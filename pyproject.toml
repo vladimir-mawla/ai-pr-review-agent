@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "pr-review-agent"
 version = "0.1.0"
 description = "Multi-agent PR review system with local-first simulation"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 authors = [
     {name = "Aspire Software", email = "vladimir.mawla@aspiresoftware.com"},
 ]
@@ -32,7 +32,7 @@ python_functions = ["test_*"]
 addopts = "-ra"
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
@@ -48,7 +48,7 @@ strict_equality = true
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 exclude = [
     ".git",
     ".venv",
