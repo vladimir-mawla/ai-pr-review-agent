@@ -68,7 +68,17 @@ class WebhookEvent(BaseModel):
     delivery_id: str = Field(
         min_length=36,
         max_length=36,
-        description="GitHub X-GitHub-Delivery UUID for idempotency",
+        # Length alone lets any 36-char junk string through and collide/dedup
+        # incorrectly against real deliveries; a shape check catches that.
+        # GitHub always sends this as a lowercase UUID, so we require lowercase
+        # hex here (matching head_sha's lowercase-only convention above) rather
+        # than accepting uppercase as an equivalent form.
+        pattern="^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        description=(
+            "GitHub X-GitHub-Delivery UUID for idempotency. Must be a "
+            "canonical lowercase UUID (8-4-4-4-12 hex digits); uppercase hex "
+            "is rejected since GitHub never sends it."
+        ),
     )
     received_at: str = Field(
         description="ISO 8601 timestamp when webhook was received",

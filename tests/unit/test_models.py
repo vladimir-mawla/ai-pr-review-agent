@@ -586,8 +586,8 @@ class TestWebhookEvent:
             )
 
     def test_webhook_event_delivery_id_validation(self) -> None:
-        """delivery_id must be a UUID format (36 chars)."""
-        # Valid
+        """delivery_id must be a UUID format, not just 36 characters of anything."""
+        # Valid: a real, canonical lowercase UUID
         event = WebhookEvent(
             action="opened",
             pr_number=1,
@@ -597,7 +597,7 @@ class TestWebhookEvent:
             delivery_id="12345678-1234-1234-1234-123456789012",
             received_at="2025-01-15T10:30:00Z",
         )
-        assert len(event.delivery_id) == 36
+        assert event.delivery_id == "12345678-1234-1234-1234-123456789012"
 
         # Invalid: too short
         with pytest.raises(ValidationError):
@@ -608,6 +608,19 @@ class TestWebhookEvent:
                 repository_name="repo",
                 head_sha="a" * 40,
                 delivery_id="12345678-1234-1234-1234-12345678901",  # too short
+                received_at="2025-01-15T10:30:00Z",
+            )
+
+        # Invalid: 36 chars but not UUID-shaped (no hyphens in the right places,
+        # not hex). Length alone used to be enough to pass; it must not be.
+        with pytest.raises(ValidationError):
+            WebhookEvent(
+                action="opened",
+                pr_number=1,
+                repository_owner="org",
+                repository_name="repo",
+                head_sha="a" * 40,
+                delivery_id="1" * 36,
                 received_at="2025-01-15T10:30:00Z",
             )
 
