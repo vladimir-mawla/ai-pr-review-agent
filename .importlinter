@@ -1,0 +1,10 @@
+[importlinter:settings]
+root_package = backend
+
+[importlinter:contract:1]
+name = "No forbidden imports"
+type = "forbidden"
+source_modules =
+    backend.models
+forbidden_modules =
+    backend.api

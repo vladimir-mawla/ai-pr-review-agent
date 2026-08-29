@@ -1,0 +1,137 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pr-review-agent"
+version = "0.1.0"
+description = "Multi-agent PR review system with local-first simulation"
+requires-python = ">=3.11"
+authors = [
+    {name = "Aspire Software", email = "vladimir.mawla@aspiresoftware.com"},
+]
+dependencies = [
+    "pydantic>=2.0,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "mypy>=1.5.0",
+    "ruff>=0.1.0",
+    "import-linter>=2.0",
+]
+
+[tool.pytest.ini_options]
+minversion = "7.4"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-ra"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # Pyflakes
+    "I",     # isort
+    "N",     # pep8-naming
+    "UP",    # pyupgrade
+    "B",     # flake8-bugbear
+    "C4",    # flake8-comprehensions
+    "T20",   # flake8-print
+    "SIM",   # flake8-simplify
+]
+ignore = [
+    "E501",  # line-too-long (ruff format handles this)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["T20"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["backend"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["backend"]
+
+[tool.import-linter]
+root_package = "backend"
+
+[[tool.import-linter.contracts]]
+name = "Core Layer Independence"
+type = "forbidden"
+source_modules = ["backend.core"]
+forbidden_modules = [
+    "backend.models",
+    "backend.agents",
+    "backend.orchestrator",
+    "backend.database",
+    "backend.webhook_receiver",
+    "backend.job_queue",
+    "backend.integrations",
+    "backend.api",
+    "backend.reliability",
+    "backend.observability",
+    "backend.memory",
+    "backend.tools",
+    "backend.security",
+    "backend.hitl",
+    "backend.economics",
+    "backend.evaluation",
+    "backend.cli",
+    "backend.prompts",
+]
+
+[[tool.import-linter.contracts]]
+name = "Models Layer Independence"
+type = "forbidden"
+source_modules = ["backend.models"]
+forbidden_modules = [
+    "backend.agents",
+    "backend.orchestrator",
+    "backend.database",
+    "backend.webhook_receiver",
+    "backend.job_queue",
+    "backend.integrations",
+    "backend.api",
+    "backend.reliability",
+    "backend.observability",
+    "backend.memory",
+    "backend.tools",
+    "backend.security",
+    "backend.hitl",
+    "backend.economics",
+    "backend.evaluation",
+    "backend.cli",
+    "backend.prompts",
+]
