@@ -54,9 +54,15 @@
     <div class="gate"><span class="box"></span><span class="label">Every outbound call has a timeout / circuit-breaker <span class="note">(production-readiness gate)</span></span></div>
     <div class="gate"><span class="box"></span><span class="label">All LLM/structured outputs validated against a schema <span class="note">(llmops gate)</span></span></div>
     <div class="gate"><span class="box"></span><span class="label">Threat model written; prompt-injection / untrusted-input considered <span class="note">(security gate)</span></span></div>
-    <div class="gate"><span class="box"></span><span class="label"><code>{{TYPECHECK_CMD}}</code> clean AND <code>{{TEST_CMD}}</code> green in CI</span></div>
+    <div class="gate"><span class="box"></span><span class="label"><code>mypy --strict backend/</code> clean AND <code>pytest</code> green in CI</span></div>
     <div class="gate"><span class="box"></span><span class="label">One <code>verify</code> pass by a <b>separate</b> agent/model (L4)</span></div>
     <div class="gate"><span class="box"></span><span class="label">No <code>context-graph.json</code> invariant violated by the change</span></div>
+    <div class="gate"><span class="box"></span><span class="label">Webhook HMAC-SHA256 verified and idempotency key checked before any work is enqueued <span class="note">(project gate)</span></span></div>
+    <div class="gate"><span class="box"></span><span class="label">LangGraph checkpoints actually resume after a simulated worker crash (compiled with a checkpointer, not without) <span class="note">(project gate)</span></span></div>
+    <div class="gate"><span class="box"></span><span class="label">Every security and reliability module has a live call site in the request path, provable by grep -- not merely a passing unit test <span class="note">(project gate)</span></span></div>
+    <div class="gate"><span class="box"></span><span class="label">Every CI job references test files that exist; CI is green on a clean checkout <span class="note">(project gate)</span></span></div>
+    <div class="gate"><span class="box"></span><span class="label">BudgetGuard hard-blocks the next LLM call once the daily cap is exceeded <span class="note">(project gate)</span></span></div>
+    <div class="gate"><span class="box"></span><span class="label">Findings dedupe by file and line, keeping highest confidence; aggregator threshold in code matches the threshold in its user-facing message <span class="note">(project gate)</span></span></div>
     <p class="note">A milestone is DONE only when every box above is checked by the verifier. Pull each
        gate from the relevant <code>agentic-swe-master</code> phase gate.</p>
   </div>
