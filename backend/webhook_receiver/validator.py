@@ -17,9 +17,11 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import re
 
 _SIGNATURE_PREFIX = "sha256="
 _DIGEST_HEX_LENGTH = 64  # SHA-256 produces 32 bytes == 64 hex characters.
+_HEX_CHARSET_RE = re.compile(r"^[0-9a-fA-F]+$")
 
 
 class SignatureError(Exception):
@@ -85,9 +87,16 @@ def verify_signature(raw_body: bytes, signature_header: str | None, secret: str)
 
 
 def _is_hex(value: str) -> bool:
-    """Return True if every character in value is a hexadecimal digit."""
-    try:
-        int(value, 16)
-    except ValueError:
-        return False
-    return True
+    """Return True if every character in value is a hexadecimal digit.
+
+    Deliberately does NOT use ``int(value, 16)`` to check this: Python's int
+    parser accepts things that are not a plain hex-digit string, such as a
+    leading ``+``/``-`` sign or underscore digit separators (e.g.
+    ``int("dead_beef", 16)`` succeeds). Those inputs would sail past this
+    check and only fail later, if at all, deep inside ``hmac.compare_digest``
+    on a byte-for-byte mismatch -- so the resulting rejection would surface
+    as an "invalid signature" (401) instead of "malformed signature" (400),
+    hiding what actually made the header well-formed or not. A charset-only
+    regex accepts precisely 0-9/a-f/A-F and nothing else.
+    """
+    return bool(_HEX_CHARSET_RE.fullmatch(value))

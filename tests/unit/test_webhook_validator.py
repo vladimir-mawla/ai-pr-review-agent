@@ -95,6 +95,19 @@ class TestVerifySignatureUnit:
         with pytest.raises(MalformedSignatureError):
             verify_signature(b'{"hello": "world"}', bad_header, SECRET)
 
+    def test_underscore_in_digest_is_rejected_as_malformed_not_invalid(self) -> None:
+        # int(value, 16) happily parses underscore-separated hex ("dead_beef"),
+        # so a naive `_is_hex` built on it would let this 64-character string
+        # through the shape check and only fail later as a signature
+        # mismatch (InvalidSignatureError / 401) rather than being caught as
+        # malformed input (MalformedSignatureError / 400). The charset-only
+        # check must reject the underscore itself.
+        digest_with_underscore = "a" * 31 + "_" + "b" * 32  # 64 chars, one underscore
+        assert len(digest_with_underscore) == 64
+        bad_header = f"sha256={digest_with_underscore}"
+        with pytest.raises(MalformedSignatureError):
+            verify_signature(b'{"hello": "world"}', bad_header, SECRET)
+
     def test_tampered_body_with_valid_signature_shape_is_rejected(self) -> None:
         original_body = b'{"hello": "world"}'
         header = _sign(original_body)
