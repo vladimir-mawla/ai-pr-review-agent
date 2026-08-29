@@ -1,9 +1,9 @@
 # CURRENT
 - active_loop: NONE
-- target: <milestone-id>
+- target: M1
 - iteration: 0
 - last_gate: —
-- last_action: project genesis scaffolded; no milestone started
+- last_action: genesis G0-G6 complete
 - next_action: run G0 existence pre-flight on M1
 - model: claude-haiku-4-5
 - tokens_used: 0
