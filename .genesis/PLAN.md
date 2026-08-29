@@ -224,3 +224,10 @@ milestones needing a paid/external credential (M8, M10, M11, M12, M13) are order
   exits 0 (24 tests passed; 2 import-linter contracts kept, 0 broken). L4 VERIFY
   APPROVEd M1 in a separate Sonnet session; a handful of model-validation gaps
   (see `checkpoints/CURRENT.md`) were deliberately deferred pending a user decision.
+
+- **2026-08-29 — M2 (Webhook Ingress: HMAC + Idempotency):** Demo command
+  `uvicorn backend.api.main:app --port 8000 & sleep 1 && python scripts/send_signed_webhook.py --secret test-secret --url http://localhost:8000/webhook && pytest tests/unit/test_webhook_validator.py -v`
+  exits 0 (correctly-signed payload accepted with 200; 47 tests passed
+  including 23 new webhook tests; `ruff check .`, `mypy --strict backend/`,
+  and `lint-imports --config .importlinter` all green). L4 VERIFY APPROVEd M2
+  in a separate Sonnet session with no blocking defects.

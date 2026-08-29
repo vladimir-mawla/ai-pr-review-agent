@@ -50,6 +50,7 @@
       <tbody>
         <tr><td>Domain contracts: Finding, Review, WebhookEvent + Severity/AgentType/ReviewStatus enums</td><td><code>backend/models/{enums,findings,review,webhook}.py</code></td><td><span class="pill live">live</span></td><td>pytest tests/unit/test_models.py -v (24 passed)</td></tr>
         <tr><td>19-subpackage skeleton with inward-only dependency rule (ADR-002)</td><td><code>backend/{core,models,agents,...}/__init__.py</code>, <code>.importlinter</code></td><td><span class="pill live">live</span></td><td>lint-imports --config .importlinter (2 contracts kept, 0 broken); L4 VERIFY APPROVE on M1</td></tr>
+        <tr><td>Webhook ingress: HMAC-SHA256 signature verification (timing-safe, hmac.compare_digest) over the raw request body, idempotency dedup on X-GitHub-Delivery, and a JobQueue interface with an in-memory implementation</td><td><code>backend/webhook_receiver/{validator,parser,router}.py</code>, <code>backend/job_queue/{interface,in_memory}.py</code>, <code>backend/api/main.py</code></td><td><span class="pill live">live</span></td><td>pytest tests/unit/test_webhook_validator.py -v (23 passed); PLAN.md M2 demo command exits 0; L4 VERIFY APPROVE on M2</td></tr>
       </tbody>
     </table>
     <p class="note">Append a row the moment a milestone passes L4 VERIFY. The grep in G0 checks against this table.</p>

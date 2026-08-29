@@ -1,22 +1,29 @@
 # CURRENT
-- active_loop: L1 BUILD (complete, unverified)
-- target: M2
-- iteration: 1
-- last_gate: L1 BUILD complete on M2 -- ruff/mypy --strict/pytest (47 passed)/lint-imports all green; PLAN.md demo command run verbatim and exited 0
-- last_action: Built the webhook ingress (HMAC-SHA256 validator with hmac.compare_digest, pull_request parser, InMemoryJobQueue behind a JobQueue interface for M3 to swap, FastAPI router+app, signing script, 23 substantive tests). Pushed 8 granular commits to origin/main (508b9fd..4ac47e1). Context graph regenerated (0->40 nodes, 0->75 edges) and the 4 hand-written invariants restored after graphizer wiped them.
-- next_action: L4 VERIFY on M2 (separate session)
-- model: claude-sonnet-5
-- tokens_used: ~95000 (honest estimate for this L1 BUILD session; not separately tracked by tooling)
+- active_loop: none (between milestones)
+- target: M3
+- iteration: 0
+- last_gate: L4 VERIFY APPROVE on M2
+- last_action: M2 (Webhook Ingress: HMAC + Idempotency) is complete -- L4 VERIFY APPROVEd it in a separate Sonnet session with no blocking defects. Post-APPROVE housekeeping done: flipped M2's status to done in DONE.html/PLAN.md/implementation-notes.html, refreshed this checkpoint, and generated the M2 explain-diff artifact.
+- next_action: run G0 existence pre-flight on M3
+- model: claude-haiku-4-5
+- tokens_used: 0
 - tokens_budget: 50000
 - skills_loaded: []
 
-> Note: tokens_used exceeds tokens_budget for this milestone. The budget in
-> PLAN.md (50000) undersizes the actual cost of a security-focused milestone
-> with route-level TestClient coverage across 8 rejection paths plus gate
-> verification and context-graph reconciliation. Flagging for the verifier /
-> next planning pass rather than silently under-reporting.
+## Deferred
 
-## M2 Build Summary (L1 BUILD complete -- NOT YET L4 VERIFIED)
+Still open from M1:
+- `Review.overall_confidence` has no cross-field consistency check (not cross-checked against the mean of `findings[].confidence`)
+- `Finding`, `Review`, `WebhookEvent` are not frozen and do not set `validate_assignment`, so instances are mutable post-construction
+
+New from M2 (all non-blocking, raised by L4 VERIFY):
+- `InMemoryJobQueue` and its `_seen_delivery_ids` grow unboundedly with no eviction -- must be addressed in M3's real Redis/ARQ queue
+- No max request body size is configured, so a large POST is fully buffered and hashed -- address before M11 internet exposure
+- `_is_hex` uses `int(value, 16)` which accepts underscore separators and a leading sign -- not exploitable since `compare_digest` still rejects, but worth tightening
+- `backend/core/settings.py` placement is an accepted ADR-002 taxonomy nit, not a layering violation
+- The demo command needs an activated venv and a hand-created `.env` and neither is documented (no README exists)
+
+## M2 Build Summary (L4 VERIFY APPROVED)
 
 ### Outcome Achieved
 - FastAPI POST /webhook verifies GitHub's HMAC-SHA256 signature over the RAW
