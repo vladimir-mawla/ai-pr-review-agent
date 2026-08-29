@@ -12,6 +12,9 @@ authors = [
 ]
 dependencies = [
     "pydantic>=2.0,<3",
+    "pydantic-settings>=2.2,<3",
+    "fastapi>=0.110,<1",
+    "uvicorn[standard]>=0.27,<1",
 ]
 
 [project.optional-dependencies]
@@ -21,6 +24,7 @@ dev = [
     "mypy>=1.5.0",
     "ruff>=0.1.0",
     "import-linter>=1.8,<2.0",
+    "httpx>=0.27,<1",
 ]
 
 [tool.pytest.ini_options]
@@ -77,6 +81,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["T20"]
+"scripts/**" = ["T20"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["backend"]
