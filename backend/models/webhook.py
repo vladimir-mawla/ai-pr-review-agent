@@ -10,29 +10,7 @@ resilient to GitHub API shape changes and explicit about what we actually depend
 The delivery_id enables idempotency checking per ADR-IDEMPOTENCY.
 """
 
-from typing import Any
-
 from pydantic import BaseModel, Field
-
-
-class WebhookPullRequest(BaseModel):
-    """Minimal PR fields from a GitHub webhook pull_request event."""
-
-    number: int = Field(description="PR number")
-    action: str = Field(description="Action that triggered the webhook (opened, synchronize, etc.)")
-    head: dict[str, Any] = Field(
-        description="Head branch commit info; we extract sha from here",
-    )
-    base: dict[str, Any] = Field(
-        description="Base branch info; we extract repo details from here",
-    )
-
-
-class WebhookRepository(BaseModel):
-    """Minimal repository fields from a GitHub webhook."""
-
-    name: str = Field(description="Repository name")
-    owner: dict[str, Any] = Field(description="Owner info; we extract login from here")
 
 
 class WebhookEvent(BaseModel):
