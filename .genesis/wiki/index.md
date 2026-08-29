@@ -23,7 +23,7 @@ each with frontmatter and ≥2 `[[wikilinks]]`. The L3 RESEARCH loop writes here
 ## Concepts (how it works)
 <!-- - [[concepts/hybrid-retrieval]] — DiskANN ANN search + FTS over code_chunks, merged by reciprocal rank fusion -->
 <!-- - [[concepts/confidence-weighted-HITL-gate]] — routes on overall_confidence and presence of a CRITICAL finding -->
-<!-- - [[concepts/inward-only-dependency-rule]] — ADR-002: 22 modules, dependencies point toward core/ only -->
+<!-- - [[concepts/inward-only-dependency-rule]] — ADR-002: 19 subpackages, dependencies point toward core/ only -->
 <!-- - [[concepts/idempotency-key-dedup]] — X-GitHub-Delivery UUID check preventing a double-posted review -->
 <!-- - [[concepts/checkpoint-resume]] — LangGraph state checkpointed to Redis per node, resumes after a crash -->
 
@@ -50,9 +50,9 @@ path below was verified to exist with `ls` against `$AGENTIC_SWE_WIKI_ROOT` befo
 - $AGENTIC_SWE_WIKI_ROOT/distributed-systems/concepts/Fault-Tolerance.md — when designing the retries/circuit-breaker/timeout trio in backend/reliability/** around GitHub and LLM provider calls
 - $AGENTIC_SWE_WIKI_ROOT/distributed-systems/concepts/Coordination-and-Clocks.md — when reasoning about idempotency-key ordering and what "resume from last checkpoint" actually guarantees after a worker crash
 
-**clean-architecture** (22-module monolith, ADR-002 dependency rule — spec 4.2)
+**clean-architecture** (19-subpackage monolith, ADR-002 dependency rule — spec 4.2)
 - $AGENTIC_SWE_WIKI_ROOT/clean-architecture/concepts/Dependency-Rule.md — when enforcing that backend/core/** imports nothing and every other module points inward toward it
-- $AGENTIC_SWE_WIKI_ROOT/clean-architecture/concepts/Component-Coupling-Principles.md — when deciding which of the 22 modules in the module map may depend on which, to keep the graph acyclic
+- $AGENTIC_SWE_WIKI_ROOT/clean-architecture/concepts/Component-Coupling-Principles.md — when deciding which of the 19 subpackages in the module map may depend on which, to keep the graph acyclic
 
 **release-it** (the L8 reliability mechanics — spec 3.6, module `reliability/`)
 - $AGENTIC_SWE_WIKI_ROOT/release-it/concepts/Circuit-Breaker.md — when implementing backend/reliability/circuit_breaker.py around the LLM client and the GitHub client

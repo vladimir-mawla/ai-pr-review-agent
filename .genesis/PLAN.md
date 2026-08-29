@@ -56,7 +56,7 @@ Credential-free milestones (M1–M7, M9's container path) are ordered first; mil
 a paid/external credential (M8, M10–M13) come after, per the user-approved ordering rule.
 
 ### M1 — Project Skeleton & Core Contracts
-- **Outcome:** The 22-module package layout exists with the inward-only dependency rule mechanically enforced, and the Finding/Review/WebhookEvent Pydantic contracts from the spec's L2 are defined and unit-tested.
+- **Outcome:** The 19-subpackage layout exists with the inward-only dependency rule mechanically enforced, and the Finding/Review/WebhookEvent Pydantic contracts from the spec's L2 are defined and unit-tested.
 - **Phase (spec roadmap):** Phase 01 — System Architecture
 - **Files / freeze boundary:** `backend/{core,models,agents,orchestrator,...}/__init__.py` (stub package tree per 4.2's module map), `backend/models/{enums,findings,review,webhook}.py`, `pyproject.toml`, `.importlinter` (or equivalent), `tests/unit/test_models.py`, `docs/adr/ADR-002-modular-monolith.md`
 - **Demo command:** `pytest tests/unit/test_models.py -v && lint-imports --config .importlinter`
