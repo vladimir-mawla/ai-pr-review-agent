@@ -1,0 +1,27 @@
+{
+  "action": "opened",
+  "number": 42,
+  "pull_request": {
+    "number": 42,
+    "state": "open",
+    "title": "Add webhook ingress",
+    "head": {
+      "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+      "ref": "feature/webhook-ingress"
+    },
+    "base": {
+      "sha": "0011223344556677889900112233445566778899",
+      "ref": "main"
+    }
+  },
+  "repository": {
+    "name": "pr-review-agent",
+    "full_name": "myorg/pr-review-agent",
+    "owner": {
+      "login": "myorg"
+    }
+  },
+  "sender": {
+    "login": "octocat"
+  }
+}
