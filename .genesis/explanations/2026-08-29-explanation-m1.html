@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>M1 Explained — Project Skeleton &amp; Core Contracts</title>
+<style>
+  :root {
+    --bg: #f7f7f5;
+    --bg-card: #ffffff;
+    --ink: #1b1f23;
+    --mut: #5b6472;
+    --line: #e2e4e8;
+    --accent: #2f6feb;
+    --accent-ink: #ffffff;
+    --ok: #1a7f37;
+    --warn: #9a6700;
+    --bad: #cf222e;
+    --code-bg: #f0f1f3;
+    --pill-bg: #eef2ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1117;
+      --bg-card: #161b22;
+      --ink: #e6edf3;
+      --mut: #9aa4b2;
+      --line: #2d333b;
+      --accent: #6ea8fe;
+      --accent-ink: #0d1117;
+      --ok: #3fb950;
+      --warn: #d29922;
+      --bad: #f85149;
+      --code-bg: #1c2128;
+      --pill-bg: #1c2440;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1117;
+    --bg-card: #161b22;
+    --ink: #e6edf3;
+    --mut: #9aa4b2;
+    --line: #2d333b;
+    --accent: #6ea8fe;
+    --accent-ink: #0d1117;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --bad: #f85149;
+    --code-bg: #1c2128;
+    --pill-bg: #1c2440;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    font-size: 16px;
+  }
+  .page {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 40px 20px 100px;
+  }
+  header.hero {
+    margin-bottom: 32px;
+  }
+  header.hero .kicker {
+    color: var(--accent);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-size: 12.5px;
+    margin: 0 0 10px;
+  }
+  h1 {
+    font-size: clamp(26px, 4vw, 36px);
+    margin: 0 0 12px;
+    line-height: 1.2;
+  }
+  .lede {
+    color: var(--mut);
+    font-size: 17px;
+    max-width: 70ch;
+  }
+  nav.toc {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin: 28px 0 40px;
+  }
+  nav.toc h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--mut);
+    margin: 0 0 10px;
+  }
+  nav.toc ol {
+    margin: 0;
+    padding-left: 20px;
+    columns: 2;
+    column-gap: 24px;
+  }
+  nav.toc li { margin: 4px 0; break-inside: avoid; }
+  nav.toc a { color: var(--ink); text-decoration: none; border-bottom: 1px dashed var(--line); }
+  nav.toc a:hover { border-bottom-color: var(--accent); color: var(--accent); }
+
+  section { margin: 56px 0; }
+  section > h2 {
+    font-size: 22px;
+    margin: 0 0 16px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--line);
+  }
+  section > h2 .num {
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+    margin-right: 10px;
+  }
+  h3 { font-size: 17px; margin: 26px 0 10px; }
+  p { margin: 12px 0; }
+  a { color: var(--accent); }
+
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin: 16px 0;
+  }
+  .callout {
+    border-left: 4px solid var(--accent);
+    background: var(--pill-bg);
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin: 18px 0;
+  }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.ok { border-left-color: var(--ok); }
+  .callout .label {
+    font-weight: 700;
+    font-size: 12.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--mut);
+    margin-bottom: 6px;
+  }
+
+  code {
+    background: var(--code-bg);
+    padding: 1px 6px;
+    border-radius: 5px;
+    font-size: 0.9em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    white-space: pre;
+    font-size: 13.5px;
+    line-height: 1.55;
+  }
+  pre code { background: none; padding: 0; border-radius: 0; }
+  .diffline-add { color: var(--ok); }
+  .diffline-del { color: var(--bad); }
+
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14.5px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--mut); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.03em; }
+
+  .pill {
+    display: inline-block;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 2px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    color: var(--mut);
+    white-space: nowrap;
+  }
+  .pill.ok { color: var(--ok); border-color: var(--ok); }
+  .pill.bad { color: var(--bad); border-color: var(--bad); }
+  .pill.warn { color: var(--warn); border-color: var(--warn); }
+
+  .flow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin: 18px 0;
+  }
+  .flow .node {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 13.5px;
+    min-width: 120px;
+    text-align: center;
+  }
+  .flow .node.core { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .flow .arrow {
+    color: var(--mut);
+    font-size: 18px;
+  }
+  .flow.vertical { flex-direction: column; align-items: stretch; }
+  .flow.vertical .node { text-align: left; }
+  .flow.vertical .arrow { text-align: center; }
+
+  .badwrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 18px 0;
+  }
+  @media (max-width: 640px) {
+    .badwrap { flex-direction: column; align-items: stretch; }
+  }
+  .badwrap .arrow2 { font-size: 22px; color: var(--mut); }
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 16px 0;
+  }
+  @media (max-width: 640px) {
+    .compare { grid-template-columns: 1fr; }
+  }
+  .compare .col {
+    border-radius: 12px;
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+  }
+  .compare .col.before { background: color-mix(in srgb, var(--bad) 6%, var(--bg-card)); }
+  .compare .col.after { background: color-mix(in srgb, var(--ok) 6%, var(--bg-card)); }
+  .compare h4 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .compare.before-after .before h4 { color: var(--bad); }
+  .compare.before-after .after h4 { color: var(--ok); }
+
+  .module-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px;
+    margin: 18px 0;
+  }
+  .module-card {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px 18px;
+  }
+  .module-card h4 {
+    margin: 0 0 6px;
+    font-size: 15px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: var(--accent);
+  }
+  .module-card p { margin: 6px 0 0; font-size: 14px; color: var(--mut); }
+
+  ol.gaps li, ul.plain li { margin: 8px 0; }
+
+  details.quiz {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 18px;
+    margin: 16px 0;
+  }
+  details.quiz summary {
+    cursor: pointer;
+    font-weight: 600;
+    list-style: none;
+  }
+  details.quiz summary::-webkit-details-marker { display: none; }
+  details.quiz summary::before {
+    content: "▸ ";
+    color: var(--accent);
+  }
+  details.quiz[open] summary::before {
+    content: "▾ ";
+  }
+  details.quiz .q { font-weight: 600; margin-bottom: 4px; }
+  details.quiz .answer {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--line);
+  }
+  details.quiz .answer .verdict {
+    font-weight: 700;
+    color: var(--ok);
+  }
+
+  footer {
+    margin-top: 60px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    color: var(--mut);
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <p class="kicker">Genesis L4 · Explain Diff · Milestone M1</p>
+    <h1>Project Skeleton &amp; Core Contracts</h1>
+    <p class="lede">
+      What M1 built, why the package layout is checked by a linter instead of a code
+      review checklist, and the three real bugs that surfaced (and got fixed) while
+      getting the demo command to actually pass. Covers commits
+      <code>21c9768</code>&nbsp;&hellip;&nbsp;<code>aa4c6c0</code> on <code>main</code>,
+      the range between the last genesis-scaffolding commit and L4 VERIFY's APPROVE.
+    </p>
+  </header>
+
+  <nav class="toc">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#background">Background</a></li>
+      <li><a href="#intuition">The intuition: enforce, don't document</a></li>
+      <li><a href="#implementation">Implementation walkthrough</a></li>
+      <li><a href="#linter-bug">The import-linter config bug</a></li>
+      <li><a href="#python-migration">Python 3.11 → 3.12, and the unbounded pin</a></li>
+      <li><a href="#gaps">Known gaps, deliberately deferred</a></li>
+      <li><a href="#quiz">Quiz</a></li>
+    </ol>
+  </nav>
+
+  <section id="background">
+    <h2><span class="num">1</span>Background</h2>
+    <p>
+      This repository is a from-scratch build of a multi-agent PR review system: a webhook
+      receiver, a queue, a LangGraph orchestrator fanning out to four specialist agents
+      (security, quality, tests, docs), an aggregator with a human-in-the-loop gate, and a
+      Tiger Cloud-backed memory/events store. None of that exists yet. M1's job was narrower
+      and more foundational: stand up the package skeleton the rest of the plan will be built
+      into, and define the three data contracts — <code>Finding</code>, <code>Review</code>,
+      <code>WebhookEvent</code> — that every later milestone passes around.
+    </p>
+    <p>
+      This is a <strong>contracts-first</strong> milestone by design. The project's ADR-0001
+      (local-simulation-first build order) commits to building the real architecture against
+      local fixtures rather than a throwaway prototype, specifically so that later milestones
+      swap in real integrations (GitHub, Tiger Cloud, an LLM) behind interfaces that were
+      designed deliberately, not improvised under integration pressure. That only works if the
+      shapes flowing through the system are nailed down before the behavior is. If
+      <code>Finding</code>'s confidence field, or <code>WebhookEvent</code>'s idempotency key,
+      changes shape in M8 because nobody thought it through in M1, every consumer written in
+      between has to be revisited. Pydantic models with real field constraints (bounds,
+      lengths, patterns) — validated at construction time rather than trusted by convention —
+      are the mechanism for "nailed down."
+    </p>
+    <p>
+      The other half of M1 is architectural: ADR-002 commits to a modular monolith where
+      dependencies only point <em>inward</em>, toward <code>backend/core</code>. M1 stands up
+      the empty package tree for that (19 subpackages under <code>backend/</code>) and wires up
+      a tool, <a href="https://github.com/seddonym/import-linter"><code>import-linter</code></a>,
+      to check the rule mechanically rather than relying on every future contributor reading and
+      remembering ADR-002.
+    </p>
+  </section>
+
+  <section id="intuition">
+    <h2><span class="num">2</span>The intuition: enforce, don't document</h2>
+    <p>
+      A codebase with clean layering degrades one import at a time. Nobody ever decides "let's
+      make <code>core</code> depend on the API layer" — someone just needs a type from
+      <code>backend.api</code> inside <code>backend/core/</code> to fix a bug at 6pm, adds the
+      import, the tests still pass, and the rule is now silently false. Six months later nobody
+      can extract <code>core</code> into its own package, or reason about it in isolation,
+      because it quietly depends on everything.
+    </p>
+    <div class="callout">
+      <div class="label">Why mechanical enforcement, not a docs page</div>
+      A rule that lives only in a wiki page or an ADR is a rule that has to be remembered,
+      every time, by every person (or agent) touching the code. A rule enforced by a linter
+      that runs as part of the demo command is a rule that <em>cannot regress silently</em> —
+      the CI-equivalent gate goes red the moment someone adds the forbidden import, in the same
+      commit, before it ever reaches a reviewer.
+    </div>
+    <p>
+      Concretely, ADR-002's inward-only rule says: <code>backend/core</code> may be imported by
+      anything, but it must import nothing else in <code>backend/</code>. <code>backend/models</code>
+      is one layer out from that — it may depend on <code>core</code>, but nothing above it
+      (agents, orchestrator, API, etc.) may be depended on by it either. Two
+      <code>import-linter</code> "forbidden" contracts encode exactly that:
+    </p>
+    <div class="flow vertical">
+      <div class="node core">backend.core</div>
+      <div class="arrow">↑ everything else may depend on core; core depends on nothing</div>
+      <div class="node">backend.models</div>
+      <div class="arrow">↑ everything above may depend on models; models depends on nothing above it</div>
+      <div class="node">backend.agents · orchestrator · api · database · webhook_receiver · job_queue · integrations · reliability · observability · memory · tools · security · hitl · economics · evaluation · cli · prompts</div>
+    </div>
+    <p>
+      A toy example: if someone later writes <code>from backend.api import respond</code> inside
+      <code>backend/core/engine.py</code> to reuse a helper, that one line breaks the
+      "Core layer independence" contract. Running the demo command's second half,
+      <code>lint-imports --config .importlinter</code>, would report that contract as
+      <code>BROKEN</code> and exit non-zero — before the PR merges, not after someone notices
+      the module graph has become a hairball.
+    </p>
+  </section>
+
+  <section id="implementation">
+    <h2><span class="num">3</span>Implementation walkthrough</h2>
+    <p>
+      M1 landed four files under <code>backend/models/</code>, each owning one contract, plus
+      the 19 empty subpackages (<code>backend/{core,models,agents,api,cli,database,economics,
+      evaluation,hitl,integrations,job_queue,memory,observability,orchestrator,prompts,
+      reliability,security,tools,webhook_receiver}</code>) and 24 unit tests in
+      <code>tests/unit/test_models.py</code>.
+    </p>
+    <div class="module-grid">
+      <div class="module-card">
+        <h4>enums.py</h4>
+        <p>
+          <code>Severity</code> (CRITICAL→INFO), <code>AgentType</code> (SECURITY/QUALITY/TESTS/DOCS),
+          <code>ReviewStatus</code> (POSTED/QUEUED_FOR_HITL/REJECTED/ERROR). All three are
+          <code>StrEnum</code>, so they serialize as plain strings in JSON while still being
+          type-checked and exhaustively matchable in Python.
+        </p>
+      </div>
+      <div class="module-card">
+        <h4>findings.py</h4>
+        <p>
+          <code>Finding</code>: one issue found by one agent. Owns <code>confidence</code> as a
+          <code>Decimal</code> bounded to <code>[0.000, 1.000]</code> with exactly 3 decimal
+          places (avoids float-precision drift when confidences get averaged later), and
+          <code>line_start</code>/<code>line_end</code> as positive ints. Also defines
+          <code>__lt__</code> so a list of findings sorts by severity then confidence without a
+          separate sort key function at every call site.
+        </p>
+      </div>
+      <div class="module-card">
+        <h4>review.py</h4>
+        <p>
+          <code>Review</code>: the top-level result for one PR. Owns the full
+          <code>findings</code> list, an <code>overall_confidence</code> (same bounded-Decimal
+          shape as <code>Finding.confidence</code>), and the <code>ReviewStatus</code> that
+          downstream consumers (the API, the dashboard, the HITL queue) branch on. This is the
+          object every later milestone that "produces a review" will construct.
+        </p>
+      </div>
+      <div class="module-card">
+        <h4>webhook.py</h4>
+        <p>
+          <code>WebhookEvent</code>: the parsed, minimal shape extracted from GitHub's
+          <code>pull_request</code> payload — action, PR number, repo owner/name, 40-hex-char
+          head SHA, and a <code>delivery_id</code> for idempotency dedup in M2. Also defines
+          <code>WebhookPullRequest</code>/<code>WebhookRepository</code> as intermediate shapes,
+          though nothing in the current tree actually constructs them yet (see the gaps below).
+        </p>
+      </div>
+    </div>
+    <p>
+      The demo command is two commands chained with <code>&amp;&amp;</code>, and both halves
+      were run for real to write this page:
+    </p>
+    <pre><code>$ pytest tests/unit/test_models.py -v
+...
+tests/unit/test_models.py::TestFinding::test_finding_confidence_bounds_enforcement PASSED
+tests/unit/test_models.py::TestReview::test_review_confidence_bounds PASSED
+tests/unit/test_models.py::TestWebhookEvent::test_webhook_event_delivery_id_validation PASSED
+...
+============================== 24 passed in 0.06s ==============================
+
+$ lint-imports --config .importlinter
+=============
+Import Linter
+=============
+
+Analyzed 24 files, 7 dependencies.
+----------------------------------
+
+Core layer independence KEPT
+Models layer independence KEPT
+
+Contracts: 2 kept, 0 broken.</code></pre>
+    <p>
+      That second command passing "for free" looks unremarkable. It wasn't — see the next
+      section.
+    </p>
+  </section>
+
+  <section id="linter-bug">
+    <h2><span class="num">4</span>The import-linter config bug</h2>
+    <p>
+      The first pass at <code>.importlinter</code> used the section header
+      <code>[importlinter:settings]</code>. That header is documented in some
+      <code>import-linter</code> examples floating around, but it is <strong>not</strong> what
+      the version actually pinned in this project (<code>import-linter</code> 1.8.x /
+      1.12.1 installed) looks for. Its INI reader,
+      <code>IniFileUserOptionReader</code>, matches on a section literally named
+      <code>[importlinter]</code>.
+    </p>
+    <div class="compare before-after">
+      <div class="col before">
+        <h4>Before — silently broken</h4>
+        <pre><code>[importlinter:settings]
+root_package = backend
+
+[importlinter:contract:1]
+name = "No forbidden imports"
+type = "forbidden"
+source_modules =
+    backend.models
+forbidden_modules =
+    backend.api</code></pre>
+      </div>
+      <div class="col after">
+        <h4>After — fixed</h4>
+        <pre><code>[importlinter]
+root_package = backend
+
+[importlinter:contract:core-independence]
+name = Core layer independence
+type = forbidden
+source_modules =
+    backend.core
+forbidden_modules =
+    backend.models
+    backend.api
+    ...
+
+[importlinter:contract:models-independence]
+name = Models layer independence
+type = forbidden
+source_modules =
+    backend.models
+forbidden_modules =
+    backend.api
+    ...</code></pre>
+      </div>
+    </div>
+    <div class="callout warn">
+      <div class="label">Why this failed loudly instead of quietly</div>
+      With the wrong section header, every reader (<code>.importlinter</code> and a duplicate
+      copy in <code>setup.cfg</code>) returned <code>None</code> from
+      <code>read_options()</code>, and <code>use_cases.read_user_options()</code> raised
+      <code>"Could not read any configuration."</code> — a hard crash, not a false "0 broken."
+      That's the good version of this bug: a <em>third</em> copy of the contracts also existed
+      under <code>[tool.import-linter]</code> in <code>pyproject.toml</code>, which is not even
+      the key the TOML reader looks for (it wants <code>[tool.importlinter]</code>) and was
+      unreachable anyway because the demo command passes <code>--config .importlinter</code>,
+      which forces the INI-only reader path. Three different broken config locations, one real
+      fix: keep <code>.importlinter</code> as the single source of truth, since that's the file
+      the demo command names explicitly, and delete the other two.
+    </div>
+    <p>
+      The fix also widened the contracts. The original single contract only checked that
+      <code>backend.models</code> doesn't import <code>backend.api</code> — a narrow, partial
+      encoding of ADR-002. The corrected config adds a second contract for
+      <code>backend.core</code> against every other subpackage, and expands
+      <code>backend.models</code>'s forbidden list to all 17 outer subpackages, so both
+      innermost layers are actually checked, not just one edge of the graph.
+    </p>
+    <p>
+      Non-vacuousness was verified by hand: a throwaway
+      <code>from backend.api import x</code> was added to <code>backend/core/__init__.py</code>,
+      <code>lint-imports</code> was re-run and printed <code>Core layer independence BROKEN</code>
+      with a non-zero exit, then the line was reverted and the contract went back to
+      <code>KEPT</code>. A passing linter that has never been observed to fail is not proof the
+      gate works — it might just mean nothing sets it off.
+    </p>
+  </section>
+
+  <section id="python-migration">
+    <h2><span class="num">5</span>Python 3.11 → 3.12, and the unbounded pin</h2>
+    <p>
+      <code>pyproject.toml</code> was originally written against Python 3.11 (the highest
+      version documented as available at the time), with <code>requires-python = ">=3.11"</code>
+      and matching <code>mypy</code>/<code>ruff</code> target versions. Once Homebrew's
+      <code>python@3.12</code> (3.12.14) became the project's approved runtime, three fields
+      were bumped together — <code>requires-python</code>, <code>tool.mypy.python_version</code>,
+      and <code>tool.ruff.target-version</code> — so the interpreter actually running the venv,
+      the type checker, and the linter all agree on one language version. Skewed versions here
+      are a quiet source of false-negative type checks (mypy checking 3.11 syntax rules against
+      code that a 3.12 interpreter runs).
+    </p>
+    <p>
+      Separately, the dev dependency <code>import-linter&gt;=2.0</code> (later corrected to
+      <code>import-linter&gt;=1.8,&lt;2.0</code>) was an unbounded lower pin — the kind of thing
+      that looks harmless in a diff because it installs fine on the machine that wrote it.
+    </p>
+    <div class="badwrap">
+      <div class="node">pin: <code>import-linter&gt;=2.0</code></div>
+      <div class="arrow2">→</div>
+      <div class="node">fresh <code>pip install</code> resolves to latest 2.x (2.14)</div>
+      <div class="arrow2">→</div>
+      <div class="node" style="border-color:var(--bad);color:var(--bad);">config validated against 1.8 syntax breaks</div>
+    </div>
+    <p>
+      <code>.importlinter</code>'s contract syntax (the unquoted <code>type = forbidden</code>
+      form, the section-name conventions fixed in the previous section) was validated against
+      1.8.0 specifically. An unbounded <code>&gt;=2.0</code> pin means anyone cloning this repo
+      today — or CI running a fresh install tomorrow — gets whatever the newest 2.x release is,
+      which is a different major version with its own config expectations. The project would
+      pass on the original author's machine (whatever was already installed locally) and fail
+      on a clean clone, which is close to the worst kind of bug: invisible until someone else
+      tries to reproduce the build. The final commit narrows the pin to
+      <code>&gt;=1.8,&lt;2.0</code>, matching the version the contracts were actually written and
+      verified against, so a fresh clone reproducibly gets the same behavior.
+    </p>
+  </section>
+
+  <section id="gaps">
+    <h2><span class="num">6</span>Known gaps, deliberately deferred</h2>
+    <p>
+      L4 VERIFY ran a separate, independent session against M1's demo command and success
+      criteria and returned <strong>APPROVE</strong> — the tests pass, the linter contracts
+      hold, and <code>backend/core</code> has zero sibling imports, which is everything M1's
+      plan entry actually committed to. That verification pass also surfaced five
+      model-validation gaps that are real, but out of scope for what M1 promised. They're
+      recorded here, and in <code>checkpoints/CURRENT.md</code>, rather than fixed silently,
+      so a later milestone (or the user) makes an explicit call on each one instead of the gap
+      being forgotten.
+    </p>
+    <ol class="gaps">
+      <li>
+        <strong><code>Finding.line_end &gt;= line_start</code> is not enforced.</strong>
+        Both fields are independently validated as positive ints, but nothing stops
+        <code>line_start=42, line_end=10</code> from constructing successfully — it would need
+        a cross-field <code>@model_validator</code>.
+      </li>
+      <li>
+        <strong><code>Review.overall_confidence</code> is not cross-checked</strong> against the
+        actual mean of <code>findings[].confidence</code>. A <code>Review</code> can be
+        constructed with findings that average to 0.30 and an <code>overall_confidence</code> of
+        0.99 — the two fields are validated independently, not against each other.
+      </li>
+      <li>
+        <strong><code>WebhookEvent.delivery_id</code> is validated only by length</strong>
+        (exactly 36 characters), not by actual UUID format — a 36-character string of arbitrary
+        characters passes.
+      </li>
+      <li>
+        <strong>Models are mutable after construction.</strong> None of the four contracts set
+        <code>model_config["frozen"] = True</code> or <code>validate_assignment = True</code>,
+        so a <code>Finding</code> or <code>Review</code> instance can have its fields reassigned
+        post-construction without re-running validation.
+      </li>
+      <li>
+        <strong><code>WebhookPullRequest</code> and <code>WebhookRepository</code> are dead
+        code.</strong> Both are defined in <code>backend/models/webhook.py</code>, but nothing
+        in the current tree constructs or imports either one — only <code>WebhookEvent</code> is
+        actually used.
+      </li>
+    </ol>
+    <div class="callout ok">
+      <div class="label">Why not just fix these now</div>
+      Fixing validation gaps changes the contract's runtime behavior for every future consumer,
+      and the deferral is deliberate: it's a decision for the user (or a later, explicitly-scoped
+      milestone) to make, not something to slip in as a side effect of a documentation and
+      bookkeeping pass. None of the five gaps affect what M1's own demo command or success
+      criteria checked.
+    </div>
+  </section>
+
+  <section id="quiz">
+    <h2><span class="num">7</span>Quiz</h2>
+    <p>Three questions. Click each one to reveal the answer.</p>
+
+    <details class="quiz">
+      <summary class="q">1. Why did <code>lint-imports --config .importlinter</code> raise a hard "Could not read any configuration" error instead of quietly reporting zero broken contracts?</summary>
+      <div class="answer">
+        <p class="verdict">Because the section header didn't match what the installed tool looks for.</p>
+        <p>
+          The config used <code>[importlinter:settings]</code>, but <code>import-linter</code>
+          1.8.x's <code>IniFileUserOptionReader</code> matches only a section literally named
+          <code>[importlinter]</code>. Every reader (the <code>.importlinter</code> file and a
+          duplicate in <code>setup.cfg</code>) returned <code>None</code>, so
+          <code>read_user_options()</code> had nothing to work with and raised outright — which,
+          while alarming, was actually the safer failure mode: it forced a fix rather than
+          letting the gate silently pass with zero contracts checked.
+        </p>
+      </div>
+    </details>
+
+    <details class="quiz">
+      <summary class="q">2. Why is <code>backend/core</code> forbidden from importing <code>backend/models</code>, when <code>backend/models</code> is one layer further from the edges of the system?</summary>
+      <div class="answer">
+        <p class="verdict">Because ADR-002's rule is inward-only in one specific direction: everything points toward <code>core</code>, and <code>core</code> depends on nothing in the tree.</p>
+        <p>
+          <code>backend/models</code> is allowed to depend on <code>backend/core</code> (one
+          layer further in), but not the reverse. If <code>core</code> could import
+          <code>models</code>, and some outer package (say <code>backend/api</code>) already
+          depends on both, the dependency graph stops being a clean tree pointing toward
+          <code>core</code> and starts having cycles — which is exactly what the two forbidden-import
+          contracts in <code>.importlinter</code> exist to catch mechanically.
+        </p>
+      </div>
+    </details>
+
+    <details class="quiz">
+      <summary class="q">3. Why does an unbounded pin like <code>import-linter&gt;=2.0</code> count as a real bug even though it worked when M1 was originally built?</summary>
+      <div class="answer">
+        <p class="verdict">Because "works on this machine" and "reproducible" are different claims, and the pin only guaranteed the first one.</p>
+        <p>
+          The <code>.importlinter</code> contract syntax in this repo was written and verified
+          against <code>import-linter</code> 1.8.0 specifically. A <code>&gt;=2.0</code> lower
+          bound with no upper bound means a fresh <code>pip install</code> — on a clean clone,
+          in CI, or on a teammate's machine — resolves to whatever the newest 2.x release is
+          (2.14 at the time), a different major version with different config expectations. The
+          fix pins to <code>&gt;=1.8,&lt;2.0</code> so every fresh install lands on the version
+          the config was actually validated against.
+        </p>
+      </div>
+    </details>
+  </section>
+
+  <footer>
+    Generated by the <code>explain-diff-html</code> skill during L4 VERIFY for milestone M1 of
+    the <code>pr-review-agent</code> genesis-kit project. Diff range:
+    <code>6189af5</code> (G6, last genesis-scaffolding commit) through
+    <code>aa4c6c0</code> (HEAD at time of writing). Self-contained: no external stylesheets,
+    fonts, scripts, or images.
+  </footer>
+
+</div>
+</body>
+</html>
