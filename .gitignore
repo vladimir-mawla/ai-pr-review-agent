@@ -1,0 +1,35 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---- Node / Next.js ----
+node_modules/
+.next/
+out/
+dist/
+*.tsbuildinfo
+
+# ---- Secrets & local config ----
+# Never commit real credentials; .env.example is the tracked template.
+.env
+.env.*
+!.env.example
+
+# ---- OS / editor ----
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# ---- Genesis spine ----
+# The spine itself IS tracked (it is the project's memory).
+# Only the sed backup files it can leave behind are ignored.
+.genesis/**/*.bak

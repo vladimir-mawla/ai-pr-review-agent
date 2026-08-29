@@ -1,0 +1,13 @@
+{
+  "$comment": "nodes=modules, edges=[cause,effect] where cause is imported-by effect. ADD invariants by hand.",
+  "project": ".",
+  "generated": "2026-08-29T14:04:13.210Z",
+  "nodes": [],
+  "edges": [],
+  "invariants": {
+    "$TODO": "Add 2-3 health rules, e.g. \"API latency < 200ms\", \"domain imports no framework\"."
+  },
+  "freeze_boundary": [
+    "src/**"
+  ]
+}
