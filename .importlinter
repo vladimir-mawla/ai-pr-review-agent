@@ -1,10 +1,51 @@
-[importlinter:settings]
+[importlinter]
 root_package = backend
 
-[importlinter:contract:1]
-name = "No forbidden imports"
-type = "forbidden"
+[importlinter:contract:core-independence]
+name = Core layer independence
+type = forbidden
+source_modules =
+    backend.core
+forbidden_modules =
+    backend.models
+    backend.api
+    backend.agents
+    backend.orchestrator
+    backend.integrations
+    backend.database
+    backend.webhook_receiver
+    backend.job_queue
+    backend.memory
+    backend.tools
+    backend.security
+    backend.hitl
+    backend.economics
+    backend.evaluation
+    backend.observability
+    backend.reliability
+    backend.prompts
+    backend.cli
+
+[importlinter:contract:models-independence]
+name = Models layer independence
+type = forbidden
 source_modules =
     backend.models
 forbidden_modules =
     backend.api
+    backend.agents
+    backend.orchestrator
+    backend.integrations
+    backend.database
+    backend.webhook_receiver
+    backend.job_queue
+    backend.memory
+    backend.tools
+    backend.security
+    backend.hitl
+    backend.economics
+    backend.evaluation
+    backend.observability
+    backend.reliability
+    backend.prompts
+    backend.cli
