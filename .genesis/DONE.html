@@ -40,10 +40,10 @@
   <!-- ───────────── THE LOCKED SPEC ───────────── -->
   <h2>1 · The Locked Spec (what we are building)</h2>
   <div class="card locked">
-    <p><b>Cognitive job:</b> {{COGNITIVE_JOB}}</p>
-    <p><b>Inputs:</b> {{INPUTS}} &nbsp;→&nbsp; <b>Outputs:</b> {{OUTPUTS}}</p>
-    <p><b>Autonomy level:</b> {{AUTONOMY}} &nbsp;|&nbsp; <b>Human-in-the-loop points:</b> {{HITL}}</p>
-    <p><b>Failure tolerance:</b> {{FAILURE_TOLERANCE}} &nbsp;|&nbsp; <b>Trust boundary:</b> {{TRUST_BOUNDARY}}</p>
+    <p><b>Cognitive job:</b> Automatically review GitHub pull requests the way a selective senior engineer would: run four specialist reasoners over the diff plus retrieved codebase context, and return one structured, evidence-backed review.</p>
+    <p><b>Inputs:</b> A GitHub pull_request webhook event (HMAC-signed) carrying the PR diff, plus retrieved codebase context: embedded code chunks, past review history, and team conventions. &nbsp;→&nbsp; <b>Outputs:</b> A structured review made of typed Finding objects (agent type, severity, category, file/line, confidence, rationale), either posted to the PR or routed to a human approval queue.</p>
+    <p><b>Autonomy level:</b> Level L3 on the Human-in-the-Loop spectrum: the system auto-handles routine, high-confidence findings and escalates only low-confidence or critical-severity cases. &nbsp;|&nbsp; <b>Human-in-the-loop points:</b> A human approval queue for any review below the confidence threshold or containing a CRITICAL finding, plus a developer dispute path that feeds corrections back into the system.</p>
+    <p><b>Failure tolerance:</b> Must fail toward doing less, never toward guessing: on timeout or low confidence it defers to a human queue, and a retried webhook delivery must never post a duplicate review. &nbsp;|&nbsp; <b>Trust boundary:</b> Everything from GitHub (webhook payload and diff content) is untrusted until its HMAC signature verifies; all LLM output is untrusted until it validates against a Pydantic schema.</p>
     <p class="note">Filled during Genesis step G0 (Cognitive Design) via <code>agentic-swe-master</code>.</p>
   </div>
 
