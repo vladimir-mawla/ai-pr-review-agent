@@ -12,7 +12,6 @@ and record the final outcome status. This is the top-level contract that clients
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -56,8 +55,8 @@ class Review(BaseModel):
     )
     status: ReviewStatus
     created_at: datetime
-    posted_at: Optional[datetime] = None
-    error_message: Optional[str] = Field(None, max_length=10000)
+    posted_at: datetime | None = None
+    error_message: str | None = Field(None, max_length=10000)
 
     model_config = {
         "json_schema_extra": {

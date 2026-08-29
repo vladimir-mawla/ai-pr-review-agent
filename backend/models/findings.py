@@ -10,7 +10,6 @@ validation time to prevent impossible values.
 """
 
 from decimal import Decimal
-from typing import Optional
 
 from pydantic import BaseModel, Field
 

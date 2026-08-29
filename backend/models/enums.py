@@ -10,10 +10,10 @@ Why: Enums centralize valid values and prevent stringly-typed fields, making
 the system easier to reason about and less brittle to schema changes.
 """
 
-from enum import Enum
+from enum import StrEnum
 
 
-class Severity(str, Enum):
+class Severity(StrEnum):
     """Finding severity level, from highest to lowest impact.
 
     Used by agents to classify the impact of a code issue.
@@ -27,7 +27,7 @@ class Severity(str, Enum):
     INFO = "INFO"
 
 
-class AgentType(str, Enum):
+class AgentType(StrEnum):
     """Specialist agent categories.
 
     Each agent handles a specific review domain:
@@ -45,7 +45,7 @@ class AgentType(str, Enum):
     DOCS = "DOCS"
 
 
-class ReviewStatus(str, Enum):
+class ReviewStatus(StrEnum):
     """Overall review outcome status.
 
     - POSTED: findings posted as a GitHub comment on the PR
