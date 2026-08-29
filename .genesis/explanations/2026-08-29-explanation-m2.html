@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>M2 Explained — Webhook Ingress: HMAC + Idempotency</title>
+<style>
+  :root {
+    --bg: #f7f7f5;
+    --bg-card: #ffffff;
+    --ink: #1b1f23;
+    --mut: #5b6472;
+    --line: #e2e4e8;
+    --accent: #2f6feb;
+    --accent-ink: #ffffff;
+    --ok: #1a7f37;
+    --warn: #9a6700;
+    --bad: #cf222e;
+    --code-bg: #f0f1f3;
+    --pill-bg: #eef2ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1117;
+      --bg-card: #161b22;
+      --ink: #e6edf3;
+      --mut: #9aa4b2;
+      --line: #2d333b;
+      --accent: #6ea8fe;
+      --accent-ink: #0d1117;
+      --ok: #3fb950;
+      --warn: #d29922;
+      --bad: #f85149;
+      --code-bg: #1c2128;
+      --pill-bg: #1c2440;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1117;
+    --bg-card: #161b22;
+    --ink: #e6edf3;
+    --mut: #9aa4b2;
+    --line: #2d333b;
+    --accent: #6ea8fe;
+    --accent-ink: #0d1117;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --bad: #f85149;
+    --code-bg: #1c2128;
+    --pill-bg: #1c2440;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    font-size: 16px;
+  }
+  .page {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 40px 20px 100px;
+  }
+  header.hero {
+    margin-bottom: 32px;
+  }
+  header.hero .kicker {
+    color: var(--accent);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-size: 12.5px;
+    margin: 0 0 10px;
+  }
+  h1 {
+    font-size: clamp(26px, 4vw, 36px);
+    margin: 0 0 12px;
+    line-height: 1.2;
+  }
+  .lede {
+    color: var(--mut);
+    font-size: 17px;
+    max-width: 70ch;
+  }
+  nav.toc {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin: 28px 0 40px;
+  }
+  nav.toc h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--mut);
+    margin: 0 0 10px;
+  }
+  nav.toc ol {
+    margin: 0;
+    padding-left: 20px;
+    columns: 2;
+    column-gap: 24px;
+  }
+  nav.toc li { margin: 4px 0; break-inside: avoid; }
+  nav.toc a { color: var(--ink); text-decoration: none; border-bottom: 1px dashed var(--line); }
+  nav.toc a:hover { border-bottom-color: var(--accent); color: var(--accent); }
+
+  section { margin: 56px 0; }
+  section > h2 {
+    font-size: 22px;
+    margin: 0 0 16px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--line);
+  }
+  section > h2 .num {
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+    margin-right: 10px;
+  }
+  h3 { font-size: 17px; margin: 26px 0 10px; }
+  p { margin: 12px 0; }
+  a { color: var(--accent); }
+
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin: 16px 0;
+  }
+  .callout {
+    border-left: 4px solid var(--accent);
+    background: var(--pill-bg);
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin: 18px 0;
+  }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.ok { border-left-color: var(--ok); }
+  .callout .label {
+    font-weight: 700;
+    font-size: 12.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--mut);
+    margin-bottom: 6px;
+  }
+
+  code {
+    background: var(--code-bg);
+    padding: 1px 6px;
+    border-radius: 5px;
+    font-size: 0.9em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    white-space: pre;
+    font-size: 13.5px;
+    line-height: 1.55;
+  }
+  pre code { background: none; padding: 0; border-radius: 0; }
+  .diffline-add { color: var(--ok); }
+  .diffline-del { color: var(--bad); }
+
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14.5px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--mut); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.03em; }
+
+  .pill {
+    display: inline-block;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 2px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    color: var(--mut);
+    white-space: nowrap;
+  }
+  .pill.ok { color: var(--ok); border-color: var(--ok); }
+  .pill.bad { color: var(--bad); border-color: var(--bad); }
+  .pill.warn { color: var(--warn); border-color: var(--warn); }
+
+  .flow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin: 18px 0;
+  }
+  .flow .node {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 13.5px;
+    min-width: 120px;
+    text-align: center;
+  }
+  .flow .node.core { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .flow .node.bad { border-color: var(--bad); color: var(--bad); font-weight: 600; }
+  .flow .arrow {
+    color: var(--mut);
+    font-size: 18px;
+  }
+  .flow.vertical { flex-direction: column; align-items: stretch; }
+  .flow.vertical .node { text-align: left; }
+  .flow.vertical .arrow { text-align: center; }
+
+  .badwrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 18px 0;
+  }
+  @media (max-width: 640px) {
+    .badwrap { flex-direction: column; align-items: stretch; }
+  }
+  .badwrap .arrow2 { font-size: 22px; color: var(--mut); }
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 16px 0;
+  }
+  @media (max-width: 640px) {
+    .compare { grid-template-columns: 1fr; }
+  }
+  .compare .col {
+    border-radius: 12px;
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+  }
+  .compare .col.before { background: color-mix(in srgb, var(--bad) 6%, var(--bg-card)); }
+  .compare .col.after { background: color-mix(in srgb, var(--ok) 6%, var(--bg-card)); }
+  .compare h4 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .compare.before-after .before h4 { color: var(--bad); }
+  .compare.before-after .after h4 { color: var(--ok); }
+
+  .module-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px;
+    margin: 18px 0;
+  }
+  .module-card {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px 18px;
+  }
+  .module-card h4 {
+    margin: 0 0 6px;
+    font-size: 15px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: var(--accent);
+  }
+  .module-card p { margin: 6px 0 0; font-size: 14px; color: var(--mut); }
+
+  ol.gaps li, ul.plain li { margin: 8px 0; }
+
+  details.quiz {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 18px;
+    margin: 16px 0;
+  }
+  details.quiz summary {
+    cursor: pointer;
+    font-weight: 600;
+    list-style: none;
+  }
+  details.quiz summary::-webkit-details-marker { display: none; }
+  details.quiz summary::before {
+    content: "▸ ";
+    color: var(--accent);
+  }
+  details.quiz[open] summary::before {
+    content: "▾ ";
+  }
+  details.quiz .q { font-weight: 600; margin-bottom: 4px; }
+  details.quiz .answer {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--line);
+  }
+  details.quiz .answer .verdict {
+    font-weight: 700;
+    color: var(--ok);
+  }
+
+  footer {
+    margin-top: 60px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    color: var(--mut);
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <p class="kicker">Genesis L4 · Explain Diff · Milestone M2</p>
+    <h1>Webhook Ingress: HMAC + Idempotency</h1>
+    <p class="lede">
+      Why the webhook route does exactly three things and nothing more, how raw-byte
+      HMAC-SHA256 verification actually defeats a forged request, why the comparison at
+      the heart of it uses <code>hmac.compare_digest</code> instead of <code>==</code>,
+      and why the idempotency check has to run <em>after</em> signature verification, not
+      before. Covers commits <code>8a07d19</code>&nbsp;&hellip;&nbsp;<code>7a1b0ed</code> on
+      <code>main</code> — 9 commits, the range from the last M1.1 fix
+      (<code>508b9fd</code>, removing the two dead <code>WebhookPullRequest</code>/
+      <code>WebhookRepository</code> shapes) through the M2 checkpoint commit. 15 files
+      changed, 1418 insertions(+), 17 deletions(-).
+    </p>
+  </header>
+
+  <nav class="toc">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#background">Background</a></li>
+      <li><a href="#intuition">The intuition: three steps, in order</a></li>
+      <li><a href="#raw-bytes">HMAC over raw bytes, not re-parsed JSON</a></li>
+      <li><a href="#compare-digest">Why <code>compare_digest</code>, not <code>==</code></a></li>
+      <li><a href="#rejections">Three rejection cases, kept separate</a></li>
+      <li><a href="#idempotency">Idempotency: why it comes second</a></li>
+      <li><a href="#jobqueue">The <code>JobQueue</code> interface, one milestone early</a></li>
+      <li><a href="#limits">Known limits, stated honestly</a></li>
+      <li><a href="#quiz">Quiz</a></li>
+    </ol>
+  </nav>
+
+  <section id="background">
+    <h2><span class="num">1</span>Background</h2>
+    <p>
+      M1 defined the shapes (<code>Finding</code>, <code>Review</code>,
+      <code>WebhookEvent</code>) but built nothing that talks to the outside world. M2 is
+      the first milestone where an actual HTTP request from an actual untrusted network
+      reaches this codebase: a <code>POST /webhook</code> route that GitHub calls every
+      time a pull request is opened, synchronized, or reopened on a repo this system
+      watches.
+    </p>
+    <p>
+      The project's locked spec (<code>DONE.html</code> §1) states the trust boundary
+      plainly: <em>"Everything from GitHub is untrusted until its HMAC signature
+      verifies."</em> That is not a throwaway line — it is the entire reason M2 exists
+      before M3's real queue or M4's orchestrator. <code>/webhook</code> is a public URL.
+      Anyone who discovers it can craft a JSON body that looks exactly like a GitHub
+      <code>pull_request</code> event and POST it. Without a signature check, that forged
+      request would sail through parsing, get enqueued, and eventually trigger four LLM
+      agents to review a "pull request" that was never actually opened on GitHub — at
+      minimum a cost/DoS problem, at worst a way to feed poisoned diff content into
+      whatever posts back to the real repo later.
+    </p>
+    <p>
+      GitHub's own mechanism for this is documented and specific: every webhook delivery
+      carries an <code>X-Hub-Signature-256</code> header, computed as
+      <code>hmac-sha256(secret, raw_request_body)</code>, plus an
+      <code>X-GitHub-Delivery</code> header — a UUID unique to that one delivery attempt,
+      repeated unchanged on a retry. M2's job is to use both correctly.
+    </p>
+  </section>
+
+  <section id="intuition">
+    <h2><span class="num">2</span>The intuition: three steps, in order</h2>
+    <p>
+      <code>backend/webhook_receiver/router.py</code> opens with a comment that is also the
+      entire design of the milestone:
+    </p>
+    <pre><code>1. Verify the HMAC-SHA256 signature over the RAW request body — reject
+   forgeries before any other work happens.
+2. Check the X-GitHub-Delivery idempotency key so a retried delivery
+   is not processed twice.
+3. Enqueue the job (behind the JobQueue interface) and return 200
+   immediately.</code></pre>
+    <p>
+      Nothing else. No parsing before step 1, no queue lookups before step 1, and
+      critically, <strong>no actual review work happens in this request path at all</strong> —
+      not even in M2, and not in M3 or beyond either. GitHub enforces a short response
+      timeout on webhook deliveries and will mark the delivery failed (and retry it,
+      repeatedly, on its own schedule) if the endpoint doesn't acknowledge quickly. A
+      handler that tried to run the four specialist LLM agents synchronously, inline,
+      before returning 200 would routinely time out — and worse, a slow-but-eventually-
+      successful handler would still get retried by GitHub because the ack never arrived
+      in time, causing duplicate work on top of the timeout.
+    </p>
+    <div class="callout">
+      <div class="label">Why "enqueue and return" is the whole contract</div>
+      The webhook route's job is to turn an HTTP request into a reliably-recorded fact
+      ("this delivery happened, do the work exactly once") as fast as possible, then get
+      out of the way. Everything expensive — diff retrieval, four LLM calls, aggregation —
+      belongs on the far side of a queue, in a worker that can take as long as it needs
+      without an HTTP client (GitHub) waiting on it. M2 doesn't build that worker yet
+      (that's M3); it builds the interface the worker will sit behind, so the request path
+      never has to change shape once the queue is real.
+    </div>
+    <p>
+      The three steps also explain the milestone's name directly: <strong>HMAC</strong> is
+      step 1, <strong>idempotency</strong> is step 2, and step 3 (enqueue) is what both of
+      the first two exist to protect.
+    </p>
+  </section>
+
+  <section id="raw-bytes">
+    <h2><span class="num">3</span>HMAC over raw bytes, not re-parsed JSON</h2>
+    <p>
+      <code>router.py</code> calls <code>await request.body()</code> and passes those exact
+      bytes into <code>verify_signature</code> before touching <code>json.loads</code> at
+      all:
+    </p>
+    <pre><code>raw_body = await request.body()
+
+# Step 1: verify the signature over the RAW bytes, before anything else.
+signature_header = request.headers.get(_SIGNATURE_HEADER)
+verify_signature(raw_body, signature_header, settings.github_webhook_secret)
+
+# Only now, with a verified signature, do we parse the body at all.
+payload: Any = json.loads(raw_body)</code></pre>
+    <p>
+      This ordering is not a style choice. GitHub computes its signature over the literal
+      bytes it sends on the wire — whatever whitespace, key ordering, and unicode escaping
+      its JSON serializer happened to produce that day. If this codebase instead did
+      <code>payload = json.loads(raw_body)</code> first and later re-serialized
+      <code>payload</code> (say, with <code>json.dumps(payload)</code>) to compute the
+      HMAC, the digest would almost certainly come out different — Python's
+      <code>json</code> module does not promise to reproduce GitHub's exact byte
+      sequence, and doesn't need to for the parsed data to be "the same." A
+      <strong>correctly-signed, unmodified, genuine</strong> GitHub delivery would then
+      fail verification, indistinguishable from a forgery.
+    </p>
+    <div class="compare before-after">
+      <div class="col before">
+        <h4>Parse, then re-serialize, then hash</h4>
+        <p>
+          <code>{"action":"opened","pr":1}</code> on the wire becomes a Python
+          <code>dict</code>, then <code>json.dumps()</code> might emit
+          <code>{"action": "opened", "pr": 1}</code> — extra spaces, maybe different key
+          order under some code paths. Different bytes, different HMAC. A genuine request
+          now fails verification through no fault of the sender.
+        </p>
+      </div>
+      <div class="col after">
+        <h4>Hash the raw bytes first</h4>
+        <p>
+          <code>raw_body</code> is whatever arrived on the socket, untouched.
+          <code>hmac.new(secret, raw_body, sha256)</code> reproduces exactly what GitHub
+          computed on its side, because both sides are hashing the identical byte
+          sequence — not two independent serializations of "the same" logical data.
+        </p>
+      </div>
+    </div>
+    <p>
+      This is also why <code>verify_signature</code>'s own docstring calls this out
+      explicitly as a precondition of the function, not an implementation detail: whatever
+      calls it must pass the untouched wire bytes, or the whole verification is
+      meaningless regardless of how carefully the comparison itself is done.
+    </p>
+  </section>
+
+  <section id="compare-digest">
+    <h2><span class="num">4</span>Why <code>hmac.compare_digest</code>, not <code>==</code></h2>
+    <p>
+      Once both sides have a 64-character hex digest — the one GitHub sent, and the one
+      this code computes from the raw body and the shared secret — <code>validator.py</code>
+      compares them with:
+    </p>
+    <pre><code>if not hmac.compare_digest(expected_hex, provided_hex.lower()):
+    raise InvalidSignatureError("signature does not match computed HMAC")</code></pre>
+    <p>
+      Two strings that are equal in value can still be unequal in <em>how long Python
+      takes to notice</em>. Python's <code>==</code> on strings compares byte by byte and
+      stops at the first mismatch — that's a completely reasonable thing for a language to
+      do, and normally invisible. But it means <code>"abc123" == "abc999"</code> and
+      <code>"zzz123" == "abc999"</code> take measurably different amounts of time: the
+      first mismatches at position 3, the second at position 0, so the first comparison
+      does more work before giving up.
+    </p>
+    <p>
+      Now imagine an attacker who can submit a guessed signature and measure how long the
+      server takes to respond "invalid" — over a network, with enough repeated samples to
+      average out noise, this is a documented, practical attack. If this code used
+      <code>==</code>, an attacker could try a signature that's wrong everywhere, then
+      change just the first hex character and try all 16 possibilities, keeping whichever
+      one made the response take fractionally longer (because <code>==</code> got one
+      character further before bailing out). Repeat for the second character, then the
+      third, and so on — 64 rounds of roughly 16 guesses each (about 1,024 total attempts)
+      recovers the entire correct signature, instead of needing to brute-force all
+      2<sup>256</sup> possible digests at once.
+    </p>
+    <div class="flow vertical">
+      <div class="node">Guess digest, measure response latency for each of 16 values at position 0</div>
+      <div class="arrow">↓ keep the slowest-to-reject guess — it matched one more byte than the rest</div>
+      <div class="node">Fix that byte, repeat for position 1, then 2, then 3 &hellip;</div>
+      <div class="arrow">↓ after 64 rounds</div>
+      <div class="node bad">Full 64-character signature recovered without knowing the secret</div>
+    </div>
+    <p>
+      <code>hmac.compare_digest</code> defeats this specific attack by comparing every
+      character before deciding on an answer, regardless of where — or whether — a
+      mismatch occurred, so the function takes the same amount of time whether the first
+      byte is wrong or the last one is. There's no early exit for an attacker's timing
+      measurements to detect, so no partial "warmer/colder" signal ever leaks through
+      response latency. This is the one line in the whole milestone that
+      <code>validator.py</code>'s own comment calls "the actual point of this module" —
+      everything else (the prefix check, the length check, the hex check) is just getting
+      two strings into a state where this comparison is meaningful.
+    </p>
+  </section>
+
+  <section id="rejections">
+    <h2><span class="num">5</span>Three rejection cases, kept separate</h2>
+    <p>
+      <code>validator.py</code> defines three distinct exception types instead of one
+      generic <code>SignatureError</code>, and the router maps each to a different HTTP
+      status code:
+    </p>
+    <table>
+      <thead><tr><th>Case</th><th>Exception</th><th>Status</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>X-Hub-Signature-256</code> absent</td>
+          <td><code>MissingSignatureError</code></td>
+          <td><span class="pill bad">401</span></td>
+          <td>No credential was presented at all — an auth failure.</td>
+        </tr>
+        <tr>
+          <td>Header present but not <code>sha256=&lt;64 hex chars&gt;</code></td>
+          <td><code>MalformedSignatureError</code></td>
+          <td><span class="pill warn">400</span></td>
+          <td>The request itself is garbled — wrong prefix, wrong length, non-hex characters. Not a security decision, a shape problem.</td>
+        </tr>
+        <tr>
+          <td>Well-formed header, digest doesn't match</td>
+          <td><code>InvalidSignatureError</code></td>
+          <td><span class="pill bad">401</span></td>
+          <td>A credential was presented and it's wrong — the auth failure the whole module exists to catch.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>
+      Collapsing these into one generic "signature failed, return 401" would lose real
+      diagnostic value and blur two very different situations. A <code>400</code> for a
+      malformed header tells whoever configured the GitHub App (or a test writing a
+      malformed fixture on purpose) that the request shape itself is broken — check the
+      header format, not the secret. A <code>401</code> says the shape was fine but the
+      credential was wrong — check the secret, or suspect a forgery. Keeping them as
+      separate exception types in <code>validator.py</code> is also what makes the router's
+      three-branch <code>except</code> block in <code>receive_webhook</code> possible at
+      all: the module that knows <em>why</em> verification failed hands that reason to the
+      module that knows <em>which status code</em> that reason deserves, instead of one
+      function trying to do both jobs.
+    </p>
+    <div class="callout warn">
+      <div class="label">A known rough edge in this split</div>
+      <code>_is_hex</code> currently checks hex-ness with <code>int(value, 16)</code>,
+      which is more permissive than "every character is 0-9/a-f/A-F" — Python's integer
+      parser also accepts a leading <code>+</code>/<code>-</code> sign and underscore
+      digit separators (e.g. <code>int("dead_beef", 16)</code> succeeds). A 64-character
+      digest containing an underscore would currently pass this shape check and only get
+      caught later by <code>compare_digest</code> rejecting it as a plain mismatch —
+      surfacing as <code>InvalidSignatureError</code> (401) instead of
+      <code>MalformedSignatureError</code> (400). Not a security hole (the request is
+      still rejected either way), but it blurs exactly the distinction this section just
+      described. Recorded as a deferred cleanup in <code>checkpoints/CURRENT.md</code>
+      rather than fixed as a drive-by change during this bookkeeping pass.
+    </div>
+  </section>
+
+  <section id="idempotency">
+    <h2><span class="num">6</span>Idempotency: why it comes second</h2>
+    <p>
+      GitHub retries webhook deliveries it doesn't get a timely 200 for, resending the
+      identical body with the identical <code>X-GitHub-Delivery</code> UUID. Processing
+      that retry as a brand-new event would enqueue (and eventually review) the same pull
+      request twice. The fix is what <code>JobQueue.enqueue()</code> guarantees: calling it
+      twice with the same <code>delivery_id</code> is a no-op the second time.
+    </p>
+    <p>
+      But the order in <code>router.py</code> matters as much as the mechanism.
+      Signature verification (step 1) runs to completion — including raising an
+      <code>HTTPException</code> that returns 401 or 400 — <strong>before</strong> the
+      delivery ID is even read off the request, let alone checked against the queue's
+      seen-set (step 2). This isn't incidental; it's the only ordering that makes the
+      idempotency guarantee mean anything.
+    </p>
+    <div class="flow vertical">
+      <div class="node bad">Attacker sends unsigned/forged request with delivery_id = "real-future-uuid"</div>
+      <div class="arrow">↓ if idempotency were checked before signature verification&hellip;</div>
+      <div class="node bad">"real-future-uuid" gets marked seen in the queue's dedup set — for free, with no valid credential</div>
+      <div class="arrow">↓ minutes later, GitHub sends the real delivery with that same UUID</div>
+      <div class="node bad">Legitimate, correctly-signed delivery is silently treated as a duplicate and dropped</div>
+    </div>
+    <p>
+      That is the concrete attack this ordering prevents: an idempotency store keyed on an
+      attacker-controlled, unauthenticated header (<code>X-GitHub-Delivery</code> is just a
+      request header — nothing about it is signed or verified on its own) would let anyone
+      who can guess or predict a future delivery ID poison the dedup set ahead of time. The
+      real event, when it eventually arrives with a valid signature, would look like "we've
+      already seen this one" and get quietly discarded — a denial-of-service against one
+      specific pull request's review, achievable without ever forging a valid signature.
+    </p>
+    <p>
+      Checking the signature first closes this off completely: an attacker who cannot
+      produce a valid HMAC for <em>any</em> body never gets far enough into
+      <code>receive_webhook</code> to touch the delivery ID or the queue at all — the
+      request is rejected with 401/400 at step 1, before <code>parse_pull_request_payload</code>
+      or <code>queue.enqueue</code> are even called. Only a request that has already proven
+      it came from someone holding the shared secret gets to participate in the idempotency
+      mechanism.
+    </p>
+  </section>
+
+  <section id="jobqueue">
+    <h2><span class="num">7</span>The <code>JobQueue</code> interface, one milestone early</h2>
+    <p>
+      M3 is the milestone that adds a real, durable queue (Dockerized Redis + ARQ). M2 has
+      no need for one — there's nothing to hand work off to yet, since M4's orchestrator
+      doesn't exist. So why does M2 introduce <code>backend/job_queue/interface.py</code>
+      (a <code>Protocol</code>) and <code>backend/job_queue/in_memory.py</code> (a concrete,
+      process-local implementation) now, instead of waiting?
+    </p>
+    <p>
+      Because the router needs <em>something</em> to call in step 3, and the shape of that
+      call — <code>queue.enqueue(event) -&gt; EnqueueResult</code>, where a repeated
+      <code>delivery_id</code> returns <code>enqueued=False</code> instead of raising — is
+      exactly the idempotency contract the previous section depends on. Coding
+      <code>router.py</code> against a concrete <code>InMemoryJobQueue</code> directly would
+      work fine for M2's own tests, but it would mean M3 has to go back and edit the
+      router, and every test that constructs it, just to swap in Redis. Coding against the
+      <code>JobQueue</code> <code>Protocol</code> instead means M3's job is purely additive:
+      write a new class that satisfies the same two methods (<code>enqueue</code>,
+      <code>size</code>), and change one line in <code>backend/api/main.py</code>'s
+      <code>create_app()</code> default. The router, <code>test_webhook_validator.py</code>,
+      and the idempotency guarantee itself don't move.
+    </p>
+    <div class="module-grid">
+      <div class="module-card">
+        <h4>interface.py</h4>
+        <p>
+          <code>JobQueue</code> (a <code>Protocol</code>) plus <code>EnqueueResult</code>, a
+          frozen dataclass carrying <code>enqueued: bool</code> and <code>delivery_id: str</code>.
+          The idempotency contract — "twice with the same delivery_id must not double-enqueue" —
+          is documented on the <code>Protocol</code> itself, not left implicit.
+        </p>
+      </div>
+      <div class="module-card">
+        <h4>in_memory.py</h4>
+        <p>
+          <code>InMemoryJobQueue</code>: a <code>set[str]</code> of seen delivery IDs plus a
+          <code>list[WebhookEvent]</code> of accepted jobs, both held in process memory.
+          Explicitly not durable, not shared across processes, and not thread-safe under
+          concurrent writers — acceptable for a single FastAPI instance in tests and a local
+          demo, not for production.
+        </p>
+      </div>
+    </div>
+    <p>
+      This is the same "enforce the boundary in code, not in a comment" idea M1 used for
+      <code>backend/core</code>'s dependency direction, applied one layer up: the request
+      path is written against an abstraction on purpose, before the concrete
+      implementation on the other side of it is real.
+    </p>
+  </section>
+
+  <section id="limits">
+    <h2><span class="num">8</span>Known limits, stated honestly</h2>
+    <p>
+      L4 VERIFY approved M2 — the demo command passes, the four gates are green, and the
+      milestone did what its plan entry committed to. It also flagged real limitations that
+      are out of scope for what M2 promised, rather than treating them as blockers:
+    </p>
+    <ol class="gaps">
+      <li>
+        <strong><code>InMemoryJobQueue</code>'s <code>_seen_delivery_ids</code> set grows
+        unboundedly.</strong> Nothing ever removes an entry, so a long-running process
+        accumulates one string per delivery forever. Fine for a test suite or a short local
+        demo; not fine as a standalone production component. M3's real Redis/ARQ queue is
+        expected to bring its own eviction (a TTL on dedup keys), which is exactly why this
+        in-memory version wasn't over-engineered with one — it exists to unblock the router,
+        not to be the long-term answer.
+      </li>
+      <li>
+        <strong>No maximum request body size is configured.</strong> <code>router.py</code>
+        calls <code>await request.body()</code> unconditionally, buffering and later hashing
+        whatever arrives, however large. A local demo or a test suite never sends anything
+        adversarial, so this doesn't show up yet — but M11 (real GitHub integration, exposed
+        to the internet) is exactly the point where an unbounded body becomes a memory /
+        CPU exhaustion vector and needs a hard limit before that milestone ships.
+      </li>
+    </ol>
+    <div class="callout ok">
+      <div class="label">Why not just fix these now</div>
+      Both are real, but neither is what M2's plan entry or the security gate in
+      <code>DONE.html</code> actually asked for at this stage — M2's job was "HMAC verified
+      and idempotency checked before any work is enqueued," which the demo command and
+      the 23 webhook tests do prove. Recording the gaps in
+      <code>checkpoints/CURRENT.md</code> keeps them visible for M3 and M11 respectively,
+      instead of quietly forgetting them or scope-creeping this milestone to cover work two
+      and nine milestones away.
+    </div>
+  </section>
+
+  <section id="quiz">
+    <h2><span class="num">9</span>Quiz</h2>
+    <p>Three questions. Click each one to reveal the answer.</p>
+
+    <details class="quiz">
+      <summary class="q">1. Why does <code>router.py</code> call <code>await request.body()</code> and verify the signature before ever calling <code>json.loads</code> on it?</summary>
+      <div class="answer">
+        <p class="verdict">Because GitHub's signature is computed over the exact bytes it sent on the wire, and parsing-then-re-serializing would almost certainly produce different bytes.</p>
+        <p>
+          <code>hmac.new(secret, raw_body, sha256)</code> only reproduces GitHub's digest if
+          <code>raw_body</code> is the literal, untouched byte sequence GitHub hashed on its
+          side. If the code parsed the JSON into a Python <code>dict</code> first and later
+          re-serialized it to compute the HMAC, whitespace and key-ordering differences
+          introduced by re-encoding would change the byte sequence and the digest — making
+          even a genuine, unmodified GitHub delivery fail verification through no fault of
+          the sender.
+        </p>
+      </div>
+    </details>
+
+    <details class="quiz">
+      <summary class="q">2. An attacker who cannot forge a valid signature sends a request with <code>X-GitHub-Delivery: some-future-uuid</code>. What stops them from poisoning the idempotency store for that UUID?</summary>
+      <div class="answer">
+        <p class="verdict">The router checks the signature (step 1) before it ever reads the delivery ID or touches the queue (step 2), so an unsigned/forged request never gets far enough to affect the dedup set.</p>
+        <p>
+          If idempotency were checked first, an attacker could mark any UUID "seen" with no
+          valid credential at all, so a legitimate delivery with that same
+          <code>X-GitHub-Delivery</code> value would later be silently treated as a
+          duplicate and dropped — a denial-of-service against a specific PR's review. Because
+          <code>verify_signature</code> raises (and the router returns 401/400) before
+          <code>queue.enqueue</code> is ever reached, only requests that already proved they
+          hold the shared secret can influence what the queue considers "seen."
+        </p>
+      </div>
+    </details>
+
+    <details class="quiz">
+      <summary class="q">3. Why does M2 introduce a <code>JobQueue</code> <code>Protocol</code> and an in-memory implementation now, when the real Redis/ARQ queue isn't built until M3?</summary>
+      <div class="answer">
+        <p class="verdict">Because the router needs something to call in step 3 (enqueue), and coding it against an abstraction means M3 can swap in a real queue without touching the router, its tests, or the idempotency guarantee at all.</p>
+        <p>
+          <code>InMemoryJobQueue</code> is a deliberately minimal stand-in — not durable, not
+          shared across processes, with an unbounded dedup set — that exists purely so
+          <code>receive_webhook</code> has a real, working target for
+          <code>queue.enqueue(event)</code>. Because the router is written against the
+          <code>JobQueue</code> <code>Protocol</code> and not this concrete class, M3's job is
+          purely additive: implement the same two methods against Redis/ARQ and change one
+          default in <code>create_app()</code>, rather than rewriting the request path.
+        </p>
+      </div>
+    </details>
+  </section>
+
+  <footer>
+    Generated by the <code>explain-diff-html</code> skill during L4 VERIFY housekeeping for
+    milestone M2 of the <code>pr-review-agent</code> genesis-kit project. Diff range:
+    <code>508b9fd</code> (M1.1, last fix before M2 started — removal of the unused
+    <code>WebhookPullRequest</code>/<code>WebhookRepository</code> shapes) through
+    <code>7a1b0ed</code> (the M2 checkpoint commit, HEAD at time of writing) — 9 commits,
+    15 files changed, 1418 insertions(+), 17 deletions(-). Self-contained: no external
+    stylesheets, fonts, scripts, or images.
+  </footer>
+
+</div>
+</body>
+</html>
