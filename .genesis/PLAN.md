@@ -219,4 +219,8 @@ milestones needing a paid/external credential (M8, M10, M11, M12, M13) are order
 
 ## Progress (loops append here on milestone completion — newest last)
 
-- _(none yet — first loop fills this)_
+- **2026-08-29 — M1 (Project Skeleton & Core Contracts):** Demo command
+  `pytest tests/unit/test_models.py -v && lint-imports --config .importlinter`
+  exits 0 (24 tests passed; 2 import-linter contracts kept, 0 broken). L4 VERIFY
+  APPROVEd M1 in a separate Sonnet session; a handful of model-validation gaps
+  (see `checkpoints/CURRENT.md`) were deliberately deferred pending a user decision.

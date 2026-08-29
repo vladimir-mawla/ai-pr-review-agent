@@ -48,9 +48,8 @@
     <table>
       <thead><tr><th>Capability</th><th>Where (file/route/symbol)</th><th>Status</th><th>Verified by</th></tr></thead>
       <tbody>
-        <tr><td>{{CAP_1}}</td><td><code>{{LOC_1}}</code></td><td><span class="pill live">live</span></td><td>{{VERIFY_1}}</td></tr>
-        <tr><td>{{CAP_2}}</td><td><code>{{LOC_2}}</code></td><td><span class="pill wip">partial</span></td><td>—</td></tr>
-        <tr><td>add rows as milestones complete…</td><td></td><td></td><td></td></tr>
+        <tr><td>Domain contracts: Finding, Review, WebhookEvent + Severity/AgentType/ReviewStatus enums</td><td><code>backend/models/{enums,findings,review,webhook}.py</code></td><td><span class="pill live">live</span></td><td>pytest tests/unit/test_models.py -v (24 passed)</td></tr>
+        <tr><td>19-subpackage skeleton with inward-only dependency rule (ADR-002)</td><td><code>backend/{core,models,agents,...}/__init__.py</code>, <code>.importlinter</code></td><td><span class="pill live">live</span></td><td>lint-imports --config .importlinter (2 contracts kept, 0 broken); L4 VERIFY APPROVE on M1</td></tr>
       </tbody>
     </table>
     <p class="note">Append a row the moment a milestone passes L4 VERIFY. The grep in G0 checks against this table.</p>
