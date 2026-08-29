@@ -3,7 +3,7 @@
 - target: M3
 - iteration: 0
 - last_gate: L4 VERIFY APPROVE on M2
-- last_action: M2 (Webhook Ingress: HMAC + Idempotency) is complete -- L4 VERIFY APPROVEd it in a separate Sonnet session with no blocking defects. Post-APPROVE housekeeping done: flipped M2's status to done in DONE.html/PLAN.md/implementation-notes.html, refreshed this checkpoint, and generated the M2 explain-diff artifact.
+- last_action: Cleared two of M2's deferred findings ahead of M3. Added README.md (setup, architecture, honest M1/M2-done / rest-not-built status) and LICENSE (MIT) -- the repo is public and previously had neither. Hardened `_is_hex` in backend/webhook_receiver/validator.py to a strict `[0-9a-fA-F]+` charset regex, replacing `int(value, 16)` (which silently accepted underscore digit separators and a leading sign), and added a regression test proving such input now raises MalformedSignatureError (400) rather than InvalidSignatureError (401). All four gates (ruff, mypy --strict, pytest, lint-imports) re-run and green; reviewed and pushed in a separate Sonnet session.
 - next_action: run G0 existence pre-flight on M3
 - model: claude-haiku-4-5
 - tokens_used: 0
@@ -16,12 +16,14 @@ Still open from M1:
 - `Review.overall_confidence` has no cross-field consistency check (not cross-checked against the mean of `findings[].confidence`)
 - `Finding`, `Review`, `WebhookEvent` are not frozen and do not set `validate_assignment`, so instances are mutable post-construction
 
-New from M2 (all non-blocking, raised by L4 VERIFY):
+New from M2 (all non-blocking, raised by L4 VERIFY), still open:
 - `InMemoryJobQueue` and its `_seen_delivery_ids` grow unboundedly with no eviction -- must be addressed in M3's real Redis/ARQ queue
 - No max request body size is configured, so a large POST is fully buffered and hashed -- address before M11 internet exposure
-- `_is_hex` uses `int(value, 16)` which accepts underscore separators and a leading sign -- not exploitable since `compare_digest` still rejects, but worth tightening
 - `backend/core/settings.py` placement is an accepted ADR-002 taxonomy nit, not a layering violation
-- The demo command needs an activated venv and a hand-created `.env` and neither is documented (no README exists)
+
+Resolved (previously deferred from M2, now closed):
+- ~~`_is_hex` uses `int(value, 16)` which accepts underscore separators and a leading sign~~ -- fixed: replaced with a strict `[0-9a-fA-F]+` charset regex; regression test added (`test_underscore_in_digest_is_rejected_as_malformed_not_invalid`)
+- ~~The demo command needs an activated venv and a hand-created `.env` and neither is documented (no README exists)~~ -- fixed: README.md now documents venv creation/activation, `pip install -e ".[dev]"`, and copying `.env.example` to `.env`
 
 ## M2 Build Summary (L4 VERIFY APPROVED)
 
