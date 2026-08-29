@@ -198,8 +198,19 @@ class TestFinding:
                 rationale="test",
             )
 
-        # Invalid: line_end < line_start (Pydantic allows this, but we document
-        # the invariant in the docstring; could add a custom validator if needed)
+        # Invalid: line_end < line_start now raises via the model_validator that
+        # enforces the invariant the docstring already promised.
+        with pytest.raises(ValidationError):
+            Finding(
+                agent_type=AgentType.TESTS,
+                severity=Severity.MEDIUM,
+                category="missing_test",
+                file_path="a.py",
+                line_start=100,
+                line_end=1,
+                confidence=Decimal("0.500"),
+                rationale="test",
+            )
 
     def test_finding_category_validation(self) -> None:
         """Category must be non-empty and <= 100 chars."""

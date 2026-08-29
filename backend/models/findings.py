@@ -11,7 +11,7 @@ validation time to prevent impossible values.
 
 from decimal import Decimal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from backend.models.enums import AgentType, Severity
 
@@ -73,6 +73,19 @@ class Finding(BaseModel):
             ]
         }
     }
+
+    @model_validator(mode="after")
+    def _check_line_range(self) -> "Finding":
+        # The docstring and field description both promise line_end >= line_start;
+        # a range that ends before it starts is not a smaller range, it's a
+        # contradiction that would silently corrupt any diff/snippet rendering
+        # downstream, so it must be rejected at construction time rather than
+        # trusted on the docstring's word alone.
+        if self.line_end < self.line_start:
+            raise ValueError(
+                f"line_end ({self.line_end}) must be >= line_start ({self.line_start})"
+            )
+        return self
 
     def __lt__(self, other: object) -> bool:
         """Sort findings by severity (descending) then confidence (descending)."""
