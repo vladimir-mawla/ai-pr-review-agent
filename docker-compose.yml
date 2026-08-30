@@ -1,0 +1,28 @@
+# Local development infrastructure for pr-review-agent.
+#
+# M3 scope only: a single Redis instance backing the real JobQueue
+# (backend/job_queue/redis_arq.py) and the ARQ worker
+# (backend/job_queue/arq_worker.py). No Postgres/pgvector here yet --
+# those are M7/M9 additions, out of scope for this milestone's freeze
+# boundary.
+#
+# NOTE ON THE HOST PORT: Redis's default 6379 was occupied on the build
+# machine by an unrelated project's own long-running container
+# (`ampliphi-redis-1`, from a different docker-compose project, not
+# something this project should stop or touch). To avoid a real conflict
+# rather than silently colliding with someone else's service, this
+# project's Redis is published on host port 6380 instead, mapped to the
+# container's normal 6379. REDIS_URL in .env.example and Settings'
+# default both point at 6380 to match. If your machine's 6379 is free,
+# you may change the "6380:6379" mapping back to "6379:6379" and update
+# REDIS_URL accordingly -- nothing else depends on the specific host port.
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
