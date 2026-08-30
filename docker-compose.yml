@@ -32,7 +32,24 @@ services:
     # enqueued a second time. Persisting across recreates would require
     # adding a named volume for Redis's data dir plus AOF/RDB persistence
     # -- neither exists today.
+    #
+    # COMMAND OVERRIDE (L2 DEBUG, HIGH PRIORITY enqueue fix): `--enable-
+    # debug-command yes` turns on Redis's `DEBUG` command family, which
+    # `redis-server` refuses by default even from a local connection
+    # (Redis >=7 treats "local" as "connected via a Unix socket", not "via
+    # a loopback TCP port published by Docker" -- so the plain default
+    # rejects DEBUG even from this project's own tests). This is what
+    # `tests/integration/test_queue_roundtrip.py::
+    # TestConcurrentWebhookEnqueuesAreNotSerializedBySlowRedis` uses
+    # (`DEBUG SLEEP <seconds>`) to block the entire, single-threaded Redis
+    # server for a fixed duration -- the "slow but not down" condition that
+    # regression test (and this fix's own manual latency experiment) needs
+    # to reproduce; nothing in `backend/` itself ever issues a `DEBUG`
+    # command. Safe here because this compose file is local dev/test
+    # infrastructure only (see the ports/no-volume notes above) -- `DEBUG`
+    # is never enabled on any real deployment target.
     image: redis:7-alpine
+    command: ["redis-server", "--enable-debug-command", "yes"]
     ports:
       - "6380:6379"
     healthcheck:
