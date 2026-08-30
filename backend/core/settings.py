@@ -123,6 +123,45 @@ _DEFAULT_LLM_RETRY_MAX_DELAY_SECONDS = 8.0
 _DEFAULT_LLM_CIRCUIT_BREAKER_FAILURE_THRESHOLD = 5
 _DEFAULT_LLM_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS = 30.0
 
+# M9: local pgvector memory store (backend/memory/). Host port 5434 -- not
+# 5432 (ampliphi-postgres-1, an unrelated project's container), not 5433
+# (this project's own M7 events-spine Postgres), not 6379/6380 (Redis,
+# unrelated protocol anyway) -- verified free with `lsof -i :5434` before
+# choosing it (see this milestone's build report for the command output).
+_DEFAULT_PGVECTOR_URL = "postgresql://postgres:postgres@localhost:5434/pr_review_memory"
+
+# M9: which Embedder backend is used when no credential is available. The
+# fixture path is the default deliberately -- this project's credential
+# policy (see backend/memory/embedder.py) is that every test and this
+# milestone's own demo command must run with no OPENAI_API_KEY / network
+# access at all; "openai" is an explicit opt-in for a real embedding run.
+_DEFAULT_EMBEDDER_BACKEND: Literal["fixture", "openai"] = "fixture"
+
+# M9: the spec's pinned embeddings config -- text-embedding-3-large,
+# truncated to 256 dimensions via OpenAI's own `dimensions` API parameter
+# (not the model's native 3072-dim output). This is also the fixture
+# embedder's output width and code_chunks.embedding's VECTOR(256) column
+# width -- all three must agree, since a mismatch fails loudly at insert
+# time (see backend.memory.context_retriever).
+_DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-large"
+_DEFAULT_EMBEDDING_DIMENSION = 256
+
+# M9 reliability knobs for backend.memory.embedder.OpenAIEmbedder's outbound
+# OpenAI API calls -- a FOURTH independent set, alongside M6 (Redis), M7
+# (events Postgres), and M8 (Anthropic) above, per this project's
+# established one-dependency-one-set-of-knobs pattern.
+_DEFAULT_EMBEDDING_TIMEOUT_SECONDS = 30.0
+_DEFAULT_EMBEDDING_RETRY_MAX_ATTEMPTS = 3
+_DEFAULT_EMBEDDING_RETRY_BASE_DELAY_SECONDS = 0.5
+_DEFAULT_EMBEDDING_RETRY_MAX_DELAY_SECONDS = 8.0
+_DEFAULT_EMBEDDING_CIRCUIT_BREAKER_FAILURE_THRESHOLD = 5
+_DEFAULT_EMBEDDING_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS = 30.0
+
+# M9: HybridRetriever's own defaults. See Settings.hybrid_retrieval_top_k /
+# Settings.rrf_k docstrings below for the reasoning behind each value.
+_DEFAULT_HYBRID_RETRIEVAL_TOP_K = 5
+_DEFAULT_RRF_K = 60
+
 
 class Settings(BaseSettings):
     """Runtime configuration for the pr-review-agent backend.
@@ -224,6 +263,64 @@ class Settings(BaseSettings):
         llm_circuit_breaker_reset_timeout_seconds: M8 reliability layer. How
             long the LLM client's breaker stays OPEN before allowing a
             single HALF_OPEN probe through.
+        pgvector_url: M9. Connection string for the local pgvector memory
+            store (``backend.memory.tiger_client``), backing the
+            ``code_chunks`` table. Defaults to the host port
+            ``docker-compose.yml``'s ``pgvector`` service publishes locally
+            (5434 -- see that file's comment for why not 5432/5433/6379/
+            6380).
+        embedder_backend: M9. Which ``Embedder`` implementation
+            ``backend.memory.embedder.get_embedder`` constructs by default.
+            ``"fixture"`` (the default) needs no network or API key --
+            every unit/integration test and this milestone's demo command
+            use it. ``"openai"`` makes real ``text-embedding-3-large``
+            calls and requires ``openai_api_key`` to be set.
+        openai_api_key: M9. Credential for OpenAI's embeddings API.
+            Deliberately optional with no default, mirroring
+            ``anthropic_api_key`` -- every test passes without it; only
+            ``embedder_backend="openai"`` actually needs a real value.
+            ``OpenAIEmbedder`` raises its own clear error at the point a
+            real call would need this, not at Settings construction.
+        openai_embedding_model: M9. The embeddings model
+            ``OpenAIEmbedder`` calls. Default ``text-embedding-3-large``,
+            per the spec's pinned config.
+        embedding_dimension: M9. The dimensionality every embedding in
+            this system must have -- passed as OpenAI's own ``dimensions``
+            truncation parameter for the real embedder, and as the target
+            vector length ``DeterministicFixtureEmbedder`` produces, and
+            matches ``code_chunks.embedding``'s ``VECTOR(256)`` column type
+            (``migrations/scripts/dev-pgvector-init.sql``). Default 256,
+            per the spec's pinned text-embedding-3-large-at-256-dims config
+            -- changing this without also changing the migration's column
+            type would make every insert fail with a dimension mismatch
+            (by design; see ``backend.memory.context_retriever``).
+        embedding_timeout_seconds: M9 reliability layer. Bound (seconds) on
+            each individual outbound OpenAI embeddings API call.
+        embedding_retry_max_attempts: M9 reliability layer. Total attempts
+            (including the first) per embeddings call before giving up.
+        embedding_retry_base_delay_seconds: M9 reliability layer. Delay
+            before the 2nd embeddings retry attempt; grows exponentially
+            after that, capped by ``embedding_retry_max_delay_seconds``.
+        embedding_retry_max_delay_seconds: M9 reliability layer. Upper
+            bound the embeddings retry backoff is clamped to.
+        embedding_circuit_breaker_failure_threshold: M9 reliability layer.
+            Consecutive failures required to trip the embedder's circuit
+            breaker to OPEN, independent of the M6/M7/M8 breakers above --
+            a fourth, independent outbound dependency.
+        embedding_circuit_breaker_reset_timeout_seconds: M9 reliability
+            layer. How long the embedder's breaker stays OPEN before
+            allowing a single HALF_OPEN probe through.
+        hybrid_retrieval_top_k: M9. Default number of fused results
+            ``HybridRetriever.hybrid_search`` returns when the caller does
+            not pass an explicit ``top_k``.
+        rrf_k: M9. The reciprocal rank fusion constant (the ``k`` in
+            ``score = sum(1 / (k + rank))``). 60 is the commonly cited
+            default in the RRF literature (Cormack et al., 2009) -- large
+            enough that a document's exact rank near the top of one ranker
+            does not completely dominate its fused score, so a
+            second-place hit from one ranker and a first-place hit from
+            another can still combine meaningfully rather than one ranker
+            unilaterally deciding the top result.
     """
 
     github_webhook_secret: str = Field(
@@ -448,6 +545,113 @@ class Settings(BaseSettings):
             "How long (seconds) the LLM client's circuit breaker stays "
             "OPEN before allowing a single HALF_OPEN probe through. "
             "Default 30.0."
+        ),
+    )
+
+    pgvector_url: str = Field(
+        default=_DEFAULT_PGVECTOR_URL,
+        description=(
+            "Postgres+pgvector connection string backing the code_chunks "
+            "hybrid-retrieval table. Defaults to the host port "
+            "docker-compose.yml's pgvector service publishes (5434)."
+        ),
+    )
+
+    embedder_backend: Literal["fixture", "openai"] = Field(
+        default=_DEFAULT_EMBEDDER_BACKEND,
+        description=(
+            "Which Embedder implementation get_embedder() constructs by "
+            "default. 'fixture' (default) is deterministic and needs no "
+            "network/API key; 'openai' makes real text-embedding-3-large "
+            "calls and requires openai_api_key."
+        ),
+    )
+
+    openai_api_key: str | None = Field(
+        default=None,
+        description=(
+            "OpenAI API key for the M9 real embedder. Deliberately "
+            "optional with no default -- every test passes without it "
+            "(DeterministicFixtureEmbedder stands in); only "
+            "embedder_backend='openai' actually needs a real value."
+        ),
+    )
+
+    openai_embedding_model: str = Field(
+        default=_DEFAULT_OPENAI_EMBEDDING_MODEL,
+        min_length=1,
+        description="Embeddings model OpenAIEmbedder calls. Default text-embedding-3-large.",
+    )
+
+    embedding_dimension: int = Field(
+        default=_DEFAULT_EMBEDDING_DIMENSION,
+        gt=0,
+        description=(
+            "Dimensionality every embedding must have -- OpenAI's "
+            "'dimensions' truncation parameter for the real embedder, "
+            "DeterministicFixtureEmbedder's output width, and "
+            "code_chunks.embedding's VECTOR(256) column width. Default "
+            "256, per the spec's pinned config."
+        ),
+    )
+
+    embedding_timeout_seconds: float = Field(
+        default=_DEFAULT_EMBEDDING_TIMEOUT_SECONDS,
+        gt=0,
+        description="Bound (seconds) on each individual outbound OpenAI embeddings call.",
+    )
+
+    embedding_retry_max_attempts: int = Field(
+        default=_DEFAULT_EMBEDDING_RETRY_MAX_ATTEMPTS,
+        ge=1,
+        description=(
+            "Total attempts (including the first) the embedder makes per "
+            "call before giving up. Default 3."
+        ),
+    )
+
+    embedding_retry_base_delay_seconds: float = Field(
+        default=_DEFAULT_EMBEDDING_RETRY_BASE_DELAY_SECONDS,
+        gt=0,
+        description="Delay (seconds) before the 2nd embeddings retry attempt. Default 0.5.",
+    )
+
+    embedding_retry_max_delay_seconds: float = Field(
+        default=_DEFAULT_EMBEDDING_RETRY_MAX_DELAY_SECONDS,
+        gt=0,
+        description="Upper bound (seconds) the embeddings retry backoff is clamped to. Default 8.0.",
+    )
+
+    embedding_circuit_breaker_failure_threshold: int = Field(
+        default=_DEFAULT_EMBEDDING_CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+        ge=1,
+        description=(
+            "Consecutive failures required to trip the embedder's "
+            "circuit breaker to OPEN. Default 5."
+        ),
+    )
+
+    embedding_circuit_breaker_reset_timeout_seconds: float = Field(
+        default=_DEFAULT_EMBEDDING_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS,
+        gt=0,
+        description=(
+            "How long (seconds) the embedder's circuit breaker stays OPEN "
+            "before allowing a single HALF_OPEN probe through. Default 30.0."
+        ),
+    )
+
+    hybrid_retrieval_top_k: int = Field(
+        default=_DEFAULT_HYBRID_RETRIEVAL_TOP_K,
+        ge=1,
+        description="Default number of fused results HybridRetriever.hybrid_search returns.",
+    )
+
+    rrf_k: int = Field(
+        default=_DEFAULT_RRF_K,
+        ge=1,
+        description=(
+            "Reciprocal rank fusion constant k in score = sum(1/(k+rank)). "
+            "Default 60, the commonly cited RRF literature default."
         ),
     )
 
