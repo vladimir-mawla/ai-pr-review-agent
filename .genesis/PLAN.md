@@ -89,7 +89,7 @@ a paid/external credential (M8, M10–M13) come after, per the user-approved ord
 - **Credentials:** [NO CREDENTIALS] (local Docker only)
 
 ### M4 — Orchestrator Fan-Out (Stub Agents)
-- **Outcome:** A LangGraph graph fans out to four parallel stub agent nodes (each returning a canned `Finding`) via the Send API, checkpoints state to Redis, and resumes correctly after a simulated mid-run crash.
+- **Outcome:** A LangGraph graph fans out to four parallel stub agent nodes (each returning a canned `Finding`) via the Send API, checkpoints state to a durable file-backed SQLite store, and resumes correctly after a simulated mid-run crash. (Redis-backed checkpointing was tried first but deferred: `langgraph-checkpoint-redis` requires RediSearch/`FT.INFO`, which this project's plain `redis:7-alpine` does not provide.)
 - **Phase:** Phase 04 — Workflow Orchestration
 - **Files / freeze boundary:** `backend/orchestrator/{graph,nodes,state,langgraph_engine}.py`, `backend/core/workflow_engine.py` (the ADR-001 abstract interface), `pyproject.toml` (adds the `langgraph` dependency this milestone introduces), `tests/integration/test_orchestrator_fanout.py`
 - **Demo command:** `pytest tests/integration/test_orchestrator_fanout.py -v -k "fanout or checkpoint_resume"`

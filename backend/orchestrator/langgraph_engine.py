@@ -78,6 +78,16 @@ class LangGraphWorkflowEngine:
         # parallel branches on a thread pool even for a sync graph like this
         # one, and SqliteSaver's connection is shared across those threads.
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        # KNOWN RISK (observed by L4 VERIFY on M4, see checkpoints/CURRENT.md):
+        # on resume, LangGraph logs "Deserializing unregistered type
+        # backend.models.enums.AgentType / Severity / backend.models.findings.
+        # Finding from checkpoint. This will be blocked in a future version."
+        # Our custom Pydantic/enum types aren't registered with LangGraph's
+        # (de)serializer, so a future LangGraph major could hard-block resume
+        # for these types. Mitigation if/when that happens: register them via
+        # LangGraph's `allowed_msgpack_modules` (or equivalent) config. Not
+        # blocking today -- resume works -- but don't upgrade LangGraph
+        # without checking this first.
         self._saver = SqliteSaver(self._conn)
         self._graph = build_graph(self._saver)
 
