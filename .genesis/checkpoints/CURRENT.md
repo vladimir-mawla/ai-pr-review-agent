@@ -1,9 +1,12 @@
 # CURRENT
-- active_loop: none (between milestones)
+- active_loop: none (between L1 BUILD and L4 VERIFY)
 - target: M7
 - iteration: 0
-- last_gate: L4 VERIFY APPROVE on M6
-- next_action: run G0 existence pre-flight on M7
+- last_gate: L1 BUILD complete on M7 (this session); L4 VERIFY not yet run
+- last_action: L1 BUILD session built the M7 events spine end-to-end -- see
+  "M7 Build Summary" below for the full account, gate results, and files
+  written.
+- next_action: L4 VERIFY on M7 (separate session)
 - model: claude-sonnet-5
 - tokens_used: 0
 - tokens_budget: 50000
@@ -16,6 +19,59 @@
 A second, independent L4 VERIFY session then re-ran all four gates plus PLAN.md's M5 demo command against the fixed code, re-verified the CRITICAL-survives-dedupe guarantee through the real compiled graph (not just the unit-level regression test), and APPROVEd M5. M5 is now DONE; see `.genesis/PLAN.md`'s Progress entry and `.genesis/explanations/2026-08-30-explanation-m5.html` for the full account of the REJECT-then-fix cycle.
 
 ## Deferred
+
+New from M7 (L1 BUILD), non-blocking:
+- Four files outside M7's literal freeze-boundary list were touched:
+  `backend/webhook_receiver/router.py` + `backend/api/main.py` (wiring the
+  webhook-ingress decision event and giving `create_app` a per-app
+  injectable `EventRepository`, explicitly called for by this milestone's
+  own instructions -- "wire event emission into ... at minimum the webhook
+  ingress"), and `backend/orchestrator/nodes.py` (wiring
+  span.start/span.end per specialist and the aggregator's decision event,
+  equally explicitly called for). `scripts/run_fixture_review.py` was also
+  added though not separately named in the freeze-boundary list -- PLAN.md's
+  own M7 demo command invokes it by this exact path, the same situation as
+  M2's `scripts/send_signed_webhook.py`. Flagging all four for L4 VERIFY to
+  confirm this reading is acceptable, same as M2/M5/M6's own documented
+  freeze-boundary notes.
+- `backend.observability.get_event_repository()` (the process-wide
+  singleton in `workflow_context.py`) is used by
+  `backend.orchestrator.nodes` (LangGraph nodes have no per-request
+  dependency injection available) but deliberately NOT by
+  `backend.webhook_receiver.router`, which instead reads a per-app
+  `EventRepository` off `request.app.state` (mirroring the existing
+  `Settings`/`JobQueue` pattern) -- required so a test can point one
+  isolated app's events writes at an unreachable DSN without affecting the
+  real, shared docker-compose Postgres any other test in the same run
+  depends on. Two different access patterns for the same repository type,
+  by design; flagging so a future reader does not "fix" the inconsistency.
+- `emit_llm_call`/`emit_tool_call` (`backend/observability/events.py`) have
+  no live call site at M7 -- no real LLM call or tool call exists yet
+  (M8's job). Forward-looking infrastructure, the same category as M5's
+  `InMemoryHitlQueue` or M6's `CircuitBreaker` registry.
+- The webhook-ingress decision event for a rejected/duplicate/accepted
+  delivery is correlated by a synthetic `webhook-<delivery_id>` run id
+  (`backend.observability.workflow_context.run_id_for_delivery`), never the
+  real `review_id` an eventual orchestrator run for the same PR would use
+  -- there is no way to join a webhook-ingress event to its later
+  orchestrator-run events from `agent_events` alone today, since the
+  orchestrator is still not wired into the webhook/queue path (a gap M4-M6
+  all already deferred, unchanged by M7).
+- `EventRepository` opens and closes a short-lived connection per call
+  (insert or select) rather than holding a pool -- deliberately simpler
+  than `RedisJobQueue`'s retry/circuit-breaker/timeout composition, since
+  events are supplementary telemetry, not a request the caller blocks
+  waiting on the *result* of. Acceptable for M7's local-dev scope; revisit
+  if event-write volume/latency ever becomes a concern (e.g. a connection
+  pool, or batching).
+- Two full sets of specialist/decision events accumulated under
+  `review_id='demo-1'` in this session's own demo-command run, because the
+  same review_id was invoked twice against the append-only table (once
+  manually while testing, once as the final demo command) -- expected,
+  harmless, and exactly what append-only means (a fresh
+  `docker compose up` with no volume wipes this on next boot regardless).
+  Not a defect; noted so a future reader isn't confused by 18 rows instead
+  of 9 in that specific manual repro.
 
 New from M5 (L4 VERIFY, both rounds) and its L2 DEBUG fix, non-blocking:
 - **Known deferred gap, explicitly not fixed by user decision:** `dedupe_findings`'s key is still exactly `(file_path, line_start)`, not `(file_path, line_start, line_end)`. L4 VERIFY separately flagged that a wide-span finding (e.g. `line_start=42, line_end=80`) can collapse into an unrelated, narrower finding that merely shares `line_start=42`. The user explicitly decided NOT to widen the key for this fix -- adding `line_end` does not solve the general "do these two findings' spans actually overlap" problem (two spans can overlap without sharing either endpoint), so it would be a partial fix wearing a full fix's clothes. Left as a known, tracked gap for a future milestone to address properly (e.g. real interval-overlap detection), not silently dropped.
@@ -66,6 +122,123 @@ Resolved (previously deferred from M2, now closed):
 - ~~`_is_hex` uses `int(value, 16)` which accepts underscore separators and a leading sign~~ -- fixed: replaced with a strict `[0-9a-fA-F]+` charset regex; regression test added (`test_underscore_in_digest_is_rejected_as_malformed_not_invalid`)
 - ~~The demo command needs an activated venv and a hand-created `.env` and neither is documented (no README exists)~~ -- fixed: README.md now documents venv creation/activation, `pip install -e ".[dev]"`, and copying `.env.example` to `.env`
 - ~~`InMemoryJobQueue` and its `_seen_delivery_ids` grow unboundedly with no eviction~~ -- fixed: M3's `RedisJobQueue` stores the idempotency key with an expiring TTL (`Settings.idempotency_ttl_seconds`, default one week) instead of an ever-growing in-process set; proven by a test that reads the TTL back from Redis directly.
+
+## M7 Build Summary (L1 BUILD complete; L4 VERIFY not yet run)
+
+### G0 Pre-Flight Verdict
+UNBUILT. `backend/observability/__init__.py` and `backend/database/__init__.py`
+were both module docstrings only -- no `events.py`/`tracing.py`/`audit.py`/
+`workflow_context.py` or `postgres.py`/`models.py`/`repository.py` existed.
+No `agent_events` table, no migration, no postgres service in
+`docker-compose.yml`, no `DATABASE_URL` in `Settings`.
+
+### Outcome Achieved
+- `docker-compose.yml` postgres service: `postgres:16-alpine` (deliberately
+  not TimescaleDB -- see that file's comment and this session's report for
+  the full justification), host port 5433 (5432 occupied by the unrelated
+  `ampliphi-postgres-1` container; verified free via `lsof -i :5433` before
+  choosing it).
+- `backend/database/migrations/0001_agent_events.sql`: the `agent_events`
+  table (timestamp, review_id, event_type, agent, model, tokens_in,
+  tokens_out, `cost_usd NUMERIC(10,6)`, latency_ms, outcome,
+  `confidence NUMERIC(4,3)`), indexed on `(review_id, ts)`, plus append-only
+  enforcement -- a BEFORE UPDATE/DELETE trigger (fires for any role,
+  including a superuser) and a dedicated `agent_events_writer` role granted
+  only SELECT+INSERT with UPDATE/DELETE/TRUNCATE explicitly revoked.
+- Enforcement was proven against a real, running Postgres, not merely
+  written: a real UPDATE and a real DELETE against a real row were both
+  rejected, with the actual database error text, as both the admin
+  superuser (rejected by the trigger) and the restricted role (rejected by
+  the permission check, before the trigger even runs). Full output pasted
+  in this session's final report.
+- `backend.database.repository.EventRepository`: INSERT/SELECT only, no
+  UPDATE/DELETE statement anywhere in the file -- what makes the
+  events-table-append-only invariant grep-verifiable, backed by an actual
+  test (`TestNoApplicationCodeMutatesEvents`), not merely asserted in prose.
+- `backend.observability`: `events.py` (one `emit_*` function per
+  EventType, log-and-continue failure policy -- an events-DB outage never
+  raises past `emit_*`, but a real construction-time bug, e.g. a bad type,
+  still propagates), `tracing.py` (`traced_span`, measured latency +
+  ok/error outcome), `audit.py` (`reconstruct_review_trace` -- the
+  trace-viewer query PLAN.md's outcome text names), `workflow_context.py`
+  (run-id correlation + a process-wide repository singleton for the
+  orchestrator's LangGraph nodes, which have no per-request DI).
+- Both live call sites wired and proven, by grep and dynamically: the
+  webhook router now emits one `decision` event per verified, parsed
+  pull_request outcome (accepted/duplicate/rejected), never before HMAC
+  verification runs; each of the four orchestrator specialist nodes now
+  runs inside `traced_span` (span.start/span.end, real measured latency),
+  and `aggregate_node` emits one `decision` event with the real
+  `Review.status`/`overall_confidence`.
+- `Settings.database_url` (restricted role, what the app writes through)
+  and `Settings.database_admin_url` (superuser, migrations only), both
+  documented in `.env.example`.
+- PLAN.md's demo command run verbatim end-to-end: `docker compose up -d
+  postgres && python scripts/run_fixture_review.py --review-id demo-1 &&
+  psql "$DATABASE_URL" -c "SELECT event_type, agent, ts FROM agent_events
+  WHERE review_id='demo-1' ORDER BY ts"` -- combined exit 0, a non-empty,
+  time-ordered sequence covering span.start through decision.
+
+### Gate Results (this session, full output in the L1 BUILD transcript)
+- `ruff check .`: All checks passed, exit 0
+- `mypy --strict backend/`: Success: no issues found in 51 source files, exit 0
+- `pytest -v`: 151 passed (137 carried over from M1-M6 + 14 new in
+  `test_events_spine.py`), exit 0. Both Redis (6380) and Postgres (5433)
+  were up for this run -- every DB-dependent test genuinely executed, none
+  skipped.
+- `lint-imports --config .importlinter`: 2 contracts kept, 0 broken, exit 0
+- Cleaned up after: `docker compose down` run, confirmed no stray listeners
+  on :5433/:6380/:8000, `docker compose ps` empty, and the unrelated
+  `ampliphi-redis-1`/`ampliphi-postgres-1` containers left untouched and
+  running throughout.
+
+### Files Written
+- `docker-compose.yml`: postgres service (5433, `postgres:16-alpine`, healthcheck)
+- `backend/database/migrations/0001_agent_events.sql`: schema + trigger + restricted role
+- `backend/database/{models,postgres,repository}.py`, `__init__.py` (re-exports)
+- `backend/observability/{events,tracing,audit,workflow_context}.py`, `__init__.py` (re-exports)
+- `backend/core/settings.py`, `.env.example`: `DATABASE_URL`/`DATABASE_ADMIN_URL`
+- `backend/webhook_receiver/router.py`, `backend/api/main.py`: webhook-ingress decision event + per-app `EventRepository` injection (freeze-boundary exception, disclosed)
+- `backend/orchestrator/nodes.py`: span.start/span.end + aggregator decision event (freeze-boundary exception, disclosed)
+- `scripts/run_fixture_review.py`: PLAN.md's named M7 demo target (not separately listed in the freeze boundary; disclosed, same as M2's `send_signed_webhook.py`)
+- `tests/integration/test_events_spine.py`: PLAN.md's named M7 demo test file, 14 tests
+- `pyproject.toml`: `psycopg[binary]` runtime dependency
+- `.genesis/context-graph.json`: refreshed (80->91 nodes, 221->295 edges); hand-written invariants backed up and restored byte-for-byte
+
+### Architecture notes for the verifier
+- The freeze-boundary exceptions above (`router.py`/`main.py`, `nodes.py`,
+  `scripts/run_fixture_review.py`) need explicit sign-off, same as
+  M2/M5/M6's own documented notes.
+- The webhook router reads a per-app-injected `EventRepository` (off
+  `request.app.state`, mirroring `Settings`/`JobQueue`), while the
+  orchestrator's LangGraph nodes read the process-wide
+  `get_event_repository()` singleton instead -- two different access
+  patterns for the same repository type, by design (see Deferred).
+- `emit_llm_call`/`emit_tool_call` have no live call site yet (M8's job) --
+  confirm this is understood as intentional forward-looking scope, not a
+  gap in M7's own.
+
+### Deferred / not built at M7 (explicitly out of scope, do not treat as gaps)
+- No real LLM agents (M8) -- `emit_llm_call` has no live caller yet
+- No GitHub posting (M11); no dashboard/trace-viewer UI (M13) -- only the
+  `reconstruct_review_trace` query it would call
+- The orchestrator is still not wired into the webhook/queue path (M4-M6's
+  own already-deferred item, unchanged by M7) -- so a webhook-ingress event
+  and its eventual orchestrator-run events for the same PR cannot yet be
+  joined from `agent_events` alone
+- No Tiger Cloud / TimescaleDB hypertable, DiskANN, or continuous
+  aggregates (M12's explicit scope) -- `agent_events` is a plain table
+
+### Next Phase (M7 -> L4 VERIFY)
+A separate agent/model session should run L4 VERIFY against this build:
+re-run all four gates plus PLAN.md's exact M7 demo command independently,
+re-derive the append-only enforcement proof independently (attempt a real
+UPDATE/DELETE, both as the admin role and the restricted
+`agent_events_writer` role, and confirm the actual rejection text) rather
+than trusting this session's report, check DONE.html's "Every security and
+reliability module has a live call site in the request path, provable by
+grep" gate against `backend/observability`'s two wired call sites, and rule
+on the freeze-boundary exceptions above before marking M7 DONE.
 
 ## M6 Build Summary (L4 VERIFY APPROVED)
 
