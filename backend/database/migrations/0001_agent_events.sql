@@ -40,7 +40,8 @@ CREATE INDEX IF NOT EXISTS idx_agent_events_review_id_ts ON agent_events (review
 
 -- ---------------------------------------------------------------------
 -- APPEND-ONLY ENFORCEMENT, mechanism 1 of 2: a BEFORE trigger that raises
--- on any UPDATE or DELETE, regardless of which role issues it.
+-- on any UPDATE or DELETE, regardless of which role issues it, PLUS a
+-- separate statement-level trigger (below) for TRUNCATE.
 --
 -- This is the PRIMARY mechanism, not the GRANT/REVOKE below, because a
 -- PostgreSQL superuser bypasses privilege checks entirely -- a REVOKE
@@ -49,6 +50,24 @@ CREATE INDEX IF NOT EXISTS idx_agent_events_review_id_ts ON agent_events (review
 -- trigger fires unconditionally for every role, superuser included, so it
 -- is what actually makes the events-table-append-only invariant true
 -- rather than merely documented.
+--
+-- CORRECTION (L2 DEBUG, post-L4-REJECT): the row-level UPDATE/DELETE
+-- triggers below do NOT, by themselves, make append-only true "regardless
+-- of which role issues it" for every kind of mutation -- an earlier
+-- version of this comment claimed that, and it was false for TRUNCATE.
+-- PostgreSQL never fires a row-level (`FOR EACH ROW`) trigger for a
+-- TRUNCATE statement, no matter who issues it: TRUNCATE only fires
+-- statement-level (`FOR EACH STATEMENT`) triggers, which is a completely
+-- separate trigger registration from `agent_events_no_update`/
+-- `agent_events_no_delete` below. L4 VERIFY demonstrated this concretely:
+-- with only the two row-level triggers in place, `TRUNCATE agent_events;`
+-- run as the "postgres" superuser silently wiped every row (94 of them at
+-- the time), no exception raised, no trigger fired -- an operator mistake
+-- or a compromised admin credential could do the same. The dedicated
+-- `agent_events_no_truncate` statement-level trigger further below closes
+-- that gap; only with *both* the row-level pair and that statement-level
+-- trigger in place is it accurate to say every mutating operation against
+-- this table is rejected regardless of role.
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION agent_events_forbid_mutation() RETURNS trigger AS $$
 BEGIN
@@ -70,14 +89,38 @@ CREATE TRIGGER agent_events_no_delete
     FOR EACH ROW EXECUTE FUNCTION agent_events_forbid_mutation();
 
 -- ---------------------------------------------------------------------
+-- APPEND-ONLY ENFORCEMENT: TRUNCATE, closed separately (L2 DEBUG,
+-- post-L4-REJECT) because TRUNCATE bypasses row-level triggers entirely
+-- (see the correction above) -- it only ever fires a statement-level
+-- (`FOR EACH STATEMENT`) trigger, which PostgreSQL requires to be
+-- registered separately from the row-level UPDATE/DELETE triggers above.
+-- `OLD`/`NEW`/`TG_OP`'s per-row context doesn't exist for a statement-level
+-- trigger, so this uses its own, simpler function rather than reusing
+-- `agent_events_forbid_mutation` (which reads `OLD.id`). BEFORE, like the
+-- two triggers above, so the truncation is rejected before it happens;
+-- fires for any role, superuser included, same as the row-level pair.
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION agent_events_forbid_truncate() RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION 'agent_events is append-only: TRUNCATE is not permitted';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS agent_events_no_truncate ON agent_events;
+CREATE TRIGGER agent_events_no_truncate
+    BEFORE TRUNCATE ON agent_events
+    FOR EACH STATEMENT EXECUTE FUNCTION agent_events_forbid_truncate();
+
+-- ---------------------------------------------------------------------
 -- APPEND-ONLY ENFORCEMENT, mechanism 2 of 2 (defense in depth): a
 -- dedicated, non-superuser application role that can only SELECT and
 -- INSERT on agent_events. This is what Settings.database_url actually
 -- connects as at application runtime -- never the "postgres" admin
 -- superuser used to apply migrations. UPDATE/DELETE/TRUNCATE are
 -- explicitly REVOKEd (not merely "never GRANTed") so this file's intent
--- is unambiguous to a future reader, even though the trigger above is
--- what actually makes mutation impossible regardless of role.
+-- is unambiguous to a future reader, even though the triggers above are
+-- what actually make every one of UPDATE/DELETE/TRUNCATE impossible
+-- regardless of role.
 -- ---------------------------------------------------------------------
 DO $$
 BEGIN

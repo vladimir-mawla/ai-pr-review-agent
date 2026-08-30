@@ -239,6 +239,44 @@ class TestAppendOnlyEnforcement:
         ):
             conn.execute("DELETE FROM agent_events WHERE review_id = %s", (review_id,))
 
+    def test_truncate_is_rejected_even_for_the_admin_superuser(
+        self, repository: EventRepository
+    ) -> None:
+        """Regression test (L2 DEBUG, post-L4-REJECT): TRUNCATE never fires a
+        row-level trigger, so the pre-existing ``agent_events_no_update``/
+        ``agent_events_no_delete`` pair (``FOR EACH ROW``) does nothing to
+        stop it -- L4 VERIFY demonstrated this concretely by running
+        ``TRUNCATE agent_events;`` as the "postgres" superuser and watching
+        every row silently disappear, no exception raised. The dedicated
+        ``agent_events_no_truncate`` statement-level (``FOR EACH STATEMENT``)
+        trigger migration 0001 now also installs closes that gap. This
+        asserts both that TRUNCATE raises AND that the row inserted just
+        before it is still there afterward -- the same "prove data survived"
+        shape as the UPDATE/DELETE tests above, not just "an exception was
+        raised somewhere."
+        """
+        review_id = _unique_review_id("append-only-truncate")
+        repository.insert_event(
+            AgentEvent(
+                review_id=review_id,
+                event_type=EventType.SPAN_START,
+                ts=datetime.now(UTC),
+                agent="security",
+            )
+        )
+
+        with (
+            psycopg.connect(_DATABASE_ADMIN_URL, autocommit=True) as conn,
+            pytest.raises(psycopg.errors.RaiseException) as exc_info,
+        ):
+            conn.execute("TRUNCATE agent_events")
+
+        assert "append-only" in str(exc_info.value)
+        assert "TRUNCATE" in str(exc_info.value)
+        # The row survives: TRUNCATE was rejected before it took effect, not
+        # merely logged-and-allowed.
+        assert repository.fetch_events_for_review(review_id) != []
+
 
 class TestNoApplicationCodeMutatesEvents:
     """Mirrors the ``events-table-append-only`` invariant in
