@@ -40,6 +40,25 @@ the tracked "Redis-down enqueue returns 500 not 503" deferred item now that
 a circuit breaker makes "the dependency is down" a distinguishable state) —
 disclosed here and in that session's final report, not silently expanded
 scope.
+
+Freeze-boundary note (M7): also outside M7's literal freeze boundary
+(``backend/observability/*.py``, ``backend/database/*.py``,
+``docker-compose.yml``, ``backend/core/settings.py``, ``.env.example``,
+``pyproject.toml``, ``tests/integration/test_events_spine.py``), but M7's
+own instructions explicitly call for wiring event emission into "at minimum
+the webhook ingress" — this file is the only place that decision happens.
+The change is narrow and additive: a ``decision`` event
+(``backend.observability.emit_decision``) is now recorded for every
+outcome a *verified, parsed* ``pull_request`` webhook reaches (accepted,
+duplicate, or rejected for an unsupported action) — never for a request
+that fails HMAC verification, and never before verification runs, so this
+does not weaken the ``hmac-verified-before-any-work`` invariant. A failure
+to write that event (events Postgres unreachable) is caught and logged
+inside ``emit_decision`` itself and never raises here — the webhook path's
+response is unaffected either way (see
+``backend.observability.events``'s module docstring for the full failure
+policy, and ``tests/integration/test_events_spine.py`` for the test
+proving the webhook still returns 200 with the events DB stopped).
 """
 
 from __future__ import annotations
@@ -53,7 +72,9 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from backend.core.settings import Settings
+from backend.database.repository import EventRepository
 from backend.job_queue.interface import JobQueue, QueueUnavailableError
+from backend.observability import emit_decision, run_id_for_delivery
 from backend.webhook_receiver.parser import SUPPORTED_ACTIONS, parse_pull_request_payload
 from backend.webhook_receiver.validator import (
     InvalidSignatureError,
@@ -94,11 +115,27 @@ def get_settings_dependency(request: Request) -> Settings:
     return settings
 
 
+def get_event_repository_dependency(request: Request) -> EventRepository:
+    """Dependency: fetch the app-level EventRepository instance (M7).
+
+    Like ``get_job_queue``, reads from ``request.app.state`` (set in
+    ``create_app``) rather than the process-wide
+    ``backend.observability.get_event_repository()`` singleton, so a test
+    can point one isolated app's events writes at an unreachable DSN (to
+    exercise "the events database is down") without affecting the real,
+    shared docker-compose Postgres any other test in the same run depends
+    on.
+    """
+    event_repository: EventRepository = request.app.state.event_repository
+    return event_repository
+
+
 @router.post("/webhook")
 async def receive_webhook(
     request: Request,
     settings: Annotated[Settings, Depends(get_settings_dependency)],
     queue: Annotated[JobQueue, Depends(get_job_queue)],
+    event_repository: Annotated[EventRepository, Depends(get_event_repository_dependency)],
 ) -> JSONResponse:
     """Receive, verify, and enqueue a GitHub ``pull_request`` webhook delivery.
 
@@ -127,10 +164,24 @@ async def receive_webhook(
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="webhook payload must be a JSON object")
 
+    # M7: read the delivery id as early as possible (GitHub sends this
+    # header on every webhook delivery, not only pull_request ones) so a
+    # decision event can correlate even a rejected/ignored delivery back to
+    # its GitHub delivery id. `None` when absent -- the "missing header"
+    # 400 below still only fires for a delivery this code would otherwise
+    # act on, unchanged from pre-M7 behavior.
+    delivery_id = request.headers.get(_DELIVERY_HEADER)
+
     # Only pull_request events are handled at all; everything else is
     # acknowledged (200) but otherwise ignored, per M2 scope.
     event_type = request.headers.get(_EVENT_HEADER)
     if event_type != _PULL_REQUEST_EVENT:
+        emit_decision(
+            event_repository,
+            run_id_for_delivery(delivery_id or "no-delivery-id"),
+            agent=None,
+            outcome="rejected",
+        )
         return JSONResponse(
             status_code=200,
             content={"status": "ignored", "reason": f"unsupported event type: {event_type!r}"},
@@ -138,6 +189,12 @@ async def receive_webhook(
 
     action = payload.get("action")
     if action not in SUPPORTED_ACTIONS:
+        emit_decision(
+            event_repository,
+            run_id_for_delivery(delivery_id or "no-delivery-id"),
+            agent=None,
+            outcome="rejected",
+        )
         return JSONResponse(
             status_code=200,
             content={"status": "ignored", "reason": f"unsupported action: {action!r}"},
@@ -145,7 +202,6 @@ async def receive_webhook(
 
     # Step 2 (idempotency key): the X-GitHub-Delivery header is required for
     # any event we're actually going to act on.
-    delivery_id = request.headers.get(_DELIVERY_HEADER)
     if not delivery_id:
         raise HTTPException(status_code=400, detail=f"missing {_DELIVERY_HEADER} header")
 
@@ -173,10 +229,18 @@ async def receive_webhook(
         raise HTTPException(
             status_code=503, detail=f"job queue temporarily unavailable: {exc}"
         ) from exc
+
+    outcome = "accepted" if result.enqueued else "duplicate"
+    emit_decision(
+        event_repository,
+        run_id_for_delivery(delivery_id),
+        agent=None,
+        outcome=outcome,
+    )
     return JSONResponse(
         status_code=200,
         content={
-            "status": "accepted" if result.enqueued else "duplicate",
+            "status": outcome,
             "delivery_id": result.delivery_id,
         },
     )

@@ -21,6 +21,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from backend.core.settings import Settings, get_settings
+from backend.database.repository import EventRepository
 from backend.job_queue.in_memory import InMemoryJobQueue
 from backend.job_queue.interface import JobQueue
 from backend.job_queue.redis_arq import RedisJobQueue
@@ -34,7 +35,11 @@ def _default_job_queue(settings: Settings) -> JobQueue:
     return InMemoryJobQueue()
 
 
-def create_app(settings: Settings | None = None, job_queue: JobQueue | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    job_queue: JobQueue | None = None,
+    event_repository: EventRepository | None = None,
+) -> FastAPI:
     """Build a FastAPI app instance with explicit, injectable dependencies.
 
     Args:
@@ -48,6 +53,15 @@ def create_app(settings: Settings | None = None, job_queue: JobQueue | None = No
             ``_default_job_queue``) when not given. Tests pass their own
             instance so they can assert on its contents after making
             requests, independent of both the environment and Docker.
+        event_repository: M7. Where the webhook router's decision events
+            (``backend.observability.emit_decision``) are written. Defaults
+            to ``EventRepository(resolved_settings.database_url)`` when not
+            given. Tests pass their own instance (e.g. pointed at an
+            unreachable DSN) so "the events database is down" can be
+            exercised for one isolated app instance without touching the
+            real, shared docker-compose Postgres other tests depend on --
+            the same per-app isolation ``job_queue`` already gives Redis-
+            down simulations (see ``tests/unit/test_reliability.py``).
 
     Returns:
         A fully configured FastAPI app with the webhook router mounted.
@@ -57,6 +71,11 @@ def create_app(settings: Settings | None = None, job_queue: JobQueue | None = No
     app.state.settings = resolved_settings
     app.state.job_queue = (
         job_queue if job_queue is not None else _default_job_queue(resolved_settings)
+    )
+    app.state.event_repository = (
+        event_repository
+        if event_repository is not None
+        else EventRepository(resolved_settings.database_url)
     )
     app.include_router(webhook_router)
     return app
