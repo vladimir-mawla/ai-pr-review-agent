@@ -231,3 +231,10 @@ milestones needing a paid/external credential (M8, M10, M11, M12, M13) are order
   including 23 new webhook tests; `ruff check .`, `mypy --strict backend/`,
   and `lint-imports --config .importlinter` all green). L4 VERIFY APPROVEd M2
   in a separate Sonnet session with no blocking defects.
+
+- **2026-08-30 — M3 (Queue + Worker: Dockerized Redis/ARQ):** Demo command
+  `docker compose up -d redis && arq backend.job_queue.arq_worker.WorkerSettings & pytest tests/integration/test_queue_roundtrip.py -v`
+  exits 0 (57 tests pass — 48 carried over from M1/M2 plus 9 new Redis/ARQ
+  integration tests, all run for real against a dockerized Redis, none
+  skipped). L4 VERIFY APPROVEd M3 in a separate Sonnet session with no
+  blocking defects.

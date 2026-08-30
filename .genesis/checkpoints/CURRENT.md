@@ -1,10 +1,10 @@
 # CURRENT
 - active_loop: none (between milestones)
-- target: M3
+- target: M4
 - iteration: 0
-- last_gate: L1 BUILD complete on M3 (all four gates + demo command green in-session; L4 VERIFY not yet run)
-- last_action: Built M3 -- RedisJobQueue (backend/job_queue/redis_arq.py) swapped in behind the unchanged JobQueue Protocol from M2, backed by an atomic Redis `SET NX EX` idempotency key with a configurable TTL (default 7 days, comfortably outliving GitHub's ~24h redelivery window) that fixes the M2-deferred unbounded-growth finding. Added the ARQ worker (backend/job_queue/arq_worker.py, a minimal stub handler), docker-compose.yml (redis:7-alpine, published on host port 6380 -- 6379 was occupied by an unrelated project's own container on this machine), and settings-driven backend selection (JOB_QUEUE_BACKEND) in backend/api/main.py. Added tests/integration/test_queue_roundtrip.py (9 tests: enqueue-then-consume via a real ARQ Worker in burst mode, idempotency, an actual TTL readback from Redis, and a JobQueue contract test parameterized over both implementations) -- all passed against a real dockerized Redis in-session. All four gates (ruff, mypy --strict backend/, pytest, lint-imports) green; PLAN.md's M3 demo command run verbatim, combined exit 0. Context graph refreshed (53 nodes/108 edges); graphizer wiped the 4 hand-written invariants again (as it did at M2) and they were restored from git history.
-- next_action: L4 VERIFY on M3 (separate session)
+- last_gate: L4 VERIFY APPROVE on M3
+- last_action: An independent L4 VERIFY Sonnet session APPROVEd M3 with no blocking defects (re-ran all four gates plus the PLAN.md demo command independently; 57 tests passed). This session then ran the post-APPROVE housekeeping pass: fixed the M3 freeze-boundary authoring gap in PLAN.md (it omitted redis_arq.py -- the milestone's central deliverable -- plus settings.py/main.py/.env.example/pyproject.toml), audited M4-M13's freeze boundaries for the same gap and corrected the ones with clear omissions, documented the idempotency-loss-on-recreate caveat (docker-compose.yml + README.md), corrected the JobQueue.enqueue() docstring to match RedisJobQueue's actual bounded-blocking behavior (docstring only, no behavior change), flipped M3 to done in DONE.html/PLAN.md/implementation-notes.html, and wrote the M3 explain-diff HTML page.
+- next_action: run G0 existence pre-flight on M4
 - model: claude-sonnet-5
 - tokens_used: 0
 - tokens_budget: 50000
@@ -20,16 +20,27 @@ Still open from M2:
 - No max request body size is configured, so a large POST is fully buffered and hashed -- address before M11 internet exposure
 - `backend/core/settings.py` placement is an accepted ADR-002 taxonomy nit, not a layering violation
 
-New from M3, still open:
+New from M3 BUILD, recorded for the verifier (still true, not superseded):
 - `RedisJobQueue.enqueue()` bridges into ARQ's async client via a dedicated background thread + `asyncio.run_coroutine_threadsafe`, which works but means every enqueue call blocks the calling (request) thread on a cross-thread round trip; acceptable at M3's scale, worth revisiting if webhook volume ever makes that latency matter.
 - The docker-compose Redis is published on host port 6380, not Redis's usual 6379, because 6379 was already bound by an unrelated project's container on the build machine. `REDIS_URL`/`docker-compose.yml` are internally consistent with each other, but anyone reusing 6379 elsewhere should update both.
+
+New from M3's L4 VERIFY, still open (all non-blocking -- did not block APPROVE):
+- No FastAPI lifespan hook calls `RedisJobQueue.close()`, so the background event-loop thread is simply abandoned on process shutdown. Harmless in practice (it's a daemon thread and the process is exiting anyway), but untidy -- a lifespan hook should call `close()` for a clean shutdown.
+- A Redis-down `enqueue()` call currently surfaces as an unhandled 500 rather than a graceful 503. Acceptable for M3's local-dev scope; revisit before this endpoint carries real traffic.
+- Idempotency state (and the queue) is lost whenever the Redis container is recreated (`docker compose down && up`, no volume) -- confirmed empirically (DBSIZE drops to 0). This satisfies M3's own success criterion (no orphaned jobs) but the idempotency-reset corollary is now documented in `docker-compose.yml` and `README.md`.
+
+Still open, carried forward (unchanged by this housekeeping pass):
+- `Review.overall_confidence` cross-field consistency check (M1)
+- Models not frozen / no `validate_assignment` (M1)
+- No max request body size configured -- address before M11 internet exposure (M2)
+- `backend/core/settings.py` placement taxonomy nit (M2, accepted, not a layering violation)
 
 Resolved (previously deferred from M2, now closed):
 - ~~`_is_hex` uses `int(value, 16)` which accepts underscore separators and a leading sign~~ -- fixed: replaced with a strict `[0-9a-fA-F]+` charset regex; regression test added (`test_underscore_in_digest_is_rejected_as_malformed_not_invalid`)
 - ~~The demo command needs an activated venv and a hand-created `.env` and neither is documented (no README exists)~~ -- fixed: README.md now documents venv creation/activation, `pip install -e ".[dev]"`, and copying `.env.example` to `.env`
 - ~~`InMemoryJobQueue` and its `_seen_delivery_ids` grow unboundedly with no eviction~~ -- fixed: M3's `RedisJobQueue` stores the idempotency key with an expiring TTL (`Settings.idempotency_ttl_seconds`, default one week) instead of an ever-growing in-process set; proven by a test that reads the TTL back from Redis directly.
 
-## M3 Build Summary (L1 BUILD complete, L4 VERIFY pending)
+## M3 Build Summary (L4 VERIFY APPROVED)
 
 ### Outcome Achieved
 - A validated webhook enqueues a job to Redis via ARQ
