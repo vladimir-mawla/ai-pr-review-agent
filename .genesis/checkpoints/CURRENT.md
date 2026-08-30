@@ -664,6 +664,44 @@ A second, independent L4 VERIFY session then re-ran all four gates plus PLAN.md'
 
 ## Deferred
 
+New from M9 (L1 BUILD, this session -- resuming an interrupted prior
+session), non-blocking except where noted:
+- **`OpenAIEmbedder`'s real API path has never been exercised against the
+  live OpenAI endpoint** -- there is no OpenAI credential available for
+  this build. Its retry/circuit-breaker/timeout composition is proven by
+  fault injection against an injected fake client
+  (`tests/unit/test_embedder.py::TestReliabilityComposition`), the same
+  pattern `AnthropicLLMClient` used before M8 obtained a real credential,
+  but the actual `text-embedding-3-large` call, its real latency/error
+  shapes, and whether `dimensions=256` truncation behaves as documented
+  have not been proven end-to-end. Re-validate once a key is available.
+- **The fixture embedder's two demonstrated properties (synonym
+  canonicalization, short-token filtering) are engineered, not learned**
+  -- see this checkpoint's M9 STATUS section above for the full
+  fixture-vs-real distinction. In particular,
+  `TestKeywordSearchFindsWhatVectorMisses`'s assertion that a real
+  embedding model would also rank a short token like "s3" last is a
+  plausible but unverified claim about real subword tokenization
+  behavior, not something this session could prove without a key.
+- **PLAN.md's success criteria literally name "recall@5 on a 10-query
+  fixture set is 100%"** -- this session's tests prove recall on several
+  individual, hand-built small corpora (each test seeds its own few
+  chunks), not one named, checked-in 10-query fixture set with a single
+  recall@5 computation over it. Judged sufficient for this milestone's
+  own "test the composition, not just units" instruction, but a future
+  session wanting a literal, named fixture set for that exact success
+  criterion would need to build one.
+- **`_CANDIDATE_POOL_MULTIPLIER=4`/`_MIN_CANDIDATE_POOL=20`
+  (`backend/memory/context_retriever.py`) are judgment calls**, sized for
+  this milestone's few-hundred-row local corpus and not load-tested at a
+  larger scale.
+- **`backend/memory/tiger_client.py`'s `apply_migrations`/`connect` have
+  no retry/circuit-breaker wrapping of their own** -- consistent with
+  `backend.database.postgres`'s equivalent M7 pattern for local Postgres
+  (a short-lived, low-frequency connection, not a per-request hot path),
+  but worth re-confirming this stays the right scope boundary once M12
+  replaces this file's internals with the real Tiger Cloud path.
+
 New from M8 (L1 BUILD), non-blocking except where noted:
 - **`complete_async` (`backend.tools.llm_client.AnthropicLLMClient`) has no
   live call site yet** -- the one live call site this milestone built
