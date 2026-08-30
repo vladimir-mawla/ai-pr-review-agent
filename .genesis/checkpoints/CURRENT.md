@@ -2,9 +2,9 @@
 - active_loop: none (between milestones)
 - target: M5
 - iteration: 0
-- last_gate: L4 VERIFY APPROVE on M4
-- last_action: L1 BUILD session built the M4 LangGraph orchestrator skeleton: backend/core/workflow_engine.py (ADR-001 abstract WorkflowEngine Protocol), backend/orchestrator/{state,nodes,graph,langgraph_engine}.py, and tests/integration/test_orchestrator_fanout.py. Smoke-tested langgraph-checkpoint-redis directly against this project's real docker-compose Redis before writing any production code; it failed (RediSearch/FT.INFO not supported by plain redis:7-alpine), so used langgraph-checkpoint-sqlite instead (a real, first-party LangGraph checkpointer, file-backed, not in-memory) and documented why in langgraph_engine.py's module docstring and the pyproject.toml commit. Validated LangGraph's Send-API fan-out is genuinely parallel (measured: ~0.31s wall time vs 1.2s sum of four 0.3s sleeps, all four execution windows pairwise overlapping) and that its pending-writes mechanism actually skips already-completed parallel branches on resume (prototyped standalone before writing production code, then proven again in the real test suite via a brand-new engine instance against the same on-disk checkpoint file). All four gates (ruff, mypy --strict, pytest -v [62 passed], lint-imports) plus PLAN.md's exact M4 demo command ran green. Context graph refreshed (53->68 nodes, 108->146 edges); all 4 hand-written invariants backed up before graphizer ran and restored/verified after. Redis (M3's, port 6380) brought up only for the full pytest -v gate run (queue-roundtrip tests need it), then torn down; ampliphi-redis-1/ampliphi-postgres-1 confirmed untouched throughout. A separate L4 VERIFY Sonnet session independently re-ran all gates plus the demo command, ruled the Redis-vs-SQLite checkpointer deviation non-blocking (DONE.html's gate says only "compiled with a checkpointer, not without"), and APPROVEd M4 with no blocking defects.
-- next_action: run G0 existence pre-flight on M5
+- last_gate: L1 BUILD complete on M5 (this session) -- awaiting L4 VERIFY
+- last_action: L1 BUILD session built M5's aggregator + confidence-weighted HITL gate: backend/agents/{base_agent,contracts}.py (AGENT_PRECEDENCE + deterministic dedupe_findings), backend/hitl/queue.py (route_review + InMemoryHitlQueue), backend/core/settings.py (HITL_CONFIDENCE_THRESHOLD, default 0.750) + .env.example, and replaced M4's aggregate_node stub with the real join-node implementation in backend/orchestrator/nodes.py (wired via two new NotRequired GraphState fields, review/routing_reason). Also closed the M1-deferred Review.overall_confidence gap: added compute_overall_confidence() (mean of findings, ROUND_HALF_UP to 3dp, 0.000 for empty) and a model_validator on Review enforcing overall_confidence == compute_overall_confidence(findings) -- a hard rejection, not a silent recompute. This touched backend/models/review.py, backend/orchestrator/state.py, and tests/unit/test_models.py, none of which are in PLAN.md's M5 freeze-boundary list; each was a minimal, necessary, explicitly-instructed exception (closing the M1 gap requires touching the model that owns the field; wiring the real aggregator into the graph requires GraphState to have somewhere to write the result) and is documented in the relevant commit messages and file docstrings rather than silently overreaching. Verified the anti-drift requirement empirically, not just by inspection: temporarily hardcoded a stale threshold number into route_review's message (reproducing the reference implementation's exact bug class), confirmed the new drift test fails, then restored the file and confirmed it passes again. All four gates (ruff, mypy --strict backend/ [41 files clean], pytest -v [91 passed, Redis integration tests genuinely ran not skipped], lint-imports [2 contracts kept]) plus PLAN.md's exact M5 demo command (pytest tests/unit/test_aggregator.py tests/unit/test_hitl_gate.py -v, 26 passed) ran green. Context graph refreshed (68->73 nodes, 146->174 edges); all 4 hand-written invariants backed up before graphizer ran and restored/verified after. Redis (port 6380) brought up only for the full pytest -v gate run, then torn down; ampliphi-redis-1/ampliphi-postgres-1 confirmed untouched throughout (still running, unaffected).
+- next_action: L4 VERIFY on M5 (separate session)
 - model: claude-sonnet-5
 - tokens_used: 0
 - tokens_budget: 50000
@@ -12,8 +12,16 @@
 
 ## Deferred
 
+New from M5 (L1 BUILD), non-blocking:
+- Three files outside PLAN.md's literal M5 freeze-boundary list were touched: `backend/models/review.py` (+ `backend/models/__init__.py`, `tests/unit/test_models.py`), `backend/orchestrator/state.py`, and `tests/integration/test_orchestrator_fanout.py`. Each was a minimal, targeted change the L1 BUILD driver's own instructions explicitly called for (closing the M1 `overall_confidence` gap; giving the real aggregator's join node somewhere in `GraphState` to write its result; proving that wiring actually works end-to-end) rather than scope creep -- flagging for L4 VERIFY to confirm this reading is acceptable, same as M2/M4's own documented freeze-boundary/architecture notes.
+- `mypy --strict backend/` required one call site (`backend/orchestrator/nodes.py`'s new `Review(...)` construction) to pass `error_message=None` explicitly, because mypy's `dataclass_transform`-based reading of pydantic v2 models does not recognize `Field(None, ...)` (a positional default, as opposed to a plain `= None` class-body default) as making a field optional in the synthesized constructor signature. This is a latent M1-era pattern (`Review.error_message` and `Finding` fields use `Field(None, ...)` throughout) that only surfaced now because M5 is the first *backend* production code to construct a `Review` -- every prior `Review(...)` call was in `tests/`, which `mypy --strict` does not scope. Not fixed at the model level (would touch M1's field style repo-wide, well outside M5's freeze boundary); worth revisiting if `mypy --strict` is ever extended to `tests/`.
+- `InMemoryHitlQueue` (`backend/hitl/queue.py`) is a real, tested class, but nothing in `backend.orchestrator.nodes.aggregate_node` actually calls `.enqueue()` on an instance of it -- the join node computes the correct `Review.status` (POSTED vs QUEUED_FOR_HITL) and `routing_reason`, but stops there. Wiring "a QUEUED_FOR_HITL review is actually pushed into a live queue something else can read" is left for a later milestone (M10's full local dry run, or wherever a durable/dashboard-visible queue is built), matching M5's explicit exclusion of GitHub posting (M11) and consistent with M4's own precedent of not wiring the orchestrator into the webhook/queue path.
+- The dedup tie-break's final fallback level (lexicographic `rationale` comparison, after confidence -> AGENT_PRECEDENCE -> category) is untested in isolation (only the category-level tie-break is exercised in `tests/unit/test_aggregator.py`) since triggering it requires two findings identical in every field except `rationale`, a case that cannot arise from M4/M5's one-finding-per-agent-per-run stubs. The logic is straightforward (one more lexicographic comparison in the same chain) but this specific level has no direct regression test.
+
+Resolved (previously deferred from M1, now closed):
+- ~~`Review.overall_confidence` has no cross-field consistency check (not cross-checked against the mean of `findings[].confidence`)~~ -- fixed at M5: `compute_overall_confidence(findings)` is the one formula (mean, ROUND_HALF_UP to 3 decimal places, 0.000 for an empty list), and `Review` has a `model_validator(mode="after")` that raises `ValidationError` if `overall_confidence` disagrees with it. A validator (reject on mismatch) was chosen over silently recomputing the field, so a caller's bug surfaces loudly at construction time instead of being silently discarded.
+
 Still open from M1:
-- `Review.overall_confidence` has no cross-field consistency check (not cross-checked against the mean of `findings[].confidence`)
 - `Finding`, `Review`, `WebhookEvent` are not frozen and do not set `validate_assignment`, so instances are mutable post-construction
 
 Still open from M2:
@@ -34,6 +42,104 @@ Resolved (previously deferred from M2, now closed):
 - ~~`_is_hex` uses `int(value, 16)` which accepts underscore separators and a leading sign~~ -- fixed: replaced with a strict `[0-9a-fA-F]+` charset regex; regression test added (`test_underscore_in_digest_is_rejected_as_malformed_not_invalid`)
 - ~~The demo command needs an activated venv and a hand-created `.env` and neither is documented (no README exists)~~ -- fixed: README.md now documents venv creation/activation, `pip install -e ".[dev]"`, and copying `.env.example` to `.env`
 - ~~`InMemoryJobQueue` and its `_seen_delivery_ids` grow unboundedly with no eviction~~ -- fixed: M3's `RedisJobQueue` stores the idempotency key with an expiring TTL (`Settings.idempotency_ttl_seconds`, default one week) instead of an ever-growing in-process set; proven by a test that reads the TTL back from Redis directly.
+
+## M5 Build Summary (awaiting L4 VERIFY)
+
+### Outcome Achieved
+- `backend.agents.contracts.dedupe_findings` merges the four specialists'
+  findings, collapsing exact `(file_path, line_start)` duplicates and
+  keeping the highest-confidence one, with a fully deterministic tie-break
+  (confidence -> `AGENT_PRECEDENCE` -> category -> rationale) that does not
+  depend on the input list's order -- proven by running the same two
+  findings through in both orders and asserting identical output.
+- `backend.models.review.compute_overall_confidence` is the single formula
+  for `Review.overall_confidence` (mean of surviving findings' confidence,
+  ROUND_HALF_UP to 3 decimal places, 0.000 for an empty list), and `Review`
+  now enforces it via a `model_validator` -- closing the M1-deferred gap
+  (see Resolved, above).
+- `backend.hitl.queue.route_review` implements the HITL gate: auto-post iff
+  `overall_confidence >= threshold` and no CRITICAL finding; otherwise
+  queued for human review. Exactly-at-threshold auto-posts (tested on both
+  sides of the boundary plus exactly at it). A CRITICAL finding forces
+  human review unconditionally, even at confidence 1.000 or threshold
+  0.000 (tested).
+- Every reason string `route_review` returns is built from the same
+  `threshold` value the comparison uses -- verified empirically, not just
+  by code inspection: temporarily hardcoded a stale number into the
+  message (reproducing the reference implementation's exact bug --
+  `critical_block_count >= 2` in code vs. "3+ agents required" in the
+  message), confirmed `test_reason_message_uses_the_configured_threshold_value`
+  fails against the tampered file, then restored the file and confirmed
+  the test passes again.
+- `backend.orchestrator.nodes.aggregate_node` (M4's no-op join-node stub)
+  now runs this whole pipeline for real as the graph's fan-in node:
+  dedupe -> compute confidence -> route -> construct `Review` -> write it
+  into `GraphState`. Proven reachable through the actual compiled graph
+  (not just correct in isolation) by
+  `test_aggregate_node_wires_into_the_fan_in_and_produces_a_review`.
+- `HITL_CONFIDENCE_THRESHOLD` (default 0.750) is a `Settings` field,
+  documented in `.env.example`.
+
+### Gate Results (this session, full output in the L1 BUILD transcript)
+- `ruff check .`: All checks passed, exit 0
+- `mypy --strict backend/`: Success: no issues found in 41 source files, exit 0
+- `pytest -v`: 91 passed (62 carried over from M1-M4 + 29 new: 13 in
+  `test_aggregator.py`, 13 in `test_hitl_gate.py`, 2 new regression tests
+  in `test_models.py` for the closed M1 gap, 1 new graph-wiring
+  integration test in `test_orchestrator_fanout.py`), exit 0. Redis
+  (project's own, port 6380) was up for this run -- the
+  `[redis]`-parametrized `test_queue_roundtrip.py` cases genuinely
+  executed (visible in the -v output), not skipped.
+- `lint-imports --config .importlinter`: 2 contracts kept, 0 broken, exit 0
+- PLAN.md's M5 demo command run verbatim
+  (`pytest tests/unit/test_aggregator.py tests/unit/test_hitl_gate.py -v`):
+  26 passed, exit 0.
+- Cleaned up after: `docker compose down` run, confirmed no stray listeners
+  on :6380/:8000, `docker compose ps` empty, and the unrelated
+  `ampliphi-redis-1`/`ampliphi-postgres-1` containers left untouched and
+  running throughout.
+
+### Files Written
+- `backend/agents/base_agent.py`: `BaseAgent` (M8 forward-looking contract) + `AGENT_PRECEDENCE`
+- `backend/agents/contracts.py`: `dedupe_findings` (the aggregator's dedup core)
+- `backend/hitl/queue.py`: `route_review`, `has_critical_finding`, `InMemoryHitlQueue`
+- `backend/models/review.py`: `compute_overall_confidence` + the consistency `model_validator` (outside M5's literal freeze boundary -- see Deferred)
+- `backend/models/__init__.py`: exports `compute_overall_confidence`
+- `backend/core/settings.py`: `hitl_confidence_threshold` field
+- `.env.example`: documents `HITL_CONFIDENCE_THRESHOLD`
+- `backend/orchestrator/nodes.py`: real `aggregate_node` implementation
+- `backend/orchestrator/state.py`: `review`/`routing_reason` `NotRequired` fields (outside M5's literal freeze boundary -- see Deferred)
+- `tests/unit/test_aggregator.py`, `tests/unit/test_hitl_gate.py`: PLAN.md's named M5 demo test files
+- `tests/unit/test_models.py`: updated pre-existing tests that relied on the now-closed M1 gap, plus 2 new regression tests
+- `tests/integration/test_orchestrator_fanout.py`: 1 new test proving the real aggregator is wired into the graph's fan-in edge
+
+### Architecture notes for the verifier
+- The three freeze-boundary exceptions above (`backend/models/review.py` +
+  its `__init__.py`/test file, `backend/orchestrator/state.py`,
+  `tests/integration/test_orchestrator_fanout.py`) need explicit sign-off,
+  same as M2/M4's own documented placement/scope notes.
+- `InMemoryHitlQueue` exists and is tested but is not yet called by
+  `aggregate_node` or anything else -- confirm this is understood as
+  intentional scope (a later milestone's job), not a gap in M5's own.
+- The dedup tie-break's `rationale`-level fallback (after confidence ->
+  `AGENT_PRECEDENCE` -> category) has no direct test, since triggering it
+  needs two findings identical in every field but `rationale`, which
+  cannot arise from the current one-finding-per-agent stubs.
+
+### Deferred / not built at M5 (explicitly out of scope, do not treat as gaps)
+- No real LLM agents (M8); no GitHub posting (M11)
+- No durable/shared HITL queue (only the in-memory stand-in); no dashboard to view it
+- The orchestrator is still not wired into the webhook/queue path (M4's own deferred item, unchanged by M5)
+
+### Next Phase (M5 -> L4 VERIFY)
+A separate agent/model session should run L4 VERIFY against this build:
+re-run all four gates plus the demo command independently, check DONE.html's
+M5-relevant gate ("Findings dedupe by file and line, keeping highest
+confidence; aggregator threshold in code matches the threshold in its
+user-facing message"), rule on the three freeze-boundary exceptions above,
+and confirm the M1 gap closure's chosen approach (a rejecting
+`model_validator`, not a silent recompute) is acceptable before marking M5
+DONE.
 
 ## M4 Build Summary (L4 VERIFY APPROVED)
 
