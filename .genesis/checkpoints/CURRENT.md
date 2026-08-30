@@ -1,30 +1,56 @@
 # CURRENT
 - active_loop: none (between milestones)
 - target: M8
-- iteration: 2
-- last_gate: L2 DEBUG (2026-08-30) -- fixed all three findings from an
-  independent L4 VERIFY session (unbounded BudgetGuard spend query,
-  security_node's bare `except Exception` swallowing a budget block into a
-  fake-clean review, and the `budget-guard-hard-blocks` invariant's stale
-  per-node wording). All four gates re-run and green after the fix
-  (`ruff check .`; `mypy --strict backend/` on 57 source files; `pytest -v`
-  218 passed + 1 skipped -- up from 205+1 before this session's 13 new
-  tests; `lint-imports --config .importlinter` 2 kept/0 broken), both Redis
-  (6380) and Postgres (5433) up so every DB-dependent test genuinely ran,
-  none skipped except the one test that legitimately needs a live
-  credential. PLAN.md's M8 demo command is still **BLOCKED -- awaiting
-  credential**: `ANTHROPIC_API_KEY` is still not present in `.env`
-  (confirmed by `grep`), and running the CLI for real still fails with a
-  clear `LLMConfigurationError` at exactly the point a real call would be
-  made -- notably with NO spurious `BudgetExceededError` this time, despite
-  this same session's own test runs having written many events (including
-  a deliberately-reintroduced-then-reverted future-dated one) into this
-  same real Postgres -- see `## M8 L2 DEBUG` below and this session's final
-  report for the full traceback and regression proof.
-- next_action: L4 VERIFY on M8 (separate session) -- re-verify the three
-  fixes below (query bound + rename, security_node's narrowed exception
-  handling, the invariant wording) and re-run PLAN.md's demo command for
-  real once `ANTHROPIC_API_KEY` is available
+- iteration: 3
+- last_gate: L2 DEBUG (2026-08-31) -- fixed a defect an invalid (rejected)
+  `ANTHROPIC_API_KEY` exposed: `anthropic.AuthenticationError` was not in
+  `backend.orchestrator.nodes._SECURITY_INFRASTRUCTURE_FAILURE_EXCEPTIONS`
+  and was never wrapped into this project's own `LLMCallFailedError`, so it
+  propagated raw out of `AnthropicLLMClient.complete` and crashed the whole
+  orchestrator run instead of forcing human review -- while a *missing* key
+  (`LLMConfigurationError`) was already handled correctly. Found when a real
+  credential (present in `.env`, meant to unblock M8's demo) turned out to
+  be rejected by Anthropic with a real 401 `authentication_error`, confirmed
+  by raw curl. Fixed at `AnthropicLLMClient.complete`'s boundary (`backend/
+  tools/llm_client.py`): catches `anthropic.AnthropicError` (the SDK's
+  common base, covering the whole non-retryable family -- auth, permission,
+  bad request, not-found, conflict, unprocessable, request-too-large -- not
+  just `AuthenticationError`) around the retry/breaker/timeout call and
+  re-raises it as `LLMCallFailedError`, so `backend.orchestrator.nodes`
+  still never imports `anthropic` and `security_node`'s existing
+  `_SECURITY_INFRASTRUCTURE_FAILURE_EXCEPTIONS` catch (unchanged) now
+  reaches it. Non-retryable set also gained `RequestTooLargeError` (413,
+  same "retrying the same body can never help" family, previously missed).
+  Transient provider failures (`RateLimitError`, `ServiceUnavailableError`,
+  `OverloadedError`, `InternalServerError`, `APIConnectionError`/
+  `APITimeoutError`, `DeadlineExceededError`) are deliberately left retryable
+  (M6's retry/breaker already handles them); proven that a bad key fails
+  fast on attempt 1 (never retried 3 times), while a transient `RuntimeError`
+  is still retried to the configured attempt count. Regression proof: the
+  previously-failing `tests/integration/test_events_spine.py::
+  test_real_orchestrator_run_produces_spans_and_a_decision_event` now
+  passes; new `tests/unit/test_llm_client.py::
+  TestNonRetryableProviderErrorsAreWrapped` (5 tests, real
+  `anthropic.AuthenticationError`/`PermissionDeniedError`/`BadRequestError`
+  constructed with no network call) and new `tests/integration/
+  test_orchestrator_fanout.py::
+  TestRealSecurityAgentAuthenticationFailureForcesHITL` (1 test, a real
+  `SecurityAgent`+`AnthropicLLMClient` wired through the compiled graph)
+  both proven to fail against the pre-fix code and pass after -- pasted
+  output in this session's final report. All four gates green after the
+  fix (`ruff check .`; `mypy --strict backend/` 60 source files; `pytest -v`
+  253 passed + 1 failed (`test_hybrid_retrieval.py`, uncommitted M9 hybrid-
+  retrieval WIP, unrelated to this fix and left untouched); `lint-imports
+  --config .importlinter` 2 kept/0 broken), Redis (6380) and Postgres
+  (5433) up. `test_security_agent_live.py` now PASSES for real -- the
+  credential in `.env` was rotated to a valid one partway through this
+  session (curl now returns 200, not 401), so M8's demo command is
+  unblocked; this was not this session's fix and is noted only as a
+  same-session environment change.
+- next_action: re-run PLAN.md's M8 demo command for real now that
+  `ANTHROPIC_API_KEY` is valid, then L4 VERIFY on M8 (separate session) --
+  re-verify this auth-error-handling fix alongside the three from the prior
+  L2 DEBUG pass below
 - model: claude-sonnet-5
 - tokens_used: 0
 - tokens_budget: 50000
@@ -144,6 +170,119 @@ reconcile.
 
 Gate results, regression-proof output, and the demo command's real output
 are all in this session's final report.
+
+## M8 L2 DEBUG (2026-08-31) -- invalid API key crashed the run instead of forcing HITL
+
+A follow-up L2 DEBUG pass on the same milestone, found while trying to
+unblock M8's demo command with a real credential: `ANTHROPIC_API_KEY` was
+present in `.env` but Anthropic rejected it outright (a real 401
+`authentication_error`, confirmed by raw curl, not a test artifact).
+
+**The defect.** `backend.tools.llm_client.AnthropicLLMClient.complete`
+composes retry -> circuit breaker -> timeout around the real
+`anthropic.Anthropic().messages.create(...)` call, with
+`anthropic.AuthenticationError` (and its sibling non-retryable family --
+`BadRequestError`, `PermissionDeniedError`, `NotFoundError`,
+`UnprocessableEntityError`, `ConflictError`) already correctly listed in
+`_NON_RETRYABLE_EXCEPTIONS`, so `backend.reliability.retry.call_with_retry`
+re-raises it immediately on the first attempt, with no sleep and no further
+attempts -- exactly right, a bad key must never be retried 3 times. But
+`call_with_retry` re-raises it *uncaught*, as the raw vendor exception --
+it never becomes a `RetryExhaustedError`. `complete`'s own
+`except (RetryExhaustedError, CircuitOpenError)` clause therefore never
+caught it, so the raw `anthropic.AuthenticationError` escaped
+`AnthropicLLMClient` entirely, propagated through `SecurityAgent.analyze`
+(which deliberately does not catch infrastructure failures -- see that
+class's own docstring), and crashed `backend.orchestrator.nodes.
+security_node`, since that node's `_SECURITY_INFRASTRUCTURE_FAILURE_
+EXCEPTIONS` catch only lists this project's own exception types
+(`BudgetExceededError`, `LLMConfigurationError`, `LLMCallFailedError`) --
+crashing the whole graph run instead of forcing human review. A *missing*
+key (`LLMConfigurationError`, raised before any SDK call is even attempted)
+was already handled correctly by the exact same node; an authentication
+failure is precisely the same class of "the analysis never actually ran"
+as a budget block or missing config, but was NOT treated the same. Confirmed
+failing first: `tests/integration/test_events_spine.py::
+test_real_orchestrator_run_produces_spans_and_a_decision_event` raised a
+raw, uncaught `anthropic.AuthenticationError` (full traceback in this
+session's final report).
+
+**The fix -- Option A, at the client boundary, not the node.** Widening
+`security_node`'s caught tuple (Option B) would have required either
+importing `anthropic` into `backend/orchestrator/` (a real layering
+violation this project has otherwise kept clean -- `nodes.py` has never
+imported the vendor SDK) or duplicating the SDK's exception list a second
+time outside `backend/tools/llm_client.py`, the one module whose whole job
+is to be the whitelisted vendor-SDK boundary (see that module's own
+docstring). Instead, `complete` now also catches `anthropic.AnthropicError`
+-- the SDK's common base class, covering its *entire* exception family, not
+merely `AuthenticationError` -- around the retry/breaker/timeout call, and
+re-raises it as this project's own `LLMCallFailedError`. This costs nothing
+extra at the non-retryable path (those exceptions were already correctly
+failing fast) and means `security_node`'s existing, unchanged
+`_SECURITY_INFRASTRUCTURE_FAILURE_EXCEPTIONS` catch now reaches it, giving
+exactly the same forced-HITL synthetic CRITICAL/confidence-0.000 `Finding`
+a `BudgetExceededError` already produces. `_NON_RETRYABLE_EXCEPTIONS` also
+gained `RequestTooLargeError` (413 -- same "retrying the identical
+oversized body can never help" family as the six already listed, simply
+missed before). Transient provider failures (`RateLimitError`,
+`ServiceUnavailableError`, `OverloadedError`, `InternalServerError`,
+`APIConnectionError`/`APITimeoutError`, `DeadlineExceededError`) are
+deliberately left OUT of the non-retryable set -- M6's retry/breaker
+composition already handles those correctly (retry, then trip the breaker
+on sustained failure), and they are not the "the request itself can never
+succeed" family a bad key is.
+
+**Proof.** `tests/unit/test_llm_client.py`'s new
+`TestNonRetryableProviderErrorsAreWrapped` (5 tests) constructs REAL
+`anthropic.AuthenticationError`/`PermissionDeniedError`/`BadRequestError`
+instances with a real (but network-free) `httpx2.Request`/`Response` pair,
+proving each comes out of `complete` as `LLMCallFailedError` (vendor
+exception still reachable via `__cause__`), that an `AuthenticationError`
+invokes the fake underlying client exactly once (not retried, even with
+`max_attempts=5`), and -- the control case -- that a genuinely transient
+`RuntimeError` IS retried to the full configured attempt count (3 of 3),
+proving the fast-fail is specific to non-retryable provider errors, not a
+global regression. `tests/integration/test_orchestrator_fanout.py`'s new
+`TestRealSecurityAgentAuthenticationFailureForcesHITL` wires a real
+`SecurityAgent` around a real `AnthropicLLMClient` (only the innermost
+`anthropic_client` faked, to inject the same real, network-free
+`AuthenticationError`) through the actual compiled LangGraph graph, and
+proves: the orchestrator run completes (no exception escapes `engine.run`);
+the synthetic CRITICAL/confidence-0.000 finding is present; `node_errors`
+records the security failure; and `route_review` -- both via the real
+`Review.status` the aggregator produced and recomputed directly -- returns
+`QUEUED_FOR_HITL`, never able to average out into an auto-post even
+alongside a confident, unrelated specialist finding. Both new test files'
+relevant tests, and the pre-existing `test_events_spine.py` test, were
+proven to FAIL against the pre-fix code (the `except AnthropicError`
+clause temporarily removed, real tracebacks pasted in this session's final
+report) and PASS after the fix was restored.
+
+**Gates.** `ruff check .` clean; `mypy --strict backend/` clean on 60
+source files; `pytest -v` 253 passed, 1 failed
+(`test_hybrid_retrieval.py::TestVectorSearchFindsWhatKeywordMisses::
+test_synonym_chunk_found_by_vector_even_though_fulltext_matches_nothing` --
+uncommitted M9 hybrid-retrieval work-in-progress, unrelated to this fix,
+left completely untouched per this session's explicit instructions);
+`lint-imports --config .importlinter` 2 kept/0 broken. Both Redis (6380)
+and Postgres (5433) were up for the whole run. Same-session environment
+change, NOT this fix: `tests/integration/test_security_agent_live.py` now
+PASSES for real -- the `.env` credential was rotated to a valid one
+partway through this session (raw curl now returns 200, previously 401),
+so M8's demo command is now unblocked for a follow-up run.
+
+Files touched: `backend/tools/llm_client.py` (the fix),
+`tests/unit/test_llm_client.py` (5 new tests),
+`tests/integration/test_orchestrator_fanout.py` (1 new test class). No
+change to `backend/orchestrator/nodes.py`, `backend/agents/security_agent.py`,
+or any of the M9 hybrid-retrieval work-in-progress files (`.env.example`,
+`backend/core/settings.py`, `docker-compose.yml`, `pyproject.toml`,
+`backend/memory/{embedder,context_retriever,tiger_client}.py`,
+`migrations/`, `scripts/seed_code_chunks.py`,
+`tests/integration/test_hybrid_retrieval.py`, `tests/unit/test_embedder.py`
+-- all confirmed still exactly as found via `git status --short` before
+committing).
 
 ## M8 history (kept for context; superseded by the two lines above)
 

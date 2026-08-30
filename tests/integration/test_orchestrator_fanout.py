@@ -54,21 +54,32 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Iterator
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from time import monotonic
 from uuid import uuid4
 
+import httpx2
 import pytest
+from anthropic import AuthenticationError
 
 from backend.agents.base_agent import BaseAgent
 from backend.agents.security_agent import SecurityAgent
-from backend.models import AgentType, Finding, ReviewStatus, Severity
+from backend.economics.budget import BudgetGuard
+from backend.hitl.queue import route_review
+from backend.models import (
+    AgentType,
+    Finding,
+    ReviewStatus,
+    Severity,
+    compute_overall_confidence,
+)
 from backend.orchestrator import nodes
 from backend.orchestrator.langgraph_engine import LangGraphWorkflowEngine
 from backend.orchestrator.nodes import NODE_WORK_SECONDS
 from backend.orchestrator.state import GraphState
-from backend.tools.llm_client import LLMResponse
+from backend.tools.llm_client import AnthropicLLMClient, LLMResponse
 
 _SPECIALISTS = ("security", "quality", "tests", "docs")
 
@@ -411,3 +422,148 @@ class TestRealSecurityAgentSlotsIntoTheGraph:
         review = result["review"]
         assert review is not None
         assert any(f.category == "sql_injection" for f in review.findings)
+
+
+class _NullBudgetEventRepository:
+    """Duck-typed stand-in for ``EventRepository`` -- the only two methods
+    ``AnthropicLLMClient`` needs (``BudgetGuard.check_and_raise`` via
+    ``sum_llm_cost_for_day``, ``emit_llm_call`` via ``insert_event``) --
+    without touching Postgres. Spend is always 0 (never blocks) and every
+    inserted event is simply discarded; this test cares about the
+    ``AuthenticationError`` path, not budget accounting or event emission.
+    """
+
+    def sum_llm_cost_for_day(self, day_start: datetime) -> Decimal:
+        return Decimal("0")
+
+    def insert_event(self, event: object) -> None:
+        pass
+
+
+class _AuthenticationErrorAnthropicClient:
+    """Stands in for ``anthropic.Anthropic``: every ``messages.create`` call
+    raises a REAL ``anthropic.AuthenticationError`` (constructed with no
+    network call below) -- simulating an invalid/revoked API key exactly as
+    the real SDK would raise it for a real 401 response.
+    """
+
+    class _Messages:
+        def __init__(self, exc: Exception) -> None:
+            self._exc = exc
+
+        def create(self, **_: object) -> object:
+            raise self._exc
+
+    def __init__(self, exc: Exception) -> None:
+        self.messages = _AuthenticationErrorAnthropicClient._Messages(exc)
+
+
+def _real_authentication_error() -> AuthenticationError:
+    """A real ``anthropic.AuthenticationError``, built with no network call.
+
+    Needs a real ``httpx2.Response`` (itself needing a real ``httpx2.
+    Request``) to construct from -- exactly what the SDK builds internally
+    from an actual HTTP 401 response. Building it by hand here is what lets
+    this test inject the actual vendor exception type the M8 L2 DEBUG
+    defect was about, not a stand-in that merely resembles one.
+    """
+    body = {"type": "error", "error": {"type": "authentication_error", "message": "invalid x-api-key"}}
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    response = httpx2.Response(401, request=request, json=body)
+    return AuthenticationError("invalid x-api-key", response=response, body=body)
+
+
+class TestRealSecurityAgentAuthenticationFailureForcesHITL:
+    """M8 L2 DEBUG regression (post-L4-VERIFY).
+
+    See ``backend.tools.llm_client``'s and ``backend.orchestrator.nodes``'s
+    own module docstrings for the full defect: an invalid/revoked
+    ``ANTHROPIC_API_KEY`` raises ``anthropic.AuthenticationError`` from deep
+    inside ``AnthropicLLMClient.complete``. Before the fix, that raw vendor
+    exception was never wrapped into this project's own
+    ``LLMCallFailedError`` -- it propagated straight through
+    ``SecurityAgent.analyze`` and crashed ``security_node``/the whole graph
+    run, since ``security_node`` only catches
+    ``BudgetExceededError``/``LLMConfigurationError``/``LLMCallFailedError``.
+    A *missing* key (``LLMConfigurationError``) was already handled
+    correctly and forced human review -- this was found precisely because a
+    real credential turned out to be rejected (401) rather than merely
+    absent, and the two cases were NOT treated the same.
+
+    This test wires a real ``SecurityAgent`` around a real
+    ``AnthropicLLMClient`` (only its underlying ``anthropic_client`` is
+    faked, to inject the ``AuthenticationError`` with no network call) into
+    the actual compiled graph, and proves the fix end-to-end:
+    1. The orchestrator run COMPLETES (``engine.run`` returns normally --
+       if the old, unwrapped exception still escaped, this call itself
+       would raise and the test would error out here, not merely fail an
+       assertion below).
+    2. The synthetic CRITICAL/confidence-0.000 finding is present.
+    3. ``node_errors`` records the security specialist's failure.
+    4. ``route_review`` -- both as reflected in the real ``Review`` the
+       aggregator node produced, and recomputed directly here exactly like
+       ``tests/unit/test_security_node_infrastructure_failures.py``'s own
+       ``test_the_forced_finding_actually_routes_the_review_to_hitl`` does
+       -- returns ``QUEUED_FOR_HITL``.
+    """
+
+    def test_an_invalid_api_key_forces_hitl_instead_of_crashing_the_run(
+        self, tmp_path: Path
+    ) -> None:
+        auth_error = _real_authentication_error()
+        fake_repository = _NullBudgetEventRepository()
+        llm_client = AnthropicLLMClient(
+            anthropic_client=_AuthenticationErrorAnthropicClient(auth_error),
+            budget_guard=BudgetGuard(fake_repository, daily_cap_usd=Decimal("20")),  # type: ignore[arg-type]
+            event_repository=fake_repository,  # type: ignore[arg-type]
+        )
+        nodes.set_security_agent_for_testing(SecurityAgent(llm_client))
+
+        thread_id = str(uuid4())
+        engine = _new_engine(tmp_path)
+        try:
+            # (1) The orchestrator run completes -- no exception escapes.
+            result = engine.run(
+                thread_id, _initial_state(thread_id, diff="--- a/app/db.py\n+++ b/app/db.py\n")
+            )
+        finally:
+            engine.close()
+
+        findings = result["findings"]
+        security_findings = [f for f in findings if f.agent_type == AgentType.SECURITY]
+
+        # (2) The synthetic forced-HITL CRITICAL finding is present.
+        assert len(security_findings) == 1
+        assert security_findings[0].severity == Severity.CRITICAL
+        assert security_findings[0].confidence == Decimal("0.000")
+        assert security_findings[0].category == "security_specialist_unavailable"
+
+        # (3) node_errors records the failure -- it is not silently dropped.
+        assert "security" in result["node_errors"]
+        assert result["node_errors"]["security"], "the error message must not be empty/swallowed"
+
+        # (4a) The real aggregator's own Review reflects forced HITL.
+        review = result["review"]
+        assert review is not None
+        assert review.status == ReviewStatus.QUEUED_FOR_HITL
+
+        # (4b) Recomputed directly against route_review, the same way
+        # tests/unit/test_security_node_infrastructure_failures.py's
+        # BudgetExceededError regression proves it -- forced HITL even
+        # alongside another, confident, unrelated specialist's finding; it
+        # must never be able to average out into an auto-post.
+        other_finding = Finding(
+            agent_type=AgentType.QUALITY,
+            severity=Severity.LOW,
+            category="stub_finding",
+            file_path="stub/quality.py",
+            line_start=1,
+            line_end=1,
+            confidence=Decimal("0.950"),
+            rationale="a confident, unrelated finding from a different specialist",
+        )
+        all_findings = security_findings + [other_finding]
+        overall_confidence = compute_overall_confidence(all_findings)
+        status, reason = route_review(overall_confidence, all_findings, threshold=Decimal("0.75"))
+        assert status == ReviewStatus.QUEUED_FOR_HITL
+        assert "CRITICAL" in reason

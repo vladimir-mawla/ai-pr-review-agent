@@ -27,6 +27,15 @@ Covers, one class per concern:
   being declared ``async def`` and blocking anyway -- the exact defect
   class this project has already been bitten by twice (see
   ``backend.observability.events.emit_decision_async``'s own docstring).
+- ``TestNonRetryableProviderErrorsAreWrapped``: M8 L2 DEBUG regression
+  (post-L4-VERIFY). A real (constructed with no network)
+  ``anthropic.AuthenticationError`` from the injected fake client must come
+  out of ``complete`` as this project's own ``LLMCallFailedError``, not the
+  raw vendor exception -- proven both for ``AuthenticationError`` and for
+  its sibling non-retryable family members (``PermissionDeniedError``,
+  ``BadRequestError``), and proven NOT to be retried (the fake client is
+  invoked exactly once), unlike a transient failure of the same call which
+  IS retried to the configured attempt count.
 """
 
 from __future__ import annotations
@@ -38,7 +47,9 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
+import httpx2
 import pytest
+from anthropic import AuthenticationError, BadRequestError, PermissionDeniedError
 from anthropic.types import TextBlock
 from anthropic.types.message import Message
 from anthropic.types.usage import Usage
@@ -368,3 +379,125 @@ def test_circuit_open_error_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> N
     # Even with retry_max_attempts=5, a CircuitOpenError must not be
     # retried -- the client is not invoked again at all.
     assert fake_client.call_count == calls_before
+
+
+def _real_provider_error(
+    cls: type[Exception], status_code: int, message: str
+) -> Exception:
+    """Construct a REAL ``anthropic`` SDK status error, with no network call.
+
+    ``anthropic.AuthenticationError``/``PermissionDeniedError``/etc. are not
+    plain ``Exception`` subclasses with a one-arg constructor -- they need a
+    real ``httpx2.Response`` (which itself needs a real ``httpx2.Request``)
+    to build ``.status_code``/``.body`` from, exactly as the real SDK
+    constructs them internally when a real HTTP response comes back. Building
+    both by hand here proves this test exercises the actual vendor exception
+    type the M8 L2 DEBUG defect was about -- not a stand-in that merely
+    looks like one -- while never touching the network.
+    """
+    body = {"type": "error", "error": {"type": cls.__name__, "message": message}}
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    response = httpx2.Response(status_code, request=request, json=body)
+    return cls(message, response=response, body=body)  # type: ignore[call-arg]
+
+
+class TestNonRetryableProviderErrorsAreWrapped:
+    """M8 L2 DEBUG regression: see this module's docstring.
+
+    Before the fix, ``call_with_retry`` re-raised a non-retryable provider
+    exception (``anthropic.AuthenticationError`` and its siblings)
+    immediately and uncaught -- it never became a ``RetryExhaustedError``,
+    so ``complete``'s ``except (RetryExhaustedError, CircuitOpenError)``
+    never caught it, and the raw ``anthropic`` exception type escaped this
+    class entirely. That crashed
+    ``backend.orchestrator.nodes.security_node`` (which only catches this
+    project's own ``LLMCallFailedError``/``LLMConfigurationError``/
+    ``BudgetExceededError``) instead of forcing HITL the same way a missing
+    key (``LLMConfigurationError``) already correctly does -- confirmed by
+    a real, rejected credential in this milestone's L2 DEBUG loop (see
+    ``tests/integration/test_events_spine.py``'s
+    ``test_real_orchestrator_run_produces_spans_and_a_decision_event``).
+    """
+
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            _real_provider_error(AuthenticationError, 401, "invalid x-api-key"),
+            _real_provider_error(PermissionDeniedError, 403, "insufficient permissions"),
+            _real_provider_error(BadRequestError, 400, "malformed request"),
+        ],
+        ids=["authentication_error", "permission_denied_error", "bad_request_error"],
+    )
+    def test_a_non_retryable_provider_error_becomes_llm_call_failed_error(
+        self, exc: Exception
+    ) -> None:
+        def always_rejects(**_: Any) -> Message:
+            raise exc
+
+        fake_client = _FakeAnthropicClient(responder=always_rejects)
+        repository = _FakeEventRepository()
+        client = AnthropicLLMClient(
+            settings=_settings(llm_retry_max_attempts=3),
+            anthropic_client=fake_client,
+            budget_guard=BudgetGuard(repository, daily_cap_usd=Decimal("20")),
+            event_repository=repository,
+        )
+
+        with pytest.raises(LLMCallFailedError) as excinfo:
+            client.complete(system="sys", user="diff", agent="security")
+
+        # The vendor exception must not leak through raw -- it is wrapped,
+        # but still reachable as __cause__ for diagnostics.
+        assert isinstance(excinfo.value.__cause__, type(exc))
+
+    def test_a_non_retryable_provider_error_is_not_retried(self) -> None:
+        """The core proof a bad key doesn't waste time being retried 3 times."""
+        exc = _real_provider_error(AuthenticationError, 401, "invalid x-api-key")
+
+        def always_rejects(**_: Any) -> Message:
+            raise exc
+
+        fake_client = _FakeAnthropicClient(responder=always_rejects)
+        repository = _FakeEventRepository()
+        client = AnthropicLLMClient(
+            # A generous attempt budget: if AuthenticationError were treated
+            # as retryable, this test would see call_count == 5, not 1.
+            settings=_settings(llm_retry_max_attempts=5, llm_circuit_breaker_failure_threshold=10),
+            anthropic_client=fake_client,
+            budget_guard=BudgetGuard(repository, daily_cap_usd=Decimal("20")),
+            event_repository=repository,
+        )
+
+        with pytest.raises(LLMCallFailedError):
+            client.complete(system="sys", user="diff", agent="security")
+
+        assert fake_client.call_count == 1, (
+            "AuthenticationError must fail fast on the first attempt, not be "
+            "retried -- a bad key retried 3 times just wastes time"
+        )
+
+    def test_a_transient_error_by_contrast_is_retried_up_to_the_attempt_budget(self) -> None:
+        """Control case: a genuinely transient failure (unlike AuthenticationError
+        above) DOES get retried up to max_attempts -- proving the fast-fail
+        above is specific to non-retryable provider errors, not a global
+        "give up after 1 try" regression.
+        """
+        attempts = {"count": 0}
+
+        def always_fails_transiently(**_: Any) -> Message:
+            attempts["count"] += 1
+            raise RuntimeError("upstream hiccup")
+
+        fake_client = _FakeAnthropicClient(responder=always_fails_transiently)
+        repository = _FakeEventRepository()
+        client = AnthropicLLMClient(
+            settings=_settings(llm_retry_max_attempts=3, llm_circuit_breaker_failure_threshold=10),
+            anthropic_client=fake_client,
+            budget_guard=BudgetGuard(repository, daily_cap_usd=Decimal("20")),
+            event_repository=repository,
+        )
+
+        with pytest.raises(LLMCallFailedError):
+            client.complete(system="sys", user="diff", agent="security")
+
+        assert fake_client.call_count == 3 == attempts["count"]

@@ -22,9 +22,29 @@ surround it before it is safe to call from the request path:
    rather than reinventing. Non-retryable exceptions extend the default set
    with the Anthropic SDK's own "this request itself is malformed/
    unauthorized, retrying can never help" exception family (bad request,
-   auth, permission, not-found, unprocessable, conflict) -- mirroring
-   ``backend.job_queue.redis_arq``'s own extension with ``CircuitOpenError``
-   for the identical reason.
+   auth, permission, not-found, unprocessable, conflict, request-too-large)
+   -- mirroring ``backend.job_queue.redis_arq``'s own extension with
+   ``CircuitOpenError`` for the identical reason.
+
+   M8 L2 DEBUG addition (post-L4-VERIFY): a non-retryable provider error is
+   re-raised by ``call_with_retry`` immediately, uncaught -- it never
+   becomes a ``RetryExhaustedError``. Left alone, that meant a raw
+   ``anthropic.AuthenticationError`` (an invalid/revoked API key) escaped
+   this class entirely and crashed the whole orchestrator run, while a
+   *missing* key (``LLMConfigurationError``, raised before any SDK call is
+   even attempted) was already handled correctly and forced human review --
+   an inconsistency proven by a real credential turning out to be rejected
+   (see ``tests/integration/test_events_spine.py``'s
+   ``test_real_orchestrator_run_produces_spans_and_a_decision_event`` and
+   ``tests/unit/test_llm_client.py``'s
+   ``TestNonRetryableProviderErrorsAreWrapped``). ``complete`` now catches
+   ``anthropic.AnthropicError`` (the SDK's common base class covering its
+   entire exception family, not just ``AuthenticationError``) around the
+   retry/breaker/timeout call and re-raises it as this project's own
+   ``LLMCallFailedError`` -- the same signal ``BudgetExceededError`` and
+   ``LLMConfigurationError`` already give ``backend.orchestrator.nodes.
+   security_node``, which is what lets that node force HITL instead of
+   crashing, without ever importing ``anthropic`` itself.
 
 2. BUDGETGUARD (hard block, not a warning). ``complete`` calls
    ``BudgetGuard.check_and_raise()`` as the FIRST thing it does -- before
@@ -77,11 +97,13 @@ from typing import Protocol
 
 from anthropic import (
     Anthropic,
+    AnthropicError,
     AuthenticationError,
     BadRequestError,
     ConflictError,
     NotFoundError,
     PermissionDeniedError,
+    RequestTooLargeError,
     UnprocessableEntityError,
 )
 from anthropic.types import Message, TextBlock
@@ -106,11 +128,17 @@ from backend.reliability.timeout import TimeoutPolicy, run_with_timeout
 _CIRCUIT_BREAKER_NAME = "anthropic_llm_client"
 
 # The Anthropic SDK's own "this request itself is malformed/unauthorized/
-# forbidden/nonexistent/unprocessable/conflicting" exception family --
-# retrying any of these can never help, since the request body/credentials/
-# target that caused them do not change between attempts. Extends retry's
-# own default (TypeError/ValueError/KeyError/AttributeError) plus
-# CircuitOpenError, mirroring backend.job_queue.redis_arq's own extension.
+# forbidden/nonexistent/unprocessable/conflicting/too-large" exception
+# family -- retrying any of these can never help, since the request body/
+# credentials/target that caused them do not change between attempts.
+# Extends retry's own default (TypeError/ValueError/KeyError/AttributeError)
+# plus CircuitOpenError, mirroring backend.job_queue.redis_arq's own
+# extension. Deliberately NOT included here (left to the default retryable
+# path): RateLimitError, ServiceUnavailableError, OverloadedError,
+# InternalServerError, APIConnectionError/APITimeoutError,
+# DeadlineExceededError -- every one of those means "the request itself was
+# fine, the provider/network had a transient problem", which retrying (and,
+# on repeated failure, the circuit breaker) can plausibly fix.
 _NON_RETRYABLE_EXCEPTIONS: tuple[type[BaseException], ...] = (
     TypeError,
     ValueError,
@@ -123,6 +151,7 @@ _NON_RETRYABLE_EXCEPTIONS: tuple[type[BaseException], ...] = (
     NotFoundError,
     UnprocessableEntityError,
     ConflictError,
+    RequestTooLargeError,
 )
 
 # Generous enough for a multi-finding JSON response with rationale text per
@@ -323,8 +352,28 @@ class AnthropicLLMClient:
                 touched at all.
             ``LLMConfigurationError``: no API key configured and no fake
                 client injected.
-            ``LLMCallFailedError``: every retry attempt failed, or the
-                circuit breaker was already open.
+            ``LLMCallFailedError``: every retry attempt failed, the circuit
+                breaker was already open, or the provider rejected the
+                request outright with a non-retryable error (bad API key,
+                insufficient permissions, malformed request, etc. -- see
+                ``_NON_RETRYABLE_EXCEPTIONS`` above). This last case is
+                exactly the defect this docstring note exists to prevent a
+                regression of: an invalid ``ANTHROPIC_API_KEY`` raises
+                ``anthropic.AuthenticationError`` from deep inside
+                ``call_with_retry`` (re-raised immediately, uncaught, since
+                it is in ``_NON_RETRYABLE_EXCEPTIONS`` -- see
+                ``backend.reliability.retry.call_with_retry``'s docstring);
+                that is a *vendor-specific* exception type this class must
+                never let escape past this method, or every caller up to
+                and including ``backend.orchestrator.nodes.security_node``
+                would need to know about ``anthropic`` -- exactly the
+                layering violation ``backend.tools.llm_client`` exists to
+                prevent (see this module's own docstring). Catching
+                ``anthropic.AnthropicError`` (the SDK's common base for its
+                entire exception family) below and wrapping it into this
+                project's own ``LLMCallFailedError`` is what keeps that
+                promise regardless of which specific provider failure mode
+                is responsible.
         """
         # HARD BLOCK -- see backend.economics.budget's module docstring for
         # why this happens before self._client() is even called.
@@ -353,6 +402,22 @@ class AnthropicLLMClient:
         except (RetryExhaustedError, CircuitOpenError) as exc:
             raise LLMCallFailedError(
                 f"LLM call failed (retries exhausted or circuit breaker open): {exc}"
+            ) from exc
+        except AnthropicError as exc:
+            # A non-retryable provider error (see _NON_RETRYABLE_EXCEPTIONS)
+            # is re-raised immediately by call_with_retry -- it never goes
+            # through RetryExhaustedError, so it is NOT caught above. Left
+            # unhandled here, a raw anthropic.AuthenticationError (etc.)
+            # would propagate all the way out to
+            # backend.orchestrator.nodes.security_node, which only catches
+            # this project's own exception types -- crashing the whole
+            # orchestrator run instead of forcing human review the same way
+            # a BudgetExceededError or missing API key already does. Wrap it
+            # here, at this class's boundary, so no caller -- including the
+            # orchestrator -- ever needs to know the vendor SDK exists.
+            raise LLMCallFailedError(
+                f"LLM call failed (non-retryable provider error): "
+                f"{type(exc).__name__}: {exc}"
             ) from exc
         latency_ms = int((time.monotonic() - start) * 1000)
 
