@@ -1,22 +1,16 @@
 # CURRENT
 - active_loop: none (between milestones)
-- target: M4
+- target: M5
 - iteration: 0
-- last_gate: L1 BUILD complete on M4 (all four gates + demo command green; not yet L4 VERIFYed)
-- last_action: L1 BUILD session built the M4 LangGraph orchestrator skeleton: backend/core/workflow_engine.py (ADR-001 abstract WorkflowEngine Protocol), backend/orchestrator/{state,nodes,graph,langgraph_engine}.py, and tests/integration/test_orchestrator_fanout.py. Smoke-tested langgraph-checkpoint-redis directly against this project's real docker-compose Redis before writing any production code; it failed (RediSearch/FT.INFO not supported by plain redis:7-alpine), so used langgraph-checkpoint-sqlite instead (a real, first-party LangGraph checkpointer, file-backed, not in-memory) and documented why in langgraph_engine.py's module docstring and the pyproject.toml commit. Validated LangGraph's Send-API fan-out is genuinely parallel (measured: ~0.31s wall time vs 1.2s sum of four 0.3s sleeps, all four execution windows pairwise overlapping) and that its pending-writes mechanism actually skips already-completed parallel branches on resume (prototyped standalone before writing production code, then proven again in the real test suite via a brand-new engine instance against the same on-disk checkpoint file). All four gates (ruff, mypy --strict, pytest -v [62 passed], lint-imports) plus PLAN.md's exact M4 demo command ran green. Context graph refreshed (53->68 nodes, 108->146 edges); all 4 hand-written invariants backed up before graphizer ran and restored/verified after. Redis (M3's, port 6380) brought up only for the full pytest -v gate run (queue-roundtrip tests need it), then torn down; ampliphi-redis-1/ampliphi-postgres-1 confirmed untouched throughout.
-- next_action: L4 VERIFY on M4 (separate session)
+- last_gate: L4 VERIFY APPROVE on M4
+- last_action: L1 BUILD session built the M4 LangGraph orchestrator skeleton: backend/core/workflow_engine.py (ADR-001 abstract WorkflowEngine Protocol), backend/orchestrator/{state,nodes,graph,langgraph_engine}.py, and tests/integration/test_orchestrator_fanout.py. Smoke-tested langgraph-checkpoint-redis directly against this project's real docker-compose Redis before writing any production code; it failed (RediSearch/FT.INFO not supported by plain redis:7-alpine), so used langgraph-checkpoint-sqlite instead (a real, first-party LangGraph checkpointer, file-backed, not in-memory) and documented why in langgraph_engine.py's module docstring and the pyproject.toml commit. Validated LangGraph's Send-API fan-out is genuinely parallel (measured: ~0.31s wall time vs 1.2s sum of four 0.3s sleeps, all four execution windows pairwise overlapping) and that its pending-writes mechanism actually skips already-completed parallel branches on resume (prototyped standalone before writing production code, then proven again in the real test suite via a brand-new engine instance against the same on-disk checkpoint file). All four gates (ruff, mypy --strict, pytest -v [62 passed], lint-imports) plus PLAN.md's exact M4 demo command ran green. Context graph refreshed (53->68 nodes, 108->146 edges); all 4 hand-written invariants backed up before graphizer ran and restored/verified after. Redis (M3's, port 6380) brought up only for the full pytest -v gate run (queue-roundtrip tests need it), then torn down; ampliphi-redis-1/ampliphi-postgres-1 confirmed untouched throughout. A separate L4 VERIFY Sonnet session independently re-ran all gates plus the demo command, ruled the Redis-vs-SQLite checkpointer deviation non-blocking (DONE.html's gate says only "compiled with a checkpointer, not without"), and APPROVEd M4 with no blocking defects.
+- next_action: run G0 existence pre-flight on M5
 - model: claude-sonnet-5
 - tokens_used: 0
 - tokens_budget: 50000
 - skills_loaded: []
 
 ## Deferred
-
-New from M4 BUILD, recorded for the verifier:
-- PLAN.md's M4 outcome text says the graph "checkpoints state to Redis"; this build uses langgraph-checkpoint-sqlite instead, not Redis. This is a deliberate, documented deviation (langgraph-checkpoint-redis needs RediSearch, which this project's plain redis:7-alpine does not have -- confirmed by an actual ResponseError, not assumed), not a silent substitution. See backend/orchestrator/langgraph_engine.py's module docstring for the full reasoning. A verifier should confirm this reading is acceptable, or that a future milestone should add Redis Stack to docker-compose.yml if Redis-backed checkpointing specifically (not just "a durable checkpointer") is actually required.
-- The orchestrator built at M4 is a standalone skeleton: nothing in backend/webhook_receiver or backend/job_queue calls into LangGraphWorkflowEngine yet. That wiring (webhook -> queue -> orchestrator run) is not part of M4's freeze boundary and is expected to land in a later milestone (M5 aggregator or M10 full dry-run), not a gap in this build.
-- LangGraphWorkflowEngine's default checkpoint DB path (var/orchestrator_checkpoints.sqlite3) is never exercised by the test suite (every test uses a tmp_path-scoped file) or created by this session's gate runs -- there is no evidence one way or the other that the default path itself works end-to-end outside of tests; only the mechanism (SqliteSaver against a real file, and the resume-across-a-new-engine-instance behavior) was verified.
-- aggregate_node is an intentional no-op (M5's aggregation logic is out of scope), so GraphState.node_errors and GraphState.findings pass through it unchanged; this is expected, not an oversight.
 
 Still open from M1:
 - `Review.overall_confidence` has no cross-field consistency check (not cross-checked against the mean of `findings[].confidence`)
@@ -26,27 +20,22 @@ Still open from M2:
 - No max request body size is configured, so a large POST is fully buffered and hashed -- address before M11 internet exposure
 - `backend/core/settings.py` placement is an accepted ADR-002 taxonomy nit, not a layering violation
 
-New from M3 BUILD, recorded for the verifier (still true, not superseded):
-- `RedisJobQueue.enqueue()` bridges into ARQ's async client via a dedicated background thread + `asyncio.run_coroutine_threadsafe`, which works but means every enqueue call blocks the calling (request) thread on a cross-thread round trip; acceptable at M3's scale, worth revisiting if webhook volume ever makes that latency matter.
-- The docker-compose Redis is published on host port 6380, not Redis's usual 6379, because 6379 was already bound by an unrelated project's container on the build machine. `REDIS_URL`/`docker-compose.yml` are internally consistent with each other, but anyone reusing 6379 elsewhere should update both.
-
-New from M3's L4 VERIFY, still open (all non-blocking -- did not block APPROVE):
+Still open from M3 (and M3's L4 VERIFY), all non-blocking:
 - No FastAPI lifespan hook calls `RedisJobQueue.close()`, so the background event-loop thread is simply abandoned on process shutdown. Harmless in practice (it's a daemon thread and the process is exiting anyway), but untidy -- a lifespan hook should call `close()` for a clean shutdown.
 - A Redis-down `enqueue()` call currently surfaces as an unhandled 500 rather than a graceful 503. Acceptable for M3's local-dev scope; revisit before this endpoint carries real traffic.
-- Idempotency state (and the queue) is lost whenever the Redis container is recreated (`docker compose down && up`, no volume) -- confirmed empirically (DBSIZE drops to 0). This satisfies M3's own success criterion (no orphaned jobs) but the idempotency-reset corollary is now documented in `docker-compose.yml` and `README.md`.
+- Idempotency state (and the queue) is lost whenever the Redis container is recreated (`docker compose down && up`, no volume) -- confirmed empirically (DBSIZE drops to 0). This satisfies M3's own success criterion (no orphaned jobs) but the idempotency-reset corollary is documented in `docker-compose.yml` and `README.md`.
 
-Still open, carried forward (unchanged by this housekeeping pass):
-- `Review.overall_confidence` cross-field consistency check (M1)
-- Models not frozen / no `validate_assignment` (M1)
-- No max request body size configured -- address before M11 internet exposure (M2)
-- `backend/core/settings.py` placement taxonomy nit (M2, accepted, not a layering violation)
+New from M4 (L1 BUILD + L4 VERIFY), still open:
+- LangGraph logs a deserialization warning on checkpoint resume: "Deserializing unregistered type backend.models.enums.AgentType / Severity / backend.models.findings.Finding from checkpoint. This will be blocked in a future version." Our custom Pydantic/enum types are not registered with LangGraph's (de)serializer, so a future LangGraph major could break checkpoint resume for them entirely unless `allowed_msgpack_modules` (or an equivalent registration mechanism) is configured. Observed and recorded by L4 VERIFY; noted in `backend/orchestrator/langgraph_engine.py` near the checkpointer setup. Not blocking today -- resume works -- but should be addressed before relying on a newer LangGraph release.
+- `LangGraphWorkflowEngine`'s default checkpoint DB path (`var/orchestrator_checkpoints.sqlite3`) is never exercised outside `tmp_path`-scoped tests -- there is no evidence one way or the other that the default path itself works end-to-end outside of tests; only the mechanism (SqliteSaver against a real file, and resume-across-a-new-engine-instance) was verified.
+- The orchestrator built at M4 is not yet wired into the webhook/queue path: nothing in `backend.webhook_receiver` or `backend.job_queue` calls `LangGraphWorkflowEngine`. That wiring is expected to land in a later milestone, not a gap in M4's own scope.
 
 Resolved (previously deferred from M2, now closed):
 - ~~`_is_hex` uses `int(value, 16)` which accepts underscore separators and a leading sign~~ -- fixed: replaced with a strict `[0-9a-fA-F]+` charset regex; regression test added (`test_underscore_in_digest_is_rejected_as_malformed_not_invalid`)
 - ~~The demo command needs an activated venv and a hand-created `.env` and neither is documented (no README exists)~~ -- fixed: README.md now documents venv creation/activation, `pip install -e ".[dev]"`, and copying `.env.example` to `.env`
 - ~~`InMemoryJobQueue` and its `_seen_delivery_ids` grow unboundedly with no eviction~~ -- fixed: M3's `RedisJobQueue` stores the idempotency key with an expiring TTL (`Settings.idempotency_ttl_seconds`, default one week) instead of an ever-growing in-process set; proven by a test that reads the TTL back from Redis directly.
 
-## M4 Build Summary (L1 BUILD complete, needs L4 VERIFY)
+## M4 Build Summary (L4 VERIFY APPROVED)
 
 ### Outcome Achieved
 - A LangGraph StateGraph fans out from START to four parallel stub

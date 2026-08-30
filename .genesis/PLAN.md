@@ -238,3 +238,16 @@ milestones needing a paid/external credential (M8, M10, M11, M12, M13) are order
   integration tests, all run for real against a dockerized Redis, none
   skipped). L4 VERIFY APPROVEd M3 in a separate Sonnet session with no
   blocking defects.
+
+- **2026-08-30 — M4 (Orchestrator Fan-Out: Stub Agents):** Demo command
+  `pytest tests/integration/test_orchestrator_fanout.py -v -k "fanout or checkpoint_resume"`
+  exits 0 (5 of 5 filtered tests pass; 62 tests pass overall — 57 carried
+  over from M1–M3 plus 5 new orchestrator integration tests). L4 VERIFY
+  APPROVEd M4 in a separate Sonnet session, having independently verified
+  checkpoint resume across a genuine process boundary (a brand-new
+  `LangGraphWorkflowEngine` instance resuming the same on-disk SQLite
+  checkpoint file, not just a retry against the same in-memory objects) and
+  with a delete-the-checkpoint falsification probe (removing the checkpoint
+  file before resume causes a fresh run instead of a false-positive resume,
+  confirming the resume path is actually reading persisted state rather than
+  vacuously succeeding). No blocking defects.
