@@ -1,0 +1,964 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>M5 Explained — Aggregator + Confidence-Weighted HITL Gate</title>
+<style>
+  :root {
+    --bg: #f7f7f5;
+    --bg-card: #ffffff;
+    --ink: #1b1f23;
+    --mut: #5b6472;
+    --line: #e2e4e8;
+    --accent: #2f6feb;
+    --accent-ink: #ffffff;
+    --ok: #1a7f37;
+    --warn: #9a6700;
+    --bad: #cf222e;
+    --code-bg: #f0f1f3;
+    --pill-bg: #eef2ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1117;
+      --bg-card: #161b22;
+      --ink: #e6edf3;
+      --mut: #9aa4b2;
+      --line: #2d333b;
+      --accent: #6ea8fe;
+      --accent-ink: #0d1117;
+      --ok: #3fb950;
+      --warn: #d29922;
+      --bad: #f85149;
+      --code-bg: #1c2128;
+      --pill-bg: #1c2440;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1117;
+    --bg-card: #161b22;
+    --ink: #e6edf3;
+    --mut: #9aa4b2;
+    --line: #2d333b;
+    --accent: #6ea8fe;
+    --accent-ink: #0d1117;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --bad: #f85149;
+    --code-bg: #1c2128;
+    --pill-bg: #1c2440;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    font-size: 16px;
+  }
+  .page {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 40px 20px 100px;
+  }
+  header.hero {
+    margin-bottom: 32px;
+  }
+  header.hero .kicker {
+    color: var(--accent);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-size: 12.5px;
+    margin: 0 0 10px;
+  }
+  h1 {
+    font-size: clamp(26px, 4vw, 36px);
+    margin: 0 0 12px;
+    line-height: 1.2;
+  }
+  .lede {
+    color: var(--mut);
+    font-size: 17px;
+    max-width: 70ch;
+  }
+  nav.toc {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin: 28px 0 40px;
+  }
+  nav.toc h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--mut);
+    margin: 0 0 10px;
+  }
+  nav.toc ol {
+    margin: 0;
+    padding-left: 20px;
+    columns: 2;
+    column-gap: 24px;
+  }
+  nav.toc li { margin: 4px 0; break-inside: avoid; }
+  nav.toc a { color: var(--ink); text-decoration: none; border-bottom: 1px dashed var(--line); }
+  nav.toc a:hover { border-bottom-color: var(--accent); color: var(--accent); }
+
+  section { margin: 56px 0; }
+  section > h2 {
+    font-size: 22px;
+    margin: 0 0 16px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--line);
+  }
+  section > h2 .num {
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+    margin-right: 10px;
+  }
+  h3 { font-size: 17px; margin: 26px 0 10px; }
+  p { margin: 12px 0; }
+  a { color: var(--accent); }
+
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin: 16px 0;
+  }
+  .callout {
+    border-left: 4px solid var(--accent);
+    background: var(--pill-bg);
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin: 18px 0;
+  }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.ok { border-left-color: var(--ok); }
+  .callout.bad { border-left-color: var(--bad); }
+  .callout .label {
+    font-weight: 700;
+    font-size: 12.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--mut);
+    margin-bottom: 6px;
+  }
+
+  code {
+    background: var(--code-bg);
+    padding: 1px 6px;
+    border-radius: 5px;
+    font-size: 0.9em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    white-space: pre;
+    font-size: 13.5px;
+    line-height: 1.55;
+  }
+  pre code { background: none; padding: 0; border-radius: 0; }
+  .diffline-add { color: var(--ok); }
+  .diffline-del { color: var(--bad); }
+
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14.5px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--mut); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.03em; }
+
+  .pill {
+    display: inline-block;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 2px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    color: var(--mut);
+    white-space: nowrap;
+  }
+  .pill.ok { color: var(--ok); border-color: var(--ok); }
+  .pill.bad { color: var(--bad); border-color: var(--bad); }
+  .pill.warn { color: var(--warn); border-color: var(--warn); }
+
+  .flow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin: 18px 0;
+  }
+  .flow .node {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 13.5px;
+    min-width: 120px;
+    text-align: center;
+  }
+  .flow .node.core { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .flow .node.bad { border-color: var(--bad); color: var(--bad); font-weight: 600; }
+  .flow .node.ok { border-color: var(--ok); color: var(--ok); font-weight: 600; }
+  .flow .arrow {
+    color: var(--mut);
+    font-size: 18px;
+  }
+  .flow.vertical { flex-direction: column; align-items: stretch; }
+  .flow.vertical .node { text-align: left; }
+  .flow.vertical .arrow { text-align: center; }
+
+  .fanin-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin: 18px 0 6px;
+  }
+  @media (max-width: 640px) {
+    .fanin-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  .fanin-grid .lane {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px;
+    text-align: center;
+    font-size: 12.5px;
+  }
+  .funnel {
+    text-align: center;
+    color: var(--mut);
+    font-size: 22px;
+    margin: 6px 0;
+  }
+
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 16px 0;
+  }
+  @media (max-width: 640px) {
+    .compare { grid-template-columns: 1fr; }
+  }
+  .compare .col {
+    border-radius: 12px;
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+  }
+  .compare .col.before { background: color-mix(in srgb, var(--bad) 6%, var(--bg-card)); }
+  .compare .col.after { background: color-mix(in srgb, var(--ok) 6%, var(--bg-card)); }
+  .compare h4 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .compare.before-after .before h4 { color: var(--bad); }
+  .compare.before-after .after h4 { color: var(--ok); }
+
+  .collision-table td.critical { color: var(--bad); font-weight: 600; }
+  .collision-table td.info { color: var(--mut); }
+  .collision-table tr.survivor { background: color-mix(in srgb, var(--ok) 10%, transparent); }
+  .collision-table tr.dropped { background: color-mix(in srgb, var(--bad) 8%, transparent); text-decoration: line-through; opacity: 0.75; }
+
+  .module-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px;
+    margin: 18px 0;
+  }
+  .module-card {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px 18px;
+  }
+  .module-card h4 {
+    margin: 0 0 6px;
+    font-size: 15px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: var(--accent);
+  }
+  .module-card p { margin: 6px 0 0; font-size: 14px; color: var(--mut); }
+
+  ol.gaps li, ul.plain li { margin: 8px 0; }
+
+  .timeline { margin: 20px 0; padding: 0; list-style: none; }
+  .timeline li {
+    position: relative;
+    padding: 4px 0 18px 26px;
+    border-left: 2px solid var(--line);
+    margin-left: 6px;
+  }
+  .timeline li:last-child { border-left-color: transparent; padding-bottom: 0; }
+  .timeline li::before {
+    content: "";
+    position: absolute;
+    left: -7px;
+    top: 6px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--bg-card);
+    border: 2px solid var(--accent);
+  }
+  .timeline li.reject::before { border-color: var(--bad); }
+  .timeline li.approve::before { border-color: var(--ok); }
+  .timeline li .when { font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .timeline li.reject .when { color: var(--bad); }
+  .timeline li.approve .when { color: var(--ok); }
+
+  details.quiz {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 18px;
+    margin: 16px 0;
+  }
+  details.quiz summary {
+    cursor: pointer;
+    font-weight: 600;
+    list-style: none;
+  }
+  details.quiz summary::-webkit-details-marker { display: none; }
+  details.quiz summary::before {
+    content: "▸ ";
+    color: var(--accent);
+  }
+  details.quiz[open] summary::before {
+    content: "▾ ";
+  }
+  details.quiz .q { font-weight: 600; margin-bottom: 4px; }
+  details.quiz .answer {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--line);
+  }
+  details.quiz .answer .verdict {
+    font-weight: 700;
+    color: var(--ok);
+  }
+
+  footer {
+    margin-top: 60px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    color: var(--mut);
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <p class="kicker">Genesis L4 · Explain Diff · Milestone M5</p>
+    <h1>Aggregator + Confidence-Weighted HITL Gate</h1>
+    <p class="lede">
+      Why four specialists' findings need a real merge step, not just
+      concatenation; what "duplicate" even means when four independent
+      reasoners look at the same line; why a dedup rule that orders by
+      confidence instead of severity is a safety bug, not a style choice;
+      why <code>overall_confidence</code>'s M1-era validation gap sat quiet
+      for four milestones and came due exactly when M5 became its first real
+      consumer; and the centerpiece of this milestone's history — an
+      independent verifier catching that exact bug, rejecting the build, and
+      a fix that had to prove itself against a regression test shown to fail
+      first. Covers commits <code>b16f363</code>&nbsp;&hellip;&nbsp;<code>cfb8f92</code>
+      on <code>main</code> — 11 commits, the whole M5 slice from the
+      M1 <code>overall_confidence</code> gap closure through the L2 DEBUG
+      checkpoint. 19 files changed, 1687 insertions(+), 52 deletions(-).
+    </p>
+  </header>
+
+  <nav class="toc">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#background">Background: why fan-in needs a real merge step</a></li>
+      <li><a href="#dedup-key">The dedup key: what "duplicate" means here</a></li>
+      <li><a href="#tie-break">Deterministic tie-breaking: not a nuisance, a bug class</a></li>
+      <li><a href="#confidence-debt">overall_confidence: an M1 debt that came due at M5</a></li>
+      <li><a href="#hitl-gate">The HITL gate: the 0.75 threshold and its boundary</a></li>
+      <li><a href="#anti-drift">Anti-drift by construction: the reason string's real bug</a></li>
+      <li><a href="#rejection">The rejection: a CRITICAL finding that vanished</a></li>
+      <li><a href="#consequence">The honest consequence of the fix</a></li>
+      <li><a href="#limits">Known limits, stated honestly</a></li>
+      <li><a href="#quiz">Quiz</a></li>
+    </ol>
+  </nav>
+
+  <section id="background">
+    <h2><span class="num">1</span>Background: why fan-in needs a real merge step</h2>
+    <p>
+      M4 built the fan-out: four specialist nodes (security, quality, tests,
+      docs) run concurrently and each contributes its findings to
+      <code>GraphState.findings</code> via an <code>operator.add</code>
+      reducer — plain list concatenation. That solves the concurrency
+      problem (nobody's write clobbers anybody else's), but it deliberately
+      does nothing else. The join node <code>aggregate_node</code> was M4's
+      last stub: a no-op that just handed the concatenated list onward.
+    </p>
+    <p>
+      A concatenated list is not a review. Four independent specialists
+      looking at the same diff will often flag the <em>same</em> line for
+      <em>different</em> reasons — security sees an injection risk exactly
+      where docs sees a missing docstring — and a review that shows the human
+      four redundant, uncoordinated comments about one line is worse than
+      unhelpful; it actively erodes trust in the tool. M5's job is to turn
+      "four lists of opinions" into "one coherent, confidence-scored,
+      correctly-routed decision" — the aggregator's whole reason to exist.
+      Concretely, that means three things landing in
+      <code>backend.orchestrator.nodes.aggregate_node</code> for the first
+      time as real logic instead of a stub:
+    </p>
+    <div class="flow">
+      <div class="node">4 specialists' findings<br><span style="color:var(--mut)">(concatenated, M4)</span></div>
+      <div class="arrow">&rarr;</div>
+      <div class="node core">dedupe_findings</div>
+      <div class="arrow">&rarr;</div>
+      <div class="node core">compute_overall_confidence</div>
+      <div class="arrow">&rarr;</div>
+      <div class="node core">route_review</div>
+      <div class="arrow">&rarr;</div>
+      <div class="node">Review<br><span style="color:var(--mut)">(POSTED or QUEUED_FOR_HITL)</span></div>
+    </div>
+    <p>
+      Every one of those three steps is pure Python over already-produced
+      <code>Finding</code> objects — no LLM call, no I/O — which is exactly
+      what makes the whole pipeline testable with plain fixtures
+      (<code>tests/unit/test_aggregator.py</code>,
+      <code>tests/unit/test_hitl_gate.py</code>) instead of needing a real
+      model in the loop.
+    </p>
+  </section>
+
+  <section id="dedup-key">
+    <h2><span class="num">2</span>The dedup key: what "duplicate" means here</h2>
+    <p>
+      <code>dedupe_findings</code> groups findings by the exact pair
+      <code>(file_path, line_start)</code>. Two findings collapse to one only
+      if they name the identical file and the identical starting line; a
+      finding on the same file at a different line, or the same line number
+      in a different file, is never touched.
+    </p>
+    <p>
+      Why this key, and not something richer? Because "duplicate" here does
+      not mean "two agents wrote the same sentence" — it means "two agents
+      are both pointing at the same piece of code," which is the situation a
+      human reviewer actually experiences as redundant. Four specialists
+      each running independently over the same diff have no way to know
+      about each other's output before the aggregator sees all four lists at
+      once; the aggregator's whole job is to notice, after the fact, "these
+      two entries are about the same line" and pick the one worth surfacing
+      rather than showing the human all four.
+    </p>
+    <div class="module-grid">
+      <div class="module-card">
+        <h4>Same file, same line_start</h4>
+        <p>Collapse to one — this is the case the aggregator exists to handle.</p>
+      </div>
+      <div class="module-card">
+        <h4>Same file, different line</h4>
+        <p>Kept separate — two genuinely different issues, even in the same file.</p>
+      </div>
+      <div class="module-card">
+        <h4>Different file, same line number</h4>
+        <p>Kept separate — line 42 in <code>app.py</code> has nothing to do with line 42 in <code>utils.py</code>.</p>
+      </div>
+    </div>
+    <div class="callout warn">
+      <div class="label">A known, deliberately accepted gap</div>
+      The key is <code>line_start</code> only, not <code>(line_start,
+      line_end)</code>. A wide-span finding (say
+      <code>line_start=42, line_end=80</code>) collapses into <em>any</em>
+      other finding that merely shares <code>line_start=42</code>, even one
+      whose own span is a completely unrelated single line. Widening the key
+      to include <code>line_end</code> was considered during the rejection
+      round below and deliberately rejected: it doesn't solve the real
+      problem ("do these two findings' spans actually overlap"), since two
+      spans can overlap without sharing either endpoint. A partial fix that
+      looks complete is worse than an honestly incomplete one — this is
+      recorded as a tracked gap for a future milestone's real interval-overlap
+      logic, not silently dropped.
+    </div>
+  </section>
+
+  <section id="tie-break">
+    <h2><span class="num">3</span>Deterministic tie-breaking: not a nuisance, a bug class</h2>
+    <p>
+      Once two findings collide at the same key, <code>dedupe_findings</code>
+      has to pick a survivor. Getting the ranking rule right (severity
+      first — see the rejection below) is one problem; the other, easy to
+      underrate, is making the whole comparison chain <em>deterministic</em>
+      regardless of the order findings happen to arrive in.
+    </p>
+    <p>
+      That input order is not something the aggregator controls: findings
+      arrive already merged by M4's <code>operator.add</code> reducer across
+      four parallel LangGraph branches, and which branch's write lands first
+      in the merged list is explicitly not guaranteed. A nondeterministic
+      aggregator — one where the surviving finding depends on which
+      specialist happened to finish first — is not merely untidy, it is a
+      correctness bug: the same PR, re-reviewed with no code changes, could
+      get a different verdict purely from scheduling noise. That would make
+      every downstream promise (a CRITICAL finding always escalates, a
+      threshold decision is reproducible) impossible to actually rely on.
+    </p>
+    <p>The full comparison chain, applied only when two findings share a dedup key:</p>
+    <pre><code>def _is_better(candidate: Finding, current: Finding) -&gt; bool:
+    if candidate.severity != current.severity:
+        return _severity_rank(candidate) &lt; _severity_rank(current)     # 1. severity
+    if candidate.confidence != current.confidence:
+        return candidate.confidence &gt; current.confidence               # 2. confidence
+    return _tie_break_key(candidate) &lt; _tie_break_key(current)         # 3. agent -&gt; category -&gt; rationale</code></pre>
+    <p>
+      Steps 3 onward (agent precedence, then category, then rationale) exist
+      purely so that once severity and confidence are both tied, the result
+      still depends only on fields <em>intrinsic to the findings themselves</em>
+      — never on "which one happened to arrive first in the list." This is
+      why <code>TestSeverityBeforeConfidenceDedupe</code>'s tests run each
+      fixture through <code>dedupe_findings</code> in both orderings and
+      assert identical output, and why the property test below goes further
+      still: every one of the 120 permutations of a 5-finding collision
+      (<code>itertools.permutations</code> over one CRITICAL finding plus
+      four rivals) produces the same survivor.
+    </p>
+  </section>
+
+  <section id="confidence-debt">
+    <h2><span class="num">4</span><code>overall_confidence</code>: an M1 debt that came due at M5</h2>
+    <p>
+      M1 shipped the <code>Review</code> model with an
+      <code>overall_confidence</code> field and no relationship whatsoever
+      to <code>findings</code>: a <code>Review</code> could be constructed
+      with findings averaging 0.500 confidence and
+      <code>overall_confidence</code> set to 0.000, and pydantic accepted it
+      without complaint. M1's own L4 VERIFY flagged this and it was
+      deliberately deferred rather than fixed — nothing in the system yet
+      <em>consumed</em> the field, so a silent inconsistency had no way to
+      cause a wrong decision. It sat quietly correct-by-vacuous-truth for
+      three whole milestones.
+    </p>
+    <div class="callout">
+      <div class="label">Why M5, specifically, is where the debt came due</div>
+      <code>backend.hitl.queue.route_review</code> is the first piece of
+      code in the entire project that actually <em>trusts</em>
+      <code>overall_confidence</code> to make a real routing decision — post
+      automatically, or send to a human. A field nobody reads can be wrong
+      for free; the moment something reads it to decide whether a human sees
+      the review, "wrong" becomes "silently mis-routes real reviews." M1's
+      deferred gap wasn't a latent bug waiting to fire on its own — it was
+      inert until M5 built the first consumer, which is exactly the shape a
+      lot of real technical debt takes: harmless until something starts
+      relying on the thing that was never actually guaranteed.
+    </div>
+    <p>
+      The fix is <code>compute_overall_confidence</code> — one formula (mean
+      of the deduped findings' confidence, rounded with
+      <code>ROUND_HALF_UP</code> to 3 decimal places, <code>0.000</code> for
+      an empty list) — paired with a <code>Review</code>
+      <code>model_validator(mode="after")</code> that recomputes the
+      expected value and raises <code>ValidationError</code> if the stored
+      field disagrees:
+    </p>
+    <pre><code>@model_validator(mode="after")
+def _check_overall_confidence_matches_findings(self) -&gt; "Review":
+    expected = compute_overall_confidence(self.findings)
+    if self.overall_confidence != expected:
+        raise ValueError(
+            f"overall_confidence ({self.overall_confidence}) does not match "
+            f"compute_overall_confidence(findings) ({expected}); construct "
+            "Review with overall_confidence=compute_overall_confidence(findings) "
+            "rather than an independently-chosen value"
+        )
+    return self</code></pre>
+    <p>
+      Two designs were on the table: silently recompute the field from
+      <code>findings</code> whenever they disagree (option A), or reject
+      construction outright (option B, what was built). Option A is
+      tempting — it never crashes — but it means a caller can pass an
+      arbitrary, wrong <code>overall_confidence</code> and have the mistake
+      quietly erased, which hides exactly the kind of bug this fix exists to
+      surface. Option B fails loudly, at construction time, which is what
+      lets a caller's bug be caught in a unit test instead of shipping
+      silently — consistent with the project's stated fail-toward-doing-less
+      philosophy: fail visibly rather than guess correctly by accident.
+    </p>
+  </section>
+
+  <section id="hitl-gate">
+    <h2><span class="num">5</span>The HITL gate: the 0.75 threshold and its boundary</h2>
+    <p>
+      <code>route_review</code> is the decision function: given the deduped
+      findings and the computed <code>overall_confidence</code>, decide
+      <code>POSTED</code> (auto-post) or <code>QUEUED_FOR_HITL</code> (human
+      review), and produce the reason string explaining why.
+    </p>
+    <pre><code>auto-post   iff  overall_confidence &gt;= threshold  AND  no CRITICAL finding
+human review otherwise</code></pre>
+    <p>
+      <code>HITL_CONFIDENCE_THRESHOLD</code> defaults to <code>0.750</code>,
+      a <code>Settings</code> field documented in <code>.env.example</code>.
+      The boundary case — confidence exactly equal to the threshold — is
+      deliberately on the <em>auto-post</em> side, not the human-review side.
+      That reads as an arbitrary pick until you notice PLAN.md's own success
+      criteria phrase it precisely: a review "below" the threshold routes to
+      HITL, which places the threshold value itself outside that condition.
+      <code>test_exactly_at_threshold_auto_posts</code> pins this down with a
+      fixture at confidence 0.750 against a 0.750 threshold, alongside
+      siblings one thousandth on either side, so the boundary can't silently
+      drift to <code>&lt;=</code> in a future edit without a test noticing.
+    </p>
+    <p>
+      A CRITICAL finding overrides all of this unconditionally — even at
+      confidence 1.000 against a threshold of 0.000, a CRITICAL finding still
+      forces human review (<code>test_critical_finding_forces_human_review_even_with_low_threshold</code>).
+      This is the invariant the rejection below is about: the override only
+      works if a CRITICAL finding actually survives long enough for the gate
+      to see it.
+    </p>
+  </section>
+
+  <section id="anti-drift">
+    <h2><span class="num">6</span>Anti-drift by construction: the reason string's real bug</h2>
+    <p>
+      DONE.html's M5 gate specifically calls out that "aggregator threshold
+      in code matches the threshold in its user-facing message" — an oddly
+      specific requirement until you know the concrete bug it is worded to
+      prevent. A reference implementation of this exact milestone shape
+      shipped code that checked <code>critical_block_count &gt;= 2</code>
+      while its human-facing message claimed <code>"3+ agents required"</code>
+      — the number in the comparison and the number in the sentence had
+      drifted apart, silently, because they were two independent literals
+      that someone updated only one of.
+    </p>
+    <p>
+      <code>route_review</code>'s reason strings are built so that class of
+      bug is structurally impossible, not just avoided by discipline: every
+      string interpolates the <em>same</em> <code>threshold</code> parameter
+      the comparison itself uses. There is no second, independently-typed
+      number anywhere in this module's strings:
+    </p>
+    <pre><code>if overall_confidence &lt; threshold:
+    reason = (
+        f"queued for human review: overall_confidence {overall_confidence} is "
+        f"below the configured HITL_CONFIDENCE_THRESHOLD of {threshold}"
+    )</code></pre>
+    <div class="callout ok">
+      <div class="label">Verified, not just claimed</div>
+      This build didn't just reason about the anti-drift design — it
+      empirically reproduced the reference bug and confirmed the test would
+      have caught it: temporarily hardcoded a stale number into the message
+      (reproducing <code>&gt;= 2</code>-in-code /
+      "3+ agents required"-in-message exactly),
+      confirmed <code>test_reason_message_uses_the_configured_threshold_value</code>
+      failed against the tampered file, then restored the real file and
+      confirmed the test passed again. A test that has never been observed
+      to fail is a test whose ability to catch anything is still unproven.
+    </div>
+  </section>
+
+  <section id="rejection">
+    <h2><span class="num">7</span>The rejection: a CRITICAL finding that vanished</h2>
+    <p>
+      This is the centerpiece of M5's history, and it is recorded here in
+      full rather than smoothed into a footnote: M5's first build was
+      rejected by an independent L4 VERIFY session for a real safety bug,
+      not a style nitpick, and the fix that followed had to prove itself
+      against a test shown to fail first.
+    </p>
+    <h3>The bug, concretely</h3>
+    <p>
+      The original <code>dedupe_findings</code> ranked colliding findings by
+      confidence alone — severity played no role in the comparison at all.
+      Two findings collided at <code>app.py</code>, line 42:
+    </p>
+    <div class="card">
+      <table class="collision-table">
+        <thead><tr><th>Agent</th><th>Severity</th><th>Confidence</th><th>Rationale</th></tr></thead>
+        <tbody>
+          <tr class="dropped"><td>SECURITY</td><td class="critical">CRITICAL</td><td>0.751</td><td>SQL injection via unsanitized query parameter</td></tr>
+          <tr class="survivor"><td>DOCS</td><td class="info">INFO</td><td>0.752</td><td>missing docstring</td></tr>
+        </tbody>
+      </table>
+      <p class="note" style="color:var(--mut);font-size:13px;margin-top:10px;">
+        Under the old confidence-only rule, 0.752 &gt; 0.751 — the INFO
+        finding survives, the CRITICAL finding is discarded. The row struck
+        through above is what the aggregator threw away.
+      </p>
+    </div>
+    <p>
+      Because <code>has_critical_finding</code> only ever inspects the
+      <em>post-dedupe</em> list — by design, since the HITL gate should only
+      ever see the findings a human would actually be shown — it found no
+      CRITICAL finding at all. <code>route_review</code> then correctly
+      followed its own logic given the (already corrupted) input: no
+      CRITICAL finding, confidence 0.752 above the 0.750 threshold, so it
+      returned <code>POSTED</code>. The review auto-posted, its reason string
+      literally reading "no CRITICAL finding is present" — true of the
+      surviving list, false of what the four specialists had actually found.
+      A real SQL-injection finding was silently discarded and the system
+      told the human everything was fine.
+    </p>
+    <h3>Why the 91-test suite missed it</h3>
+    <p>
+      This is the transferable lesson, and it is a test-<em>design</em> gap,
+      not a test-<em>coverage</em> gap — the M5 L1 BUILD already shipped 91
+      passing tests. The bug lived exactly in the seam between two halves
+      that were each, individually, thoroughly tested:
+    </p>
+    <div class="compare">
+      <div class="col before">
+        <h4>test_aggregator.py</h4>
+        <p>
+          Exercised <code>dedupe_findings</code> directly, with fixtures
+          built to test dedup's own rules (agent precedence, category,
+          rationale tie-breaks) — but no fixture happened to pit a
+          low<em>er</em>-confidence CRITICAL finding against a
+          higher-confidence non-CRITICAL one at the same key. The gap in the
+          rule was never exercised because no test shape asked the question.
+        </p>
+      </div>
+      <div class="col after">
+        <h4>test_hitl_gate.py</h4>
+        <p>
+          Exercised <code>route_review</code> directly — but always against
+          <strong>hand-built finding lists that never passed through
+          <code>dedupe_findings</code> at all</strong>. Its CRITICAL-escalates
+          tests constructed a list containing a CRITICAL finding and handed
+          it straight to <code>route_review</code>, correctly proving the
+          gate works <em>given</em> a CRITICAL finding — never proving one
+          would still be there after dedup ran first.
+        </p>
+      </div>
+    </div>
+    <p>
+      Both halves passed because each one tested its own function in
+      isolation with fixtures crafted for that function's own rules. Neither
+      one tested the actual pipeline <code>aggregate_node</code> runs:
+      dedupe's real output piped into <code>route_review</code>. The
+      integration test in <code>test_orchestrator_fanout.py</code> didn't
+      catch it either, because its four stub findings never collide on the
+      same file+line — dedup is a no-op there by construction. The bug
+      needed all three conditions at once (a real collision, a severity
+      mismatch, dedupe's actual output feeding the gate) and no single
+      existing test created that combination.
+    </p>
+    <h3>The fix and how it was verified</h3>
+    <p>
+      The approved fix reorders <code>_is_better</code> to compare severity
+      first, via an explicit <code>SEVERITY_RANK</code> map added to
+      <code>backend.models.enums</code> — deliberately not derived from the
+      <code>Severity</code> enum's declaration order or member names, so a
+      future reordering of the enum (say, alphabetizing it) can't silently
+      flip the ranking. Confidence is demoted to a tie-break used only
+      <em>within</em> the same severity. <code>Finding.__lt__</code> was
+      also pointed at the same map, closing a second place the ranking could
+      have drifted from the fix.
+    </p>
+    <ol class="gaps">
+      <li>
+        A true end-to-end regression test was added —
+        <code>TestDedupeAndRoutingInteraction::test_end_to_end_critical_survives_dedupe_and_forces_hitl</code>
+        — that builds the exact SECURITY/CRITICAL/0.751 vs. DOCS/INFO/0.752
+        collision, runs it through <code>dedupe_findings</code> then
+        <code>route_review</code>, and asserts <code>QUEUED_FOR_HITL</code>
+        with the CRITICAL finding surviving dedupe.
+      </li>
+      <li>
+        That test was <strong>proven to fail</strong> against the old
+        ordering before trusting it as a regression guard: temporarily
+        reverting <code>contracts.py</code> to the pre-fix confidence-only
+        version and re-running just that test reproduces the original bug
+        exactly —
+        <code>AssertionError: assert [Finding(...DOCS...INFO...0.752...)] == [Finding(...SECURITY...CRITICAL...0.751...)]</code>
+        — then restoring the fix turns it back to a pass. A regression test
+        that has never been seen to fail against the bug it names is
+        unproven; this one now is.
+      </li>
+      <li>
+        The test-design gap itself was closed, not just the one scenario:
+        <code>TestSeverityBeforeConfidenceDedupe</code> parametrizes over
+        every adjacent-and-non-adjacent severity pair where the
+        higher-severity finding has the <em>lower</em> confidence, plus a
+        permutation-based property test asserting a CRITICAL finding
+        survives across every ordering of a 5-finding collision.
+        <code>TestDedupeAndRoutingInteraction</code> now wires dedupe's real
+        output into <code>route_review</code> the same way
+        <code>aggregate_node</code> does, closing exactly the seam the
+        original bug hid in.
+      </li>
+    </ol>
+    <div class="callout ok">
+      <div class="label">Independently re-verified, not just re-run</div>
+      A first independent L4 VERIFY session found and rejected this bug. A
+      second, separately independent L4 VERIFY session then re-ran all four
+      gates plus the exact demo command against the fixed code, and went
+      further than re-running the unit-level regression test: it confirmed
+      the CRITICAL-survives-dedupe guarantee holds through the actual
+      compiled LangGraph — driving the collision through
+      <code>aggregate_node</code> as the graph's real fan-in node, not only
+      through <code>dedupe_findings</code> called directly — before
+      approving M5.
+    </div>
+    <ul class="timeline">
+      <li class="reject"><span class="when">L4 VERIFY — Reject</span><br>Independent session finds the CRITICAL/0.751 vs. INFO/0.752 collision, confirms the review auto-posts with a real CRITICAL finding silently discarded, and rejects M5's L1 BUILD.</li>
+      <li><span class="when">L2 DEBUG</span><br>Severity-first ordering applied to <code>_is_better</code> and <code>Finding.__lt__</code>; the regression test is written, proven to fail pre-fix, and proven to pass post-fix; every stale "keeps highest confidence" docstring and doc is rewritten.</li>
+      <li class="approve"><span class="when">L4 VERIFY — Approve</span><br>A second, independent session re-runs all four gates and the demo command, re-verifies the guarantee through the compiled graph, and approves M5.</li>
+    </ul>
+  </section>
+
+  <section id="consequence">
+    <h2><span class="num">8</span>The honest consequence of the fix</h2>
+    <p>
+      Severity-first dedupe is a fail-safe change, and fail-safe changes are
+      not free — this one has a real, deliberate cost worth stating plainly
+      rather than glossing over. Consider a HIGH finding at confidence 0.100
+      colliding with a MEDIUM finding at confidence 0.950. Under the old
+      confidence-only rule, the MEDIUM/0.950 finding would have survived and
+      (all else equal) likely kept the review's overall confidence above
+      threshold. Under the fixed rule, the HIGH finding survives instead —
+      correctly reflecting that it is the more severe issue — but its low
+      confidence pulls the review's mean down, which can push a review from
+      auto-post into human review that the old rule would have posted
+      automatically.
+    </p>
+    <div class="callout">
+      <div class="label">Accepted, not a regression</div>
+      This lowers the auto-post rate specifically for mixed-severity
+      collisions where the more severe finding also happens to carry lower
+      confidence. That is the correct direction to be wrong in: a system
+      whose failure mode is "asks a human to look at slightly more reviews"
+      is categorically safer than one whose failure mode is "silently
+      discards a CRITICAL finding and tells everyone it's fine." Fewer
+      auto-posts is the fail-safe consequence the fix exists to produce, not
+      an accidental side effect.
+    </div>
+  </section>
+
+  <section id="limits">
+    <h2><span class="num">9</span>Known limits, stated honestly</h2>
+    <p>
+      L4 VERIFY approved M5 after the fix — all four gates are green, the
+      demo command passes, and the CRITICAL-survives guarantee is now
+      verified both at the unit level and through the compiled graph. Real,
+      non-blocking limits remain on record rather than being quietly dropped:
+    </p>
+    <ol class="gaps">
+      <li>
+        <strong><code>line_end</code> is still not part of the dedup key</strong>
+        (see Section 2) — a wide-span finding can still collapse into an
+        unrelated narrow finding that merely shares <code>line_start</code>.
+        Deliberately not fixed here; needs real interval-overlap logic in a
+        future milestone.
+      </li>
+      <li>
+        <strong>An empty findings list still routes to human review</strong> —
+        <code>route_review(Decimal("0.000"), [], threshold=...)</code>
+        returns <code>QUEUED_FOR_HITL</code>, since 0.000 is always below any
+        sane threshold. This is a deliberate conservative decision, not a
+        defect: "no findings" must never look indistinguishable from
+        "confidently nothing to report" and silently auto-post. Covered by
+        <code>test_empty_findings_list_is_handled_sanely</code>.
+      </li>
+      <li>
+        <strong><code>Finding.__lt__</code> has no call site in
+        <code>backend/</code> production code.</strong>
+        <code>dedupe_findings</code> compares findings through its own
+        <code>_is_better</code>/<code>_tie_break_key</code> helpers, and its
+        final sort orders dict keys, not <code>Finding</code> objects, so the
+        dunder is never invoked in production today. It exists as
+        correct, drift-proof, forward-looking code for a future direct
+        caller (e.g. a dashboard listing).
+      </li>
+      <li>
+        <strong><code>InMemoryHitlQueue</code> is built and tested but not
+        wired up.</strong> <code>aggregate_node</code> computes the correct
+        <code>Review.status</code> and <code>routing_reason</code> and stops
+        there — nothing pushes a <code>QUEUED_FOR_HITL</code> review into a
+        live queue yet. Left for a later milestone, consistent with M4's own
+        precedent of not wiring the orchestrator into the webhook/queue path.
+      </li>
+      <li>
+        <strong>Models are still mutable post-construction</strong> —
+        <code>Finding</code> and <code>Review</code> are not frozen and don't
+        set <code>validate_assignment</code>, an M1-era gap M5 did not
+        touch.
+      </li>
+    </ol>
+  </section>
+
+  <section id="quiz">
+    <h2><span class="num">10</span>Quiz</h2>
+    <p>Three questions. Click each one to reveal the answer.</p>
+
+    <details class="quiz">
+      <summary class="q">1. M5's original 91-test suite had dedicated tests for both <code>dedupe_findings</code> and <code>route_review</code>, and both passed. Why did neither one catch the CRITICAL-finding-dropped bug?</summary>
+      <div class="answer">
+        <p class="verdict">Because the bug lived in the seam between the two functions, not inside either one: <code>test_aggregator.py</code>'s fixtures never happened to pit a lower-confidence CRITICAL finding against a higher-confidence non-CRITICAL one at the same key, and <code>test_hitl_gate.py</code> always fed <code>route_review</code> hand-built lists that never passed through <code>dedupe_findings</code> at all — so nothing ever tested dedupe's real output flowing into the gate.</p>
+        <p>
+          Each half was well-tested for its own rules in isolation. The
+          integration test in <code>test_orchestrator_fanout.py</code> also
+          didn't catch it, because its four stub findings never collide on
+          the same file+line — dedup is a no-op there. The fix explicitly
+          closes this seam: <code>TestDedupeAndRoutingInteraction</code> now
+          pipes dedupe's actual output into <code>route_review</code>, the
+          same way <code>aggregate_node</code> does. The transferable lesson:
+          two well-tested units composed together are not automatically a
+          well-tested pipeline.
+        </p>
+      </div>
+    </details>
+
+    <details class="quiz">
+      <summary class="q">2. Why does <code>Review</code>'s <code>model_validator</code> reject a mismatched <code>overall_confidence</code> outright, instead of silently recomputing it from <code>findings</code> so construction always succeeds?</summary>
+      <div class="answer">
+        <p class="verdict">Because silently recomputing would let a caller pass an arbitrary, wrong <code>overall_confidence</code> and have the mistake quietly erased — hiding exactly the kind of bug the M1 gap closure exists to surface. Rejecting fails loudly at construction time, catching a caller's error in a test instead of shipping a silently "corrected" wrong value.</p>
+        <p>
+          This matters specifically because M5's HITL gate is the first code
+          in the project that actually <em>trusts</em>
+          <code>overall_confidence</code> to make a routing decision. A
+          silent auto-correct would still produce a working <code>Review</code>
+          object every time, which means a bug in whatever computed the
+          original (wrong) value would never surface as a test failure — it
+          would just quietly always get overwritten with the right answer,
+          hiding that the caller's own computation was broken.
+        </p>
+      </div>
+    </details>
+
+    <details class="quiz">
+      <summary class="q">3. After the severity-first fix, a HIGH/0.100 finding can now survive a dedup collision over a MEDIUM/0.950 finding, and this can push a review into human review that the old rule would have auto-posted. Is this a new defect introduced by the fix?</summary>
+      <div class="answer">
+        <p class="verdict">No — it's a deliberate, accepted fail-safe consequence, not a regression. Lowering the auto-post rate for mixed-severity collisions is the correct direction to be wrong in: asking a human to look at slightly more reviews is categorically safer than the bug being fixed, which was a CRITICAL finding getting silently discarded while the system claimed everything was fine.</p>
+        <p>
+          The fix's whole point is that severity should never lose to
+          confidence in a dedup collision — that guarantee necessarily means
+          a more-severe-but-less-confident finding sometimes displaces a
+          less-severe-but-more-confident one, which can lower
+          <code>overall_confidence</code> compared to the old rule. That's
+          not a side effect to be minimized; it's the fail-safe behavior the
+          rejection exists to produce.
+        </p>
+      </div>
+    </details>
+  </section>
+
+  <footer>
+    Generated by the <code>explain-diff-html</code> skill during L4 VERIFY housekeeping for
+    milestone M5 of the <code>pr-review-agent</code> genesis-kit project. Diff range:
+    <code>b16f363</code> (fix(models): close M1-deferred Review.overall_confidence
+    consistency gap) through <code>cfb8f92</code> (chore(genesis): checkpoint M5 L2
+    DEBUG -- L4 REJECT fixed, awaiting re-VERIFY; HEAD at time of writing) — 11
+    commits, 19 files changed, 1687 insertions(+), 52 deletions(-). Self-contained:
+    no external stylesheets, fonts, scripts, or images.
+  </footer>
+
+</div>
+</body>
+</html>
