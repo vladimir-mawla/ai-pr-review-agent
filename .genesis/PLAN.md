@@ -284,3 +284,32 @@ milestones needing a paid/external credential (M8, M10, M11, M12, M13) are order
   history and is recorded here rather than smoothed over — see
   `checkpoints/CURRENT.md` and `.genesis/explanations/2026-08-30-explanation-m5.html`
   for the full account.
+
+- **2026-08-30 — M6 (Reliability Layer: Retries, Circuit Breaker,
+  Timeouts):** L1 BUILD shipped `backend.reliability.retry.call_with_retry`
+  (full-jitter exponential backoff with an explicit
+  `non_retryable_exceptions` set), `backend.reliability.circuit_breaker.CircuitBreaker`
+  (closed/open/half-open, thread-safe), and
+  `backend.reliability.timeout.{run_with_timeout,await_future}` (a shared
+  bounded-wait wrapper), then wired all three around `RedisJobQueue`'s two
+  real Redis calls as `retry(breaker(timeout(call)))`, and fixed the
+  M3-deferred "Redis-down enqueue returns 500 not 503" item by having the
+  webhook route catch the new `QueueUnavailableError`. Demo command
+  `pytest tests/unit/test_reliability.py -v --tb=short` exits 0 (23 of 23
+  tests pass); the full suite (`pytest -v`) exits 0 with 137 tests passing
+  overall — 114 carried over from M1–M5 plus the 23 new M6 tests, run with
+  this project's own Redis (port 6380) up so every Redis-gated case actually
+  executed. L4 VERIFY APPROVEd M6 in a separate Sonnet session with no
+  blocking defects. Notably, the verifier did not stop at confirming the
+  primitives were unit-tested and imported — it proved they are actually on
+  the live request path two different ways: dynamically, by monkeypatching
+  the retry and breaker primitives and observing exactly 2 circuit-breaker
+  calls and 2 retry-loop attempts occur during one real webhook request
+  against a simulated-down Redis; and by falsification, temporarily
+  neutering the circuit breaker (making `CircuitBreaker.call` bypass its own
+  state machine and call straight through) and confirming this makes 8 of
+  the 23 `test_reliability.py` tests fail rather than all 23 continuing to
+  pass. See `checkpoints/CURRENT.md` and
+  `.genesis/explanations/2026-08-30-explanation-m6.html` for the full
+  account, including why `backend/reliability/idempotency.py` was
+  deliberately not built.

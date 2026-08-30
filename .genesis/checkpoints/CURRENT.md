@@ -1,9 +1,9 @@
 # CURRENT
 - active_loop: none (between milestones)
-- target: M6
+- target: M7
 - iteration: 0
-- last_gate: L1 BUILD complete on M6 (this session) -- all four gates + PLAN.md's exact M6 demo command passed; awaiting L4 VERIFY
-- next_action: L4 VERIFY on M6 (separate session)
+- last_gate: L4 VERIFY APPROVE on M6
+- next_action: run G0 existence pre-flight on M7
 - model: claude-sonnet-5
 - tokens_used: 0
 - tokens_budget: 50000
@@ -28,6 +28,11 @@ New from M5 (L1 BUILD), non-blocking:
 - `mypy --strict backend/` required one call site (`backend/orchestrator/nodes.py`'s new `Review(...)` construction) to pass `error_message=None` explicitly, because mypy's `dataclass_transform`-based reading of pydantic v2 models does not recognize `Field(None, ...)` (a positional default, as opposed to a plain `= None` class-body default) as making a field optional in the synthesized constructor signature. This is a latent M1-era pattern (`Review.error_message` and `Finding` fields use `Field(None, ...)` throughout) that only surfaced now because M5 is the first *backend* production code to construct a `Review` -- every prior `Review(...)` call was in `tests/`, which `mypy --strict` does not scope. Not fixed at the model level (would touch M1's field style repo-wide, well outside M5's freeze boundary); worth revisiting if `mypy --strict` is ever extended to `tests/`.
 - `InMemoryHitlQueue` (`backend/hitl/queue.py`) is a real, tested class, but nothing in `backend.orchestrator.nodes.aggregate_node` actually calls `.enqueue()` on an instance of it -- the join node computes the correct `Review.status` (POSTED vs QUEUED_FOR_HITL) and `routing_reason`, but stops there. Wiring "a QUEUED_FOR_HITL review is actually pushed into a live queue something else can read" is left for a later milestone (M10's full local dry run, or wherever a durable/dashboard-visible queue is built), matching M5's explicit exclusion of GitHub posting (M11) and consistent with M4's own precedent of not wiring the orchestrator into the webhook/queue path.
 - The dedup tie-break's final fallback level (lexicographic `rationale` comparison, after confidence -> AGENT_PRECEDENCE -> category) is untested in isolation (only the category-level tie-break is exercised in `tests/unit/test_aggregator.py`) since triggering it requires two findings identical in every field except `rationale`, a case that cannot arise from M4/M5's one-finding-per-agent-per-run stubs. The logic is straightforward (one more lexicographic comparison in the same chain) but this specific level has no direct regression test.
+
+New from M6 (L4 VERIFY), non-blocking:
+- **CircuitBreaker's registry has no reader yet:** `register()`/`all_breakers()` populate a real process-wide registry, but nothing in this codebase calls `all_breakers()` -- there is no `/health` route yet to consume it. L4 VERIFY confirmed this is forward-looking infrastructure, not a gap in M6's own scope (see the L1 BUILD note below), but flagged it as worth revisiting specifically when M8's LLM client and M11's GitHub client get wrapped in the same reliability layer: a non-idempotent call to either of those (an LLM completion with side effects, a GitHub comment POST) would be a riskier thing to leave silently timed-out-but-still-running in the background than the idempotent Redis `SET`/enqueue operations this milestone guards today.
+- **A timed-out call keeps running in the background, because Python cannot kill a thread:** `backend.reliability.timeout.run_with_timeout` submits the wrapped callable to a shared background thread pool and gives up *waiting* on it after the configured bound, but the worker thread itself keeps executing the original call to completion (or its own eventual failure) -- Python has no portable way to forcibly terminate a running thread. This is documented in the module's own docstring as a known, accepted limitation (safe today because the wrapped calls -- the idempotency `SET` and the ARQ enqueue -- are idempotent or side-effect-tolerant), not silently hidden. L4 VERIFY re-confirmed the documentation matches the actual behavior rather than treating "it's in a docstring" as sufficient on its own.
+- **`idempotency.py`'s absence is a legitimate scope decision, not a missed deliverable:** PLAN.md's own slicing rule (see `PLAN.md` line 7: "a freeze boundary of files it **may** touch") defines a milestone's freeze boundary as the set of files it is *permitted* to touch, not a mandatory creation checklist every named file must produce. `backend/reliability/idempotency.py` was named in M6's freeze-boundary listing but never built, because the project's real idempotency mechanism (the atomic Redis `SET NX EX` in `backend/job_queue/redis_arq.py`, since M3) already exists and is a queue-layer concern, not a generic cross-cutting reliability primitive the way retry/timeout/circuit-breaker are. L4 VERIFY explicitly ruled on this reading (rather than either silently accepting the gap or demanding a second, unused idempotency module purely to check a box) and found it acceptable under the freeze-boundary rule as written.
 
 New from M6 (L1 BUILD), non-blocking:
 - Two files outside PLAN.md's literal M6 freeze-boundary list (`backend/reliability/{retry,circuit_breaker,idempotency,timeout}.py`, `tests/unit/test_reliability.py`) were touched: `backend/webhook_receiver/router.py` (the 503-not-500 fix, explicitly called for by this session's own build instructions to close a tracked M3-deferred item -- see the Resolved entry under M3, above) and `backend/job_queue/{redis_arq,interface}.py` (wiring the reliability layer into RedisJobQueue's real Redis calls, which is the actual point of this milestone -- a reliability layer with no live call site fails DONE.html's own "provable by grep" gate). `backend/core/settings.py` and `.env.example` were also touched, per this session's own explicit instruction to expose the new retry/timeout/breaker knobs there. Flagging all four for L4 VERIFY to confirm this reading is acceptable, same as M2/M4/M5's own documented freeze-boundary notes.
@@ -62,7 +67,7 @@ Resolved (previously deferred from M2, now closed):
 - ~~The demo command needs an activated venv and a hand-created `.env` and neither is documented (no README exists)~~ -- fixed: README.md now documents venv creation/activation, `pip install -e ".[dev]"`, and copying `.env.example` to `.env`
 - ~~`InMemoryJobQueue` and its `_seen_delivery_ids` grow unboundedly with no eviction~~ -- fixed: M3's `RedisJobQueue` stores the idempotency key with an expiring TTL (`Settings.idempotency_ttl_seconds`, default one week) instead of an ever-growing in-process set; proven by a test that reads the TTL back from Redis directly.
 
-## M6 Build Summary (L1 BUILD complete this session; awaiting L4 VERIFY)
+## M6 Build Summary (L4 VERIFY APPROVED)
 
 ### G0 Pre-Flight Verdict
 UNBUILT. `backend/reliability/__init__.py` was a module docstring only --
@@ -145,6 +150,26 @@ live call site in the request path, provable by grep -- not merely a
 passing unit test") by re-deriving the grep evidence independently rather
 than trusting this session's report, and rule on the freeze-boundary
 exceptions above before marking M6 DONE.
+
+**Outcome:** A separate, independent L4 VERIFY session (Sonnet) did exactly
+this and **APPROVEd** M6 with no blocking defects. Critically, it did not
+settle for "the module exists and is imported" as evidence for the
+grep-provable live-call-site gate -- a reference implementation that wrote
+these same three modules, unit-tested them, and never imported them from
+the live path would pass an imports-only check too. Instead it verified the
+wiring two ways: dynamically, by monkeypatching the retry and circuit
+breaker primitives and observing exactly 2 circuit-breaker calls and 2
+retry-loop attempts occur during one real webhook request driven through
+`TestClient` against a `RedisJobQueue` whose Redis connection was redirected
+to an unreachable address; and by falsification, temporarily neutering
+`CircuitBreaker.call` (bypassing its own state machine and calling straight
+through) and confirming this makes 8 of the 23 `test_reliability.py` tests
+fail, rather than all 23 continuing to pass vacuously. It also confirmed the
+503-not-500 fix does not weaken the HMAC trust boundary: a bad-signature
+request against a down-Redis queue still returns 401, because signature
+verification runs before the queue is ever touched. See
+`.genesis/explanations/2026-08-30-explanation-m6.html` for the full account.
+M6 is DONE.
 
 ## M5 Build Summary (L4 VERIFY APPROVED, after an earlier REJECT + L2 DEBUG fix)
 
