@@ -81,6 +81,17 @@ class GraphState(TypedDict):
             Kept alongside ``review`` rather than folded into one of its
             fields because it is diagnostic output about the *routing
             decision*, not a property of the review itself.
+        diff: M8 addition — the unified diff text the real, LLM-backed
+            ``security_node`` analyzes (``backend.agents.security_agent.
+            SecurityAgent.analyze``). ``NotRequired`` (read via
+            ``state.get("diff", "")`` at the one read site) so every pre-M8
+            caller that builds a ``GraphState`` without it (e.g.
+            ``tests/integration/test_orchestrator_fanout.py``'s
+            ``_initial_state``, ``scripts/run_fixture_review.py``) stays
+            valid under ``mypy --strict`` with no change required — the
+            same reasoning M5's ``review``/``routing_reason`` addition
+            documented above. Only ``security_node`` reads this field; the
+            other three specialists remain M4's canned stubs.
     """
 
     review_id: str
@@ -92,3 +103,4 @@ class GraphState(TypedDict):
     node_errors: Annotated[dict[str, str], _merge_dicts]
     review: NotRequired[Review]
     routing_reason: NotRequired[str]
+    diff: NotRequired[str]
