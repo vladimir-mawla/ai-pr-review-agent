@@ -20,15 +20,29 @@ DB's breaker has tripped after repeated failures and is failing fast; see
 ``backend.database.repository.EventRepository.insert_event``), logs a
 warning, and returns normally.
 
+NARROWED (L2 DEBUG, post-L4-REJECT): this policy used to catch bare
+``(psycopg.Error, OSError)``, which also silently swallowed
+``psycopg.errors.IntegrityError`` (e.g. a ``CheckViolation`` from
+``agent_events``'s ``event_type`` CHECK constraint, or a future
+``NotNullViolation``/``UniqueViolation``) -- ``IntegrityError`` is a
+subclass of ``psycopg.Error``, so the broad ``except`` caught it too. That
+is a bug in *our own code* (we tried to write a row the schema itself
+rejects), not the database being unavailable, and conflating the two meant
+a real data-integrity bug at a live call site would vanish into a log line
+instead of failing loudly. ``_emit`` now re-raises ``IntegrityError``
+before the broad ``except`` gets a chance to swallow it -- see
+``tests/unit/test_events_failure_policy.py``.
+
 What this policy deliberately does NOT catch: a ``TypeError``,
-``AttributeError``, or pydantic ``ValidationError`` raised while
-*constructing* the ``AgentEvent`` itself (e.g. a caller passing a string
-where ``tokens_in`` expects an int, or a value outside a field's bounds) is
-a bug in our own code, not a database-availability problem -- it must be
-allowed to propagate so a real bug is never silently swallowed alongside a
-real outage. This is why every ``emit_*`` function constructs
-``AgentEvent(...)`` OUTSIDE the ``try``/``except`` in ``_emit``, which only
-ever wraps the already-validated event's actual database write.
+``AttributeError``, pydantic ``ValidationError``, or (as of the narrowing
+above) ``psycopg.errors.IntegrityError`` raised while *constructing* the
+``AgentEvent`` itself (e.g. a caller passing a string where ``tokens_in``
+expects an int, or a value outside a field's bounds) is a bug in our own
+code, not a database-availability problem -- it must be allowed to
+propagate so a real bug is never silently swallowed alongside a real
+outage. This is why every ``emit_*`` function constructs ``AgentEvent(...)``
+OUTSIDE the ``try``/``except`` in ``_emit``, which only ever wraps the
+already-validated event's actual database write.
 
 OFFLOADING THE ONE ASYNC CALL SITE (L2 DEBUG, post-L4-REJECT)
 ---------------------------------------------------------------
@@ -80,6 +94,11 @@ def _emit(repository: EventRepository, event: AgentEvent) -> None:
     """
     try:
         repository.insert_event(event)
+    except psycopg.errors.IntegrityError:
+        # Our own bug (a row the schema itself rejects), not a database-
+        # availability problem -- must propagate. See the module
+        # docstring's "NARROWED" section.
+        raise
     except (psycopg.Error, OSError, CircuitOpenError) as exc:
         logger.warning(
             "failed to write %s event for review_id=%r: %s -- continuing without it",
