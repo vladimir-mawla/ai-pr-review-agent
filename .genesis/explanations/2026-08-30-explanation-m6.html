@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>M6 Explained — Reliability Layer (Retry, Circuit Breaker, Timeout)</title>
+<style>
+  :root {
+    --bg: #f7f7f5;
+    --bg-card: #ffffff;
+    --ink: #1b1f23;
+    --mut: #5b6472;
+    --line: #e2e4e8;
+    --accent: #2f6feb;
+    --accent-ink: #ffffff;
+    --ok: #1a7f37;
+    --warn: #9a6700;
+    --bad: #cf222e;
+    --code-bg: #f0f1f3;
+    --pill-bg: #eef2ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1117;
+      --bg-card: #161b22;
+      --ink: #e6edf3;
+      --mut: #9aa4b2;
+      --line: #2d333b;
+      --accent: #6ea8fe;
+      --accent-ink: #0d1117;
+      --ok: #3fb950;
+      --warn: #d29922;
+      --bad: #f85149;
+      --code-bg: #1c2128;
+      --pill-bg: #1c2440;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1117;
+    --bg-card: #161b22;
+    --ink: #e6edf3;
+    --mut: #9aa4b2;
+    --line: #2d333b;
+    --accent: #6ea8fe;
+    --accent-ink: #0d1117;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --bad: #f85149;
+    --code-bg: #1c2128;
+    --pill-bg: #1c2440;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    font-size: 16px;
+  }
+  .page { max-width: 880px; margin: 0 auto; padding: 40px 20px 100px; }
+  header.hero { margin-bottom: 32px; }
+  header.hero .kicker {
+    color: var(--accent);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-size: 12.5px;
+    margin: 0 0 10px;
+  }
+  h1 { font-size: clamp(26px, 4vw, 36px); margin: 0 0 12px; line-height: 1.2; }
+  .lede { color: var(--mut); font-size: 17px; max-width: 70ch; }
+  nav.toc {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin: 28px 0 40px;
+  }
+  nav.toc h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--mut);
+    margin: 0 0 10px;
+  }
+  nav.toc ol { margin: 0; padding-left: 20px; columns: 2; column-gap: 24px; }
+  nav.toc li { margin: 4px 0; break-inside: avoid; }
+  nav.toc a { color: var(--ink); text-decoration: none; border-bottom: 1px dashed var(--line); }
+  nav.toc a:hover { border-bottom-color: var(--accent); color: var(--accent); }
+
+  section { margin: 56px 0; }
+  section > h2 {
+    font-size: 22px;
+    margin: 0 0 16px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--line);
+  }
+  section > h2 .num { color: var(--accent); font-variant-numeric: tabular-nums; margin-right: 10px; }
+  h3 { font-size: 17px; margin: 26px 0 10px; }
+  p { margin: 12px 0; }
+  a { color: var(--accent); }
+  a:focus-visible, button:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .card { background: var(--bg-card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 22px; margin: 16px 0; }
+  .callout { border-left: 4px solid var(--accent); background: var(--pill-bg); border-radius: 8px; padding: 14px 18px; margin: 18px 0; }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.ok { border-left-color: var(--ok); }
+  .callout.bad { border-left-color: var(--bad); }
+  .callout .label {
+    font-weight: 700;
+    font-size: 12.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--mut);
+    margin-bottom: 6px;
+  }
+
+  code {
+    background: var(--code-bg);
+    padding: 1px 6px;
+    border-radius: 5px;
+    font-size: 0.9em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    white-space: pre;
+    font-size: 13.5px;
+    line-height: 1.55;
+  }
+  pre code { background: none; padding: 0; border-radius: 0; }
+
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14.5px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--mut); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .tablewrap { overflow-x: auto; }
+
+  .pill {
+    display: inline-block;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 2px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    color: var(--mut);
+    white-space: nowrap;
+  }
+  .pill.ok { color: var(--ok); border-color: var(--ok); }
+  .pill.bad { color: var(--bad); border-color: var(--bad); }
+  .pill.warn { color: var(--warn); border-color: var(--warn); }
+
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 18px 0; }
+  .flow .node {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 13.5px;
+    min-width: 120px;
+    text-align: center;
+  }
+  .flow .node.core { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .flow .node.bad { border-color: var(--bad); color: var(--bad); font-weight: 600; }
+  .flow .node.ok { border-color: var(--ok); color: var(--ok); font-weight: 600; }
+  .flow .node.warn { border-color: var(--warn); color: var(--warn); font-weight: 600; }
+  .flow .arrow { color: var(--mut); font-size: 18px; }
+  .flow.vertical { flex-direction: column; align-items: stretch; }
+  .flow.vertical .node { text-align: left; }
+  .flow.vertical .arrow { text-align: center; }
+
+  .nest {
+    border: 1px dashed var(--line);
+    border-radius: 12px;
+    padding: 14px;
+    margin: 18px 0;
+  }
+  .nest .ring {
+    border: 2px solid var(--line);
+    border-radius: 12px;
+    padding: 14px;
+    text-align: center;
+  }
+  .nest .ring.retry { border-color: var(--accent); }
+  .nest .ring.breaker { border-color: var(--warn); }
+  .nest .ring.timeout { border-color: var(--bad); }
+  .nest .ring .tag {
+    font-size: 11.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 8px;
+  }
+  .nest .ring.retry .tag { color: var(--accent); }
+  .nest .ring.breaker .tag { color: var(--warn); }
+  .nest .ring.timeout .tag { color: var(--bad); }
+  .nest .core-call {
+    background: var(--code-bg);
+    border-radius: 8px;
+    padding: 10px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+  }
+
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+  @media (max-width: 640px) { .compare { grid-template-columns: 1fr; } }
+  .compare .col { border-radius: 12px; padding: 16px 18px; border: 1px solid var(--line); }
+  .compare .col.before { background: color-mix(in srgb, var(--bad) 6%, var(--bg-card)); }
+  .compare .col.after { background: color-mix(in srgb, var(--ok) 6%, var(--bg-card)); }
+  .compare h4 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .compare.before-after .before h4 { color: var(--bad); }
+  .compare.before-after .after h4 { color: var(--ok); }
+
+  .module-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin: 18px 0; }
+  .module-card { background: var(--bg-card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .module-card h4 {
+    margin: 0 0 6px;
+    font-size: 15px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: var(--accent);
+  }
+  .module-card p { margin: 6px 0 0; font-size: 14px; color: var(--mut); }
+
+  .state-grid { display: flex; flex-wrap: wrap; gap: 14px; margin: 18px 0; align-items: stretch; justify-content: center; }
+  .state-box {
+    border-radius: 14px;
+    border: 2px solid var(--line);
+    padding: 16px 20px;
+    min-width: 150px;
+    text-align: center;
+    background: var(--bg-card);
+  }
+  .state-box.closed { border-color: var(--ok); }
+  .state-box.open { border-color: var(--bad); }
+  .state-box.half { border-color: var(--warn); }
+  .state-box .name { font-weight: 700; font-size: 15px; margin-bottom: 4px; }
+  .state-box.closed .name { color: var(--ok); }
+  .state-box.open .name { color: var(--bad); }
+  .state-box.half .name { color: var(--warn); }
+  .state-box .desc { font-size: 12.5px; color: var(--mut); }
+  .state-arrows { width: 100%; text-align: center; color: var(--mut); font-size: 13px; margin: -4px 0; }
+
+  ol.gaps li, ul.plain li { margin: 8px 0; }
+
+  details.quiz {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 18px;
+    margin: 16px 0;
+  }
+  details.quiz summary { cursor: pointer; font-weight: 600; list-style: none; }
+  details.quiz summary::-webkit-details-marker { display: none; }
+  details.quiz summary::before { content: "▸ "; color: var(--accent); }
+  details.quiz[open] summary::before { content: "▾ "; }
+  details.quiz .q { font-weight: 600; margin-bottom: 4px; }
+  details.quiz .answer { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
+  details.quiz .answer .verdict { font-weight: 700; color: var(--ok); }
+
+  footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--mut); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <p class="kicker">Genesis L4 · Explain Diff · Milestone M6</p>
+    <h1>Reliability Layer: Retry, Circuit Breaker, Timeout</h1>
+    <p class="lede">
+      Why an outbound call to Redis needed three separate fault-tolerance
+      primitives instead of one bigger try/except; why the three must be
+      nested in exactly one order (<code>retry(breaker(timeout(call)))</code>)
+      and not any other; why retrying a <code>TypeError</code> is a bug
+      wearing resilience's clothes; and the centerpiece of this milestone —
+      a reference implementation that built and unit-tested this exact same
+      layer and never once called it from a real request, and the two ways
+      an independent verifier proved <em>this</em> build doesn't repeat that
+      mistake. Covers commits <code>030bb20</code>&nbsp;&hellip;&nbsp;<code>8e07abe</code>
+      on <code>main</code> — 7 commits, the whole M6 slice. 12 files changed,
+      1862 insertions(+), 26 deletions(-).
+    </p>
+  </header>
+
+  <nav class="toc">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#background">Background: one outbound call, three ways to fail</a></li>
+      <li><a href="#intuition">Intuition: what each primitive is actually for</a></li>
+      <li><a href="#order">Composition order: retry(breaker(timeout(call)))</a></li>
+      <li><a href="#retryable">Retryable vs. non-retryable: a TypeError is not a flake</a></li>
+      <li><a href="#circuitopen">Why CircuitOpenError must never be retried</a></li>
+      <li><a href="#halfopen">Half-open and the thundering herd</a></li>
+      <li><a href="#centerpiece">The centerpiece: why this milestone exists at all</a></li>
+      <li><a href="#503">The 503 fix, and why HMAC still wins</a></li>
+      <li><a href="#limits">Known limits, stated honestly</a></li>
+      <li><a href="#quiz">Quiz</a></li>
+    </ol>
+  </nav>
+
+  <section id="background">
+    <h2><span class="num">1</span>Background: one outbound call, three ways to fail</h2>
+    <p>
+      Since M3, every accepted webhook goes through <code>RedisJobQueue</code>,
+      which makes exactly two real network calls per request: an atomic
+      <code>SET key value NX EX ttl</code> against Redis to check-and-record
+      the delivery's idempotency key, and a hand-off of the parsed event to
+      ARQ's queue (also a Redis operation, bridged across a background
+      event-loop thread). Before M6, both of those calls were guarded by
+      exactly one thing: a hardcoded <code>future.result(timeout=10)</code>
+      on the ARQ hand-off, and nothing at all on the idempotency
+      <code>SET</code>. If Redis was merely slow, the request blocked for up
+      to ten seconds. If Redis was down outright, the call raised a raw
+      <code>redis.exceptions.ConnectionError</code> straight out of
+      <code>RedisJobQueue.enqueue()</code>, which FastAPI turned into an
+      unhandled 500 — indistinguishable, from GitHub's point of view, from a
+      genuine bug in this service, rather than "the dependency is
+      temporarily down, please retry the delivery" (which GitHub's own
+      redelivery mechanism already knows how to do).
+    </p>
+    <p>
+      M6's job is not to make Redis more reliable — it can't — but to make
+      this service behave sanely <em>around</em> an unreliable dependency:
+      bound how long a caller waits, stop hammering a dependency that has
+      already shown it's down, and only retry the kind of failure retrying
+      can actually fix.
+    </p>
+    <div class="callout">
+      <div class="label">Where this lives</div>
+      Three new modules under <code>backend/reliability/</code>
+      (<code>retry.py</code>, <code>circuit_breaker.py</code>,
+      <code>timeout.py</code>), wired into <code>backend/job_queue/redis_arq.py</code>'s
+      <code>_call_reliably</code> helper, which both of
+      <code>RedisJobQueue</code>'s real Redis calls go through. Six new
+      <code>Settings</code> fields (<code>RETRY_MAX_ATTEMPTS</code>,
+      <code>RETRY_BASE_DELAY_SECONDS</code>, <code>RETRY_MAX_DELAY_SECONDS</code>,
+      <code>RELIABILITY_TIMEOUT_SECONDS</code>,
+      <code>CIRCUIT_BREAKER_FAILURE_THRESHOLD</code>,
+      <code>CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS</code>) make every knob
+      configurable instead of a buried magic number.
+    </div>
+  </section>
+
+  <section id="intuition">
+    <h2><span class="num">2</span>Intuition: what each primitive is actually for</h2>
+    <p>
+      Three different problems, three different tools. It helps to keep them
+      separate before seeing how they nest:
+    </p>
+    <div class="module-grid">
+      <div class="module-card">
+        <h4>retry</h4>
+        <p>
+          Handles a <strong>transient</strong> failure — one that might
+          succeed if you just try again in a moment. A dropped TCP packet, a
+          momentary connection blip. Retrying turns "this one attempt
+          failed" into "this operation eventually succeeded," as long as the
+          underlying problem was genuinely temporary.
+        </p>
+      </div>
+      <div class="module-card">
+        <h4>timeout</h4>
+        <p>
+          Bounds how long you're willing to <strong>wait</strong> for any
+          single attempt. Without it, "the dependency is slow" and "the
+          dependency will never respond" look identical from the caller's
+          seat — you just sit there. A timeout turns an unbounded wait into
+          a bounded one, so the caller can move on (and, e.g., let a retry
+          loop try again, or give up cleanly).
+        </p>
+      </div>
+      <div class="module-card">
+        <h4>circuit breaker</h4>
+        <p>
+          Stops you from <strong>hammering something already known to be
+          down</strong>. Retry and timeout both still cost something — a
+          connection attempt, a wait — every single time. Once a dependency
+          has failed enough times in a row, a breaker admits the obvious:
+          the next call is very likely to fail too, so skip trying it at
+          all and fail immediately instead. This is what turns "resilient"
+          into "fail fast," not just "keep trying forever."
+        </p>
+      </div>
+    </div>
+    <p>
+      None of these three alone is "the reliability layer." A retry loop
+      with no timeout can retry a call that hangs forever, one attempt at a
+      time, for an unbounded total duration. A timeout with no breaker cuts
+      each attempt short but still lets every single caller re-attempt a
+      dependency that's been down for an hour. A breaker with no retry
+      correctly stops calling a dead dependency, but never distinguishes "one
+      unlucky blip" from "actually down" in the first place. They compose
+      because each covers a gap the other two leave open.
+    </p>
+  </section>
+
+  <section id="order">
+    <h2><span class="num">3</span>Composition order: <code>retry(breaker(timeout(call)))</code></h2>
+    <p>
+      <code>RedisJobQueue._call_reliably</code> nests the three in exactly
+      one order, outermost to innermost:
+    </p>
+    <div class="nest">
+      <div class="ring retry">
+        <div class="tag">retry (outermost)</div>
+        <div class="ring breaker">
+          <div class="tag">circuit breaker</div>
+          <div class="ring timeout">
+            <div class="tag">timeout (innermost)</div>
+            <div class="core-call">the actual Redis call (SET NX EX, or the ARQ enqueue)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p>
+      Reading from the inside out: every real Redis call is individually
+      bounded by a timeout first. That bounded call is what the breaker
+      decides to count as a success or a failure. And the whole
+      breaker-guarded, timeout-bounded call is what the retry loop repeats,
+      with backoff, until it gives up or succeeds.
+    </p>
+    <p>
+      Why this order and not, say, <code>breaker(retry(timeout(call)))</code>?
+      Putting retry <em>inside</em> the breaker would mean the breaker only
+      ever sees one outcome per logical request — "the whole retry sequence
+      eventually failed" — collapsing several real failures into a single
+      recorded one. That breaks the breaker's own contract
+      (<code>failure_threshold</code> consecutive failures trips it): with
+      retry innermost, three real dependency failures inside one retry
+      sequence would only count as <em>one</em> failure against the
+      threshold, letting a genuinely dead dependency get hit several times
+      per breaker-counted "failure" instead of stopping after the threshold
+      is actually reached. Retry outermost means every individual attempt —
+      each one separately timeout-bounded and breaker-guarded — is what gets
+      counted, which is what lets the very next section's evidence (2 real
+      calls trip a threshold of 2) come out exactly right.
+    </p>
+  </section>
+
+  <section id="retryable">
+    <h2><span class="num">4</span>Retryable vs. non-retryable: a <code>TypeError</code> is not a flake</h2>
+    <p>
+      <code>call_with_retry</code> takes an explicit
+      <code>non_retryable_exceptions</code> tuple and re-raises those
+      immediately — no sleep, no further attempts. The default set is
+      <code>TypeError</code>, <code>ValueError</code>, <code>KeyError</code>,
+      <code>AttributeError</code>: the classic "the caller's code is wrong"
+      family, not "the dependency is flaky" family.
+    </p>
+    <div class="callout bad">
+      <div class="label">Why this matters</div>
+      A transient failure might succeed on the next attempt because the
+      <em>world</em> changed between attempts (the network blip passed, the
+      server came back). A <code>TypeError</code> from passing the wrong
+      argument shape will fail identically on every attempt, because
+      nothing about the call itself changes between retries — the bug is in
+      the code, not the environment. Retrying it anyway doesn't add
+      resilience; it just burns the entire retry budget (and the sleep time
+      that comes with it) on a call that was never going to succeed, while
+      making the failure take longer to surface and look, superficially,
+      like "the system tried hard" instead of "the system has a bug."
+    </div>
+    <p>
+      This is also exactly why the pattern generalizes: whatever exceptions
+      mean "this call itself is malformed" for a given dependency belong in
+      that call site's own <code>non_retryable_exceptions</code>, extending
+      the default set rather than replacing it. <code>RedisJobQueue</code>
+      does exactly this — see next.
+    </p>
+  </section>
+
+  <section id="circuitopen">
+    <h2><span class="num">5</span>Why <code>CircuitOpenError</code> must never be retried</h2>
+    <p>
+      <code>RedisJobQueue</code> extends the default non-retryable set with
+      one more type: <code>CircuitOpenError</code>. This is the one addition
+      the whole composition depends on. If a breaker being open were
+      <em>retryable</em>, the retry loop would catch
+      <code>CircuitOpenError</code>, sleep, and try again anyway — completely
+      defeating the point of a breaker that exists specifically to skip
+      attempts once a dependency is known to be down. Retry and breaker would
+      be fighting each other: the breaker saying "don't bother," the retry
+      loop saying "bother anyway."
+    </p>
+    <p>
+      This is provable, not just arguable. Configure
+      <code>retry_max_attempts=5</code> against a breaker with
+      <code>failure_threshold=2</code>, point the call at something that
+      always fails, and count how many times the real dependency is
+      actually touched:
+    </p>
+    <pre><code>real_call_count = 2 (retry_max_attempts was 5, breaker failure_threshold was 2)
+breaker.state = open
+CONFIRMED: exactly 2 real Redis-dependency calls happened, not 5.</code></pre>
+    <p>
+      Walking through why: attempt 1 fails (breaker still CLOSED,
+      1 consecutive failure &lt; threshold of 2). Attempt 2 fails too — now 2
+      consecutive failures, so the breaker flips to OPEN <em>as a result of
+      that second failure</em>. The retry loop, still under its 5-attempt
+      budget, tries a third time — but this time <code>breaker.call</code>
+      raises <code>CircuitOpenError</code> before the dependency is touched
+      at all, and because that exception is non-retryable, the retry loop
+      re-raises it immediately instead of sleeping and trying attempts 4 and
+      5. Two real calls, not five — the exact number the breaker's own
+      threshold predicts, no more.
+    </p>
+    <p>
+      The same shape holds for the actual production settings
+      (<code>retry_max_attempts=2</code>, breaker
+      <code>failure_threshold=2</code>, used by
+      <code>tests/unit/test_reliability.py</code>'s wiring tests): driving a
+      real webhook POST through the actual FastAPI route against a
+      <code>RedisJobQueue</code> whose Redis connection was redirected to an
+      unreachable address, with the circuit breaker and retry loop
+      instrumented to count invocations, produces:
+    </p>
+    <pre><code>response.status_code = 503
+breaker_call_count = 2
+retry_attempt_count (call_with_retry's own func() invocations) = 2
+CONFIRMED: one real 503 webhook request made exactly 2 breaker calls and 2 retry attempts.</code></pre>
+    <p>
+      One real HTTP request, two breaker calls, two retry attempts — matched
+      exactly, because both knobs are set to 2 in this project's own fast
+      test settings.
+    </p>
+  </section>
+
+  <section id="halfopen">
+    <h2><span class="num">6</span>Half-open and the thundering herd</h2>
+    <p>
+      A breaker that opens forever would just convert "dependency is
+      temporarily down" into "dependency is permanently unusable." So after
+      <code>reset_timeout_seconds</code> elapses, the breaker transitions
+      from OPEN to HALF_OPEN: the next call is treated as a <em>probe</em>.
+      If it succeeds, the breaker closes fully — the dependency has
+      recovered. If it fails, the breaker reopens immediately (not waiting
+      for a fresh run of <code>failure_threshold</code> failures — one failed
+      probe is already enough evidence the dependency is still down).
+    </p>
+    <div class="state-grid">
+      <div class="state-box closed">
+        <div class="name">CLOSED</div>
+        <div class="desc">calls go through normally; a success resets the failure count</div>
+      </div>
+      <div class="state-box open">
+        <div class="name">OPEN</div>
+        <div class="desc">every call rejected immediately, no dependency attempt at all</div>
+      </div>
+      <div class="state-box half">
+        <div class="name">HALF_OPEN</div>
+        <div class="desc">exactly one probe allowed through</div>
+      </div>
+    </div>
+    <p class="state-arrows">
+      CLOSED &rarr; (&ge;<code>failure_threshold</code> consecutive failures) &rarr; OPEN
+      &rarr; (&ge;<code>reset_timeout_seconds</code> elapsed) &rarr; HALF_OPEN
+      &rarr; success &rarr; CLOSED &nbsp;/&nbsp; failure &rarr; OPEN
+    </p>
+    <p>
+      The dangerous version of this design is a <strong>thundering herd</strong>:
+      the reset window elapses, and if every waiting caller were allowed
+      through as its own "probe," they would all hit the just-maybe-recovered
+      dependency simultaneously — potentially knocking it back down the
+      moment it came up, the exact opposite of what a cautious recovery probe
+      is for. <code>CircuitBreaker</code> prevents this with a
+      <code>_probe_in_flight</code> flag, set and checked under the same
+      lock that guards every other state read/mutation: the first caller to
+      observe HALF_OPEN claims the probe and proceeds; every other caller
+      that arrives while a probe is already in flight gets an immediate
+      <code>CircuitOpenError</code> instead of a second concurrent attempt.
+    </p>
+    <p>
+      Thread safety for the breaker as a whole — not specifically the
+      half-open probe race, but the general "many threads mutating shared
+      state" hazard the milestone calls out by name — is proven under real
+      load: <code>TestCircuitBreakerThreadSafety</code> starts 200 threads
+      simultaneously, all calling a function that always fails, against one
+      shared breaker with <code>failure_threshold=10</code>. The test asserts
+      three things afterward: no thread saw an unexpected exception (the
+      lock kept every read/mutation coherent), the breaker ended up OPEN
+      (the threshold was reached), and — the interesting part — the
+      dependency function was called somewhere between 10 and 199 times, not
+      all 200: proof the OPEN check itself, not just the failure counter, is
+      doing real work to stop callers once the breaker trips, mid-storm.
+    </p>
+    <div class="callout warn">
+      <div class="label">Scope note</div>
+      The 200-thread test targets the CLOSED-to-OPEN transition under
+      concurrent load, not a dedicated multi-thread race specifically against
+      the HALF_OPEN <code>_probe_in_flight</code> guard. That guard's
+      single-probe behavior is real production code, exercised by
+      sequential tests (a successful probe closes the breaker; a failed one
+      reopens it) — but this test suite does not additionally launch a
+      concurrent herd of threads at the exact instant a breaker transitions
+      to HALF_OPEN to prove only one of them wins the probe. Worth adding if
+      a future milestone leans harder on the half-open path.
+    </div>
+  </section>
+
+  <section id="centerpiece">
+    <h2><span class="num">7</span>The centerpiece: why this milestone exists at all</h2>
+    <p>
+      Here is the failure mode M6's own Definition-of-Done gate is written
+      to catch, stated plainly: a reference implementation of this exact
+      project wrote all three of these modules — retry, circuit breaker,
+      timeout — unit-tested each one thoroughly in isolation, and never once
+      called any of them from the live request path. Its
+      <code>/health</code> endpoint reported an empty breaker list forever,
+      because nothing ever registered a breaker outside of a test file.
+      Every one of its unit tests passed. Its reliability layer did not
+      exist in any way a real webhook request would ever notice.
+    </p>
+    <p>
+      This is why <code>DONE.html</code>'s second M6 gate is phrased the way
+      it is: <em>"Every security and reliability module has a live call site
+      in the request path, provable by grep — not merely a passing unit
+      test."</em> A plain <code>grep -r "from backend.reliability import"</code>
+      would have found imports in the reference implementation too — it
+      imported these modules into its own test files. Imports are not
+      evidence of wiring; they're evidence that a human (or an agent) once
+      typed the module's name somewhere.
+    </p>
+    <p>
+      L4 VERIFY's approach to this gate is the actual point worth
+      internalizing, not just the result. It did not stop at "does
+      <code>redis_arq.py</code> import <code>backend.reliability</code>" —
+      that check alone would have passed the reference implementation's
+      code too, if it had merely imported the modules without calling them.
+      Instead it verified the wiring two independent ways:
+    </p>
+    <div class="compare">
+      <div class="col">
+        <h4>Dynamic proof</h4>
+        <p>
+          Monkeypatched <code>CircuitBreaker.call</code> and
+          <code>call_with_retry</code> with counting wrappers, then drove one
+          real webhook POST through the actual FastAPI route (via
+          <code>TestClient</code>) against a <code>RedisJobQueue</code> whose
+          Redis connection was redirected to an unreachable address, and
+          observed the counts directly: <code>breaker_call_count = 2</code>,
+          <code>retry_attempt_count = 2</code> (shown in full in
+          Section&nbsp;5). The primitives didn't just get imported — they
+          executed, the correct number of times, during a request that
+          looks exactly like something GitHub would send.
+        </p>
+      </div>
+      <div class="col">
+        <h4>Falsification</h4>
+        <p>
+          Temporarily edited <code>CircuitBreaker.call</code> to bypass its
+          own state machine entirely — call the wrapped function straight
+          through, as if no breaker existed — and reran
+          <code>tests/unit/test_reliability.py</code>:
+        </p>
+        <pre><code>8 failed, 15 passed, 1 warning in 0.62s</code></pre>
+        <p>Then reverted and confirmed the suite is green again:</p>
+        <pre><code>23 passed, 1 warning in 0.61s</code></pre>
+      </div>
+    </div>
+    <p>
+      Exactly 8 of the 23 tests depend on the breaker's real state machine
+      actually running: the six direct <code>TestCircuitBreaker</code>
+      tests, the 200-thread concurrency test, the composition test that
+      checks the breaker trips and then fails fast, and the wiring test that
+      asserts the breaker ends up OPEN after a simulated Redis outage.
+      Neutering the breaker doesn't make those tests merely weaker — it
+      makes them fail outright, which is what distinguishes "this code path
+      is actually exercised" from "this code path is merely imported
+      somewhere." A reference implementation whose reliability layer is
+      dead code would show 23 passes either way, because dead code has no
+      failure mode when you break the thing it never called.
+    </p>
+  </section>
+
+  <section id="503">
+    <h2><span class="num">8</span>The 503 fix, and why HMAC still wins</h2>
+    <p>
+      Before M6, a Redis outage during <code>enqueue()</code> raised a raw
+      exception that FastAPI turned into an unhandled 500 — a
+      tracked-but-deferred item since M3. M6 closes it:
+      <code>RedisJobQueue</code> now translates both failure shapes (retries
+      exhausted, or the breaker already open) into one shared
+      <code>QueueUnavailableError</code>, and
+      <code>backend.webhook_receiver.router</code> catches exactly that type
+      and answers 503 instead.
+    </p>
+    <div class="compare before-after">
+      <div class="col before">
+        <h4>Before M6</h4>
+        <p>Redis unreachable &rarr; raw <code>ConnectionError</code> escapes
+        <code>enqueue()</code> &rarr; unhandled exception &rarr; FastAPI's
+        default 500, indistinguishable from a genuine bug in this service.</p>
+      </div>
+      <div class="col after">
+        <h4>After M6</h4>
+        <p>Redis unreachable &rarr; retry exhausted or breaker open &rarr;
+        <code>QueueUnavailableError</code> &rarr; router catches it &rarr;
+        503, telling GitHub (correctly) that this is a transient condition
+        worth retrying later.</p>
+      </div>
+    </div>
+    <p>
+      The one detail worth being precise about: this fix does not touch, or
+      weaken, the HMAC trust boundary from M2. The webhook route still
+      verifies the request's signature over the raw body <em>before</em>
+      anything else happens — including before the queue is ever touched.
+      So with Redis down <em>and</em> a bad signature, the response is still
+      401, not 503: signature verification runs first regardless of the
+      dependency's health, and a forged request never gets far enough to
+      discover that Redis is unreachable. The order in
+      <code>backend.webhook_receiver.router.receive_webhook</code> hasn't
+      changed — verify, then parse, then enqueue — M6 only changed what
+      happens when the last step fails.
+    </p>
+  </section>
+
+  <section id="limits">
+    <h2><span class="num">9</span>Known limits, stated honestly</h2>
+    <ol class="gaps">
+      <li>
+        <strong><code>CircuitBreaker</code>'s registry has no reader yet.</strong>
+        <code>register()</code>/<code>all_breakers()</code> maintain a real,
+        thread-safe, process-wide registry of every breaker constructed —
+        built because a future <code>/health</code> endpoint will need it —
+        but no <code>/health</code> route exists in this codebase yet to
+        call <code>all_breakers()</code>. This is forward-looking
+        infrastructure, the same category as M4's <code>WorkflowEngine</code>
+        Protocol or M5's <code>InMemoryHitlQueue</code>, not a gap in M6's
+        own scope. Worth revisiting specifically once M8's LLM client and
+        M11's GitHub client get wrapped in this same reliability layer: a
+        non-idempotent call to either (an LLM completion with side effects,
+        a real GitHub comment POST) would make an unread breaker registry a
+        more expensive blind spot than it is today, guarding only the
+        idempotent Redis operations.
+      </li>
+      <li>
+        <strong>A timed-out call keeps running in the background, because
+        Python cannot kill a thread.</strong>
+        <code>run_with_timeout</code> submits the wrapped callable to a
+        shared background thread pool and stops <em>waiting</em> for it once
+        the configured bound elapses — but the worker thread itself keeps
+        executing the original call until it eventually finishes or raises
+        on its own; there is no portable way in Python to forcibly terminate
+        a running thread. This is documented in
+        <code>backend/reliability/timeout.py</code>'s own module docstring
+        as a known, accepted trade-off, not a hidden gap — safe today because
+        the two calls it wraps (the idempotency <code>SET</code>, the ARQ
+        enqueue) are idempotent or side-effect-tolerant. Measured overshoot
+        past the configured timeout bound, across a small sample run, was
+        4&ndash;10ms — comfortably inside PLAN.md's own &plusmn;50ms
+        tolerance, and consistent with the scheduling overhead of a real
+        thread pool rather than a bare <code>future.result()</code> call.
+      </li>
+    </ol>
+  </section>
+
+  <section id="quiz">
+    <h2><span class="num">10</span>Quiz</h2>
+    <p>Three questions. Click each one to reveal the answer.</p>
+
+    <details class="quiz">
+      <summary class="q">1. A reference implementation of this project built retry.py, circuit_breaker.py, and timeout.py, unit-tested each one, and passed every test — yet its reliability layer never affected a single real request. Why does "the module is imported somewhere" not prove the opposite of that failure mode?</summary>
+      <div class="answer">
+        <p class="verdict">Because a unit test (or a `grep` for an import) can only tell you the code exists and runs in isolation — it says nothing about whether the live request path actually calls it. The reference implementation's own test files imported these modules; a plain import-grep would have passed its code too.</p>
+        <p>
+          What actually distinguishes "wired in" from "merely present" is
+          observing the primitive <em>execute</em> as a side effect of a
+          real request — which is exactly what M6's L4 VERIFY did:
+          monkeypatching the breaker and retry loop and watching a real
+          webhook POST trigger exactly 2 calls to each, and separately,
+          neutering the breaker and watching 8 of 23 tests fail because they
+          depend on state the breaker actually maintains. "The module
+          executed, with the effect a broken version of it would have
+          missed" is strictly stronger evidence than "the module is
+          imported," because the second is compatible with the module never
+          running at all.
+        </p>
+      </div>
+    </details>
+
+    <details class="quiz">
+      <summary class="q">2. With retry_max_attempts=5 and a circuit breaker failure_threshold=2, an always-failing dependency call is measured to hit the real dependency exactly 2 times, not 5. What stops attempts 3 through 5 from happening?</summary>
+      <div class="answer">
+        <p class="verdict">CircuitOpenError is registered as a non-retryable exception. After the 2nd real failure trips the breaker to OPEN, the retry loop's 3rd attempt calls the breaker again, but the breaker now raises CircuitOpenError before touching the dependency at all — and because that's non-retryable, the retry loop re-raises it immediately instead of sleeping and trying attempts 4 and 5.</p>
+        <p>
+          If <code>CircuitOpenError</code> were <em>not</em> marked
+          non-retryable, the retry loop would treat it like any other
+          failure — sleep, then try again — meaning attempts 3, 4, and 5
+          would each re-check the (still open) breaker, still never reach
+          the real dependency, but burn the entire retry budget's sleep time
+          doing so. Marking it non-retryable is what makes "fail fast while
+          open" actually fast: the very next attempt after the breaker opens
+          costs one cheap in-process exception, not a wasted retry cycle.
+        </p>
+      </div>
+    </details>
+
+    <details class="quiz">
+      <summary class="q">3. Composing the three primitives as retry(breaker(timeout(call))) puts retry outermost. Why not breaker(retry(timeout(call))), with retry innermost instead?</summary>
+      <div class="answer">
+        <p class="verdict">Because a breaker's failure_threshold counts consecutive failures it directly observes. If retry sat inside the breaker, one whole retry sequence (which might itself contain several real failed attempts) would register as only a single failure to the breaker — letting a genuinely dead dependency absorb several real hits per breaker-counted failure instead of tripping at the threshold the config actually names.</p>
+        <p>
+          With retry outermost, every individual attempt is separately
+          wrapped by the breaker (and, innermost, by the timeout), so each
+          real call the retry loop makes is exactly one data point for the
+          breaker's threshold. This is what makes the Section&nbsp;5 evidence
+          exact rather than approximate: a threshold of 2 trips after
+          precisely 2 real calls, not some larger number diluted by
+          nested retries the breaker never separately saw.
+        </p>
+      </div>
+    </details>
+  </section>
+
+  <footer>
+    Generated by the <code>explain-diff-html</code> skill during L4 VERIFY housekeeping for
+    milestone M6 of the <code>pr-review-agent</code> genesis-kit project. Diff range:
+    <code>030bb20</code> (feat(reliability): add retry-with-backoff, timeout, and
+    circuit breaker) through <code>8e07abe</code> (chore(genesis): checkpoint M6 L1
+    BUILD complete, awaiting L4 VERIFY; HEAD at time of writing) — 7 commits, 12 files
+    changed, 1862 insertions(+), 26 deletions(-). Self-contained: no external
+    stylesheets, fonts, scripts, or images.
+  </footer>
+
+</div>
+</body>
+</html>
