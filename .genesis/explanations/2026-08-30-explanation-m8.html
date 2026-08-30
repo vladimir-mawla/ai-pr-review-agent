@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>M8 Explained — First Real Specialist Agent (LLM-Backed)</title>
+<style>
+  :root {
+    --bg: #f7f7f5;
+    --bg-card: #ffffff;
+    --ink: #1b1f23;
+    --mut: #5b6472;
+    --line: #e2e4e8;
+    --accent: #2f6feb;
+    --accent-ink: #ffffff;
+    --ok: #1a7f37;
+    --warn: #9a6700;
+    --bad: #cf222e;
+    --code-bg: #f0f1f3;
+    --pill-bg: #eef2ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1117;
+      --bg-card: #161b22;
+      --ink: #e6edf3;
+      --mut: #9aa4b2;
+      --line: #2d333b;
+      --accent: #6ea8fe;
+      --accent-ink: #0d1117;
+      --ok: #3fb950;
+      --warn: #d29922;
+      --bad: #f85149;
+      --code-bg: #1c2128;
+      --pill-bg: #1c2440;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1117;
+    --bg-card: #161b22;
+    --ink: #e6edf3;
+    --mut: #9aa4b2;
+    --line: #2d333b;
+    --accent: #6ea8fe;
+    --accent-ink: #0d1117;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --bad: #f85149;
+    --code-bg: #1c2128;
+    --pill-bg: #1c2440;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    font-size: 16px;
+  }
+  .page { max-width: 880px; margin: 0 auto; padding: 40px 20px 100px; }
+  header.hero { margin-bottom: 32px; }
+  header.hero .kicker {
+    color: var(--accent);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-size: 12.5px;
+    margin: 0 0 10px;
+  }
+  h1 { font-size: clamp(26px, 4vw, 36px); margin: 0 0 12px; line-height: 1.2; }
+  .lede { color: var(--mut); font-size: 17px; max-width: 70ch; }
+  nav.toc {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin: 28px 0 40px;
+  }
+  nav.toc h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--mut);
+    margin: 0 0 10px;
+  }
+  nav.toc ol { margin: 0; padding-left: 20px; columns: 2; column-gap: 24px; }
+  nav.toc li { margin: 4px 0; break-inside: avoid; }
+  nav.toc a { color: var(--ink); text-decoration: none; border-bottom: 1px dashed var(--line); }
+  nav.toc a:hover { border-bottom-color: var(--accent); color: var(--accent); }
+
+  section { margin: 56px 0; }
+  section > h2 {
+    font-size: 22px;
+    margin: 0 0 16px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--line);
+  }
+  section > h2 .num { color: var(--accent); font-variant-numeric: tabular-nums; margin-right: 10px; }
+  h3 { font-size: 17px; margin: 26px 0 10px; }
+  p { margin: 12px 0; }
+  a { color: var(--accent); }
+  a:focus-visible, button:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .card { background: var(--bg-card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 22px; margin: 16px 0; }
+  .callout { border-left: 4px solid var(--accent); background: var(--pill-bg); border-radius: 8px; padding: 14px 18px; margin: 18px 0; }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.ok { border-left-color: var(--ok); }
+  .callout.bad { border-left-color: var(--bad); }
+  .callout .label {
+    font-weight: 700;
+    font-size: 12.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--mut);
+    margin-bottom: 6px;
+  }
+
+  code {
+    background: var(--code-bg);
+    padding: 1px 6px;
+    border-radius: 5px;
+    font-size: 0.9em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    white-space: pre;
+    font-size: 13.5px;
+    line-height: 1.55;
+  }
+  pre code { background: none; padding: 0; border-radius: 0; }
+
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14.5px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--mut); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .tablewrap { overflow-x: auto; }
+
+  .pill {
+    display: inline-block;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 2px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    color: var(--mut);
+    white-space: nowrap;
+  }
+  .pill.ok { color: var(--ok); border-color: var(--ok); }
+  .pill.bad { color: var(--bad); border-color: var(--bad); }
+  .pill.warn { color: var(--warn); border-color: var(--warn); }
+
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 18px 0; }
+  .flow .node {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 13.5px;
+    min-width: 120px;
+    text-align: center;
+  }
+  .flow .node.core { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .flow .node.bad { border-color: var(--bad); color: var(--bad); font-weight: 600; }
+  .flow .node.ok { border-color: var(--ok); color: var(--ok); font-weight: 600; }
+  .flow .node.warn { border-color: var(--warn); color: var(--warn); font-weight: 600; }
+  .flow .arrow { color: var(--mut); font-size: 18px; }
+  .flow.vertical { flex-direction: column; align-items: stretch; }
+  .flow.vertical .node { text-align: left; }
+  .flow.vertical .arrow { text-align: center; }
+
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+  @media (max-width: 640px) { .compare { grid-template-columns: 1fr; } }
+  .compare .col { border-radius: 12px; padding: 16px 18px; border: 1px solid var(--line); }
+  .compare .col.before { background: color-mix(in srgb, var(--bad) 6%, var(--bg-card)); }
+  .compare .col.after { background: color-mix(in srgb, var(--ok) 6%, var(--bg-card)); }
+  .compare h4 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .compare.before-after .before h4 { color: var(--bad); }
+  .compare.before-after .after h4 { color: var(--ok); }
+
+  .module-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin: 18px 0; }
+  .module-card { background: var(--bg-card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .module-card h4 {
+    margin: 0 0 6px;
+    font-size: 15px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: var(--accent);
+  }
+  .module-card p { margin: 6px 0 0; font-size: 14px; color: var(--mut); }
+
+  .lane-grid { display: flex; flex-wrap: wrap; gap: 12px; margin: 18px 0; align-items: stretch; }
+  .lane {
+    flex: 1 1 220px;
+    border-radius: 12px;
+    border: 2px solid var(--line);
+    padding: 14px 16px;
+    background: var(--bg-card);
+  }
+  .lane .lane-tag {
+    font-size: 11.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--mut);
+    margin-bottom: 6px;
+  }
+  .lane.busy { border-color: var(--bad); }
+  .lane.busy .lane-tag { color: var(--bad); }
+  .lane p { font-size: 13.5px; margin: 6px 0 0; }
+
+  .finding-card { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 10px 0; background: var(--bg-card); }
+  .finding-card .sev { color: var(--bad); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .finding-card .loc { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; color: var(--mut); }
+  .finding-card .conf { float: right; color: var(--mut); font-size: 13px; }
+  .finding-card .rationale { margin-top: 8px; font-size: 14px; }
+
+  ol.gaps li, ul.plain li { margin: 8px 0; }
+
+  .timeline { margin: 20px 0; padding: 0; list-style: none; }
+  .timeline li {
+    position: relative;
+    padding: 4px 0 18px 26px;
+    border-left: 2px solid var(--line);
+    margin-left: 6px;
+  }
+  .timeline li:last-child { border-left-color: transparent; padding-bottom: 0; }
+  .timeline li::before {
+    content: "";
+    position: absolute;
+    left: -7px;
+    top: 6px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--bg-card);
+    border: 2px solid var(--accent);
+  }
+  .timeline li.reject::before { border-color: var(--bad); }
+  .timeline li.approve::before { border-color: var(--ok); }
+  .timeline li .when { font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .timeline li.reject .when { color: var(--bad); }
+  .timeline li.approve .when { color: var(--ok); }
+
+  details.quiz {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 18px;
+    margin: 16px 0;
+  }
+  details.quiz summary { cursor: pointer; font-weight: 600; list-style: none; }
+  details.quiz summary::-webkit-details-marker { display: none; }
+  details.quiz summary::before { content: "▸ "; color: var(--accent); }
+  details.quiz[open] summary::before { content: "▾ "; }
+  details.quiz .q { font-weight: 600; margin-bottom: 4px; }
+  details.quiz .answer { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
+  details.quiz .answer .verdict { font-weight: 700; color: var(--ok); }
+
+  footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--mut); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <p class="kicker">Genesis L4 · Explain Diff · Milestone M8</p>
+    <h1>First Real Specialist Agent (LLM-Backed)</h1>
+    <p class="lede">
+      Every milestone through M7 was deterministic: the same input always
+      produced the same output, and every test could assert exact
+      equality. M8 replaces the canned SECURITY stub with a real call to
+      <code>claude-haiku-4-5</code> — the first point in this system where
+      that stops being true. This page covers the schema wall that keeps a
+      non-deterministic response from reaching the rest of the pipeline
+      unchecked, the empty-vs-invalid distinction that decides whether a
+      clean diff is misrouted to human review, a centralized
+      <code>BudgetGuard</code> that bit its own test suite twice before the
+      query itself was fixed, a non-retryable-error bug that only a real
+      (rejected) credential could have found, and — the actual point of
+      all of it — what the model produced when it finally ran for real.
+      Diff range <code>8b2c7ac</code>&nbsp;&hellip;&nbsp;<code>300cd59</code>
+      on <code>main</code> — 16 commits, 24 files changed, 4630
+      insertions(+), 20 deletions(-).
+    </p>
+  </header>
+
+  <nav class="toc">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#background">Background: the last deterministic milestone was M7</a></li>
+      <li><a href="#threshold">Why a real LLM call is a threshold, not just another feature</a></li>
+      <li><a href="#schema-wall">The schema wall: drift modes a real model actually produces</a></li>
+      <li><a href="#empty-vs-invalid">Empty vs. invalid: the distinction that decides HITL routing</a></li>
+      <li><a href="#forced-hitl">The forced-HITL fallback and its collision-proof sentinel</a></li>
+      <li><a href="#budgetguard">BudgetGuard: one check, one query, one bug that bit twice</a></li>
+      <li><a href="#reliability">Reusing M6, disabling SDK retries, and the bug only a real key could find</a></li>
+      <li><a href="#live-demo">What the real call actually produced</a></li>
+      <li><a href="#limits">Honest limits</a></li>
+      <li><a href="#quiz">Quiz</a></li>
+    </ol>
+  </nav>
+
+  <section id="background">
+    <h2><span class="num">1</span>Background: the last deterministic milestone was M7</h2>
+    <p>
+      By the end of M7, this system had a webhook receiver, a Redis-backed
+      queue, a LangGraph orchestrator fanning out to four specialist
+      "agents," an aggregator with a confidence-weighted human-in-the-loop
+      (HITL) gate, a reliability layer (retry / circuit breaker / timeout),
+      and an append-only Postgres events spine recording everything that
+      happened. None of the four specialists — SECURITY, QUALITY, TESTS,
+      DOCS — did any real analysis: each was a canned M4 stub returning a
+      fixed <code>Finding</code> with a fixed confidence, so every review
+      the system produced was a deterministic function of its inputs.
+    </p>
+    <p>
+      M8's outcome, verbatim from <code>PLAN.md</code>: "the security
+      agent makes a real call to the driver model (<code>claude-haiku-4-5</code>)
+      against a fixture diff, and its raw output is parsed through the
+      <code>Finding</code> Pydantic schema before anything downstream sees
+      it — the first point real model behavior enters the system." That
+      sentence is doing a lot of work: it names both what changed
+      (SECURITY becomes real) and the one thing that must exist around it
+      before the change is safe (a schema wall between the model's raw
+      text and everything downstream that assumes well-typed
+      <code>Finding</code> objects).
+    </p>
+  </section>
+
+  <section id="threshold">
+    <h2><span class="num">2</span>Why a real LLM call is a threshold, not just another feature</h2>
+    <p>
+      Every prior milestone's test suite could assert exact output:
+      "this signed payload returns 200," "this job appears in the worker's
+      log," "this collision keeps the CRITICAL finding." A real model call
+      breaks that assumption at its root — the same diff sent twice can
+      come back phrased differently, with a different confidence, in a
+      different key order, or (rarely, but demonstrably, since it is what
+      this milestone had to build defenses for) wrapped in markdown, or
+      preceded by a sentence of commentary, or missing the wrapping object
+      entirely. Nothing downstream of this call — the aggregator's dedupe,
+      the HITL gate's threshold comparison, <code>agent_events</code>'
+      <code>NUMERIC(4,3)</code> confidence column — was built to tolerate
+      an arbitrary string. It was built to tolerate a <code>Finding</code>.
+    </p>
+    <div class="callout">
+      <p class="label">The threshold, stated plainly</p>
+      <p>
+        Before M8: every code path from webhook to posted review is a
+        pure function, replayable byte-for-byte. After M8: one call in
+        that path talks to a system whose output is drawn from a
+        distribution, not a lookup table. Everything this milestone built
+        — the parser, the two forced-HITL fallbacks, <code>BudgetGuard</code>
+        — exists to make that one non-deterministic call safe to have in
+        an otherwise deterministic pipeline, not to make the pipeline
+        non-deterministic everywhere.
+      </p>
+    </div>
+  </section>
+
+  <section id="schema-wall">
+    <h2><span class="num">3</span>The schema wall: drift modes a real model actually produces</h2>
+    <p>
+      <code>backend/agents/response_parsing.py</code>'s
+      <code>parse_findings_from_llm_response</code> is that wall. It is
+      told, in the prompt, to return exactly
+      <code>{"findings": [...]}</code> — and then written as if it can't
+      trust that at all:
+    </p>
+    <div class="module-grid">
+      <div class="module-card">
+        <h4>1. Well-formed</h4>
+        <p><code>{"findings": [...]}</code> — the happy path.</p>
+      </div>
+      <div class="module-card">
+        <h4>2. Key drift</h4>
+        <p>A different top-level key, e.g. <code>{"issues": [...]}</code>.</p>
+      </div>
+      <div class="module-card">
+        <h4>3. Markdown-fenced</h4>
+        <p>The JSON arrives inside a &grave;&grave;&grave;json ... &grave;&grave;&grave; fence anyway.</p>
+      </div>
+      <div class="module-card">
+        <h4>4. Prose-then-JSON</h4>
+        <p>A sentence of commentary before the JSON object starts.</p>
+      </div>
+      <div class="module-card">
+        <h4>5. A bare list</h4>
+        <p>The wrapping object is skipped: <code>[{...}, {...}]</code> directly.</p>
+      </div>
+      <div class="module-card">
+        <h4>6. Total garbage</h4>
+        <p>No JSON at all, or every extracted item fails <code>Finding</code> validation.</p>
+      </div>
+    </div>
+    <p>
+      Cases 1&ndash;5 all resolve to a real <code>list[Finding]</code> —
+      the extraction logic tries a fenced block, then a bare JSON
+      structure, then walks the alternate key list, then falls back to
+      treating the whole payload as a list. Every recognized item is
+      validated individually against the <code>Finding</code> Pydantic
+      model; one malformed item (a hallucinated severity string, a missing
+      field) is logged and dropped rather than discarding its
+      valid siblings — "one bad item" and "the whole response is garbage"
+      are different failure severities, and the parser distinguishes them
+      instead of treating any error as total failure.
+    </p>
+    <p>
+      Case 6 — genuinely unrecoverable input — is where this module
+      deliberately stops being tolerant and raises
+      <code>ResponseParseError</code>, on purpose, rather than quietly
+      returning <code>[]</code>. What that exception means, and why an
+      empty list would have been the wrong choice even here, is section 4.
+    </p>
+  </section>
+
+  <section id="empty-vs-invalid">
+    <h2><span class="num">4</span>Empty vs. invalid: the distinction that decides HITL routing</h2>
+    <p>
+      This is the first of two real bugs the M8 L1 BUILD session caught in
+      its own work, before any independent verifier ever looked at it. The
+      original parser could not tell apart two situations that look
+      identical at the Python level — an empty list — but mean opposite
+      things:
+    </p>
+    <div class="compare before-after">
+      <div class="col before">
+        <h4>Genuinely empty</h4>
+        <p><code>{"findings": []}</code> — the model looked at a clean
+        diff and correctly found nothing to flag. This is a valid,
+        confident result.</p>
+      </div>
+      <div class="col after">
+        <h4>Every item invalid</h4>
+        <p>The model returned a non-empty list, but every item failed
+        <code>Finding</code> validation — the response is untrustworthy,
+        not merely quiet.</p>
+      </div>
+    </div>
+    <p>
+      Both cases produce the same Python value at the point the original
+      code checked it: an empty <code>findings</code> list after
+      validation. Collapsing them meant a clean diff — the common case —
+      was misrouted through the forced-HITL CRITICAL fallback path (see
+      section 5) every single time, defeating the entire point of an
+      automated review: it would never auto-post anything.
+    </p>
+    <p>
+      The fix is a single extra condition, but it's the condition that
+      matters:
+    </p>
+    <pre><code>if not findings and items:
+    raise ResponseParseError(
+        "no valid Finding objects could be extracted from the LLM response"
+    )
+return findings</code></pre>
+    <p>
+      <code>ResponseParseError</code> is raised only when the pre-validation
+      <code>items</code> list was non-empty yet nothing in it survived —
+      that is Case 6. When <code>items</code> was empty to begin with, the
+      function falls through and returns the empty list, exactly as a
+      clean diff deserves. Two regression tests
+      (<code>test_empty_findings_list_is_valid_not_an_error</code>,
+      <code>test_empty_findings_list_is_a_real_empty_list_not_a_fallback</code>)
+      pin this: both are proven to fail against the pre-fix collapsed
+      logic and pass after the one-line fix.
+    </p>
+    <div class="callout warn">
+      <p class="label">Why conflating them is dangerous, not just wrong</p>
+      <p>
+        A schema-valid <code>Finding</code> is not automatically a
+        <em>correct</em> one — but an incorrectly-routed <em>empty</em>
+        list is worse than either, because it corrupts the meaning of
+        silence itself. If "nothing to report" and "I can't tell you
+        anything trustworthy" produce the same downstream behavior, an
+        operator loses the ability to distinguish "this specialist is
+        confident and clean" from "this specialist's output should not be
+        trusted" — exactly the ambiguity a security review pipeline exists
+        to eliminate, not reproduce.
+      </p>
+    </div>
+  </section>
+
+  <section id="forced-hitl">
+    <h2><span class="num">5</span>The forced-HITL fallback and its collision-proof sentinel</h2>
+    <p>
+      When Case 6 does fire — or, separately, when the security specialist
+      never got to attempt an analysis at all (a budget block, a bad
+      credential, the provider unreachable) — this system does not crash
+      the run and does not return an empty list. It returns exactly one
+      synthetic <code>Finding</code>: <code>CRITICAL</code> severity,
+      confidence <code>0.000</code>, with a rationale explicitly stating
+      this is not a real security claim.
+    </p>
+    <p>
+      CRITICAL is deliberate, not decorative.
+      <code>backend.hitl.queue.has_critical_finding</code> — built back at
+      M5 — forces <strong>any</strong> review containing a CRITICAL
+      finding to human review, unconditionally, regardless of how
+      confident the other three (still-stub) specialists are. A
+      lower-confidence-but-non-CRITICAL fallback could, in principle, still
+      average out above the auto-post threshold if the other specialists
+      were confident enough; a forced CRITICAL cannot. M8 reuses this
+      existing mechanism for <em>two different failure classes</em> instead
+      of inventing a second signal shape:
+    </p>
+    <table>
+      <thead><tr><th>Builder</th><th>Fires when</th><th><code>file_path</code> sentinel</th></tr></thead>
+      <tbody>
+        <tr><td><code>_parse_failure_fallback_finding</code></td><td>The model answered, but its answer was garbage (Case 6)</td><td><code>&lt;llm-response-unparseable&gt;</code></td></tr>
+        <tr><td><code>infrastructure_failure_fallback_finding</code></td><td>The specialist couldn't even attempt analysis (<code>BudgetExceededError</code>, <code>LLMConfigurationError</code>, <code>LLMCallFailedError</code>)</td><td><code>&lt;security-specialist-unavailable&gt;</code></td></tr>
+      </tbody>
+    </table>
+    <p>
+      Both sentinels use <code>line_start=1, line_end=1</code>. That
+      matters because M5's aggregator dedupes findings by the key
+      <code>(file_path, line_start)</code> — a real collision would mean
+      one sentinel silently absorbing or being absorbed by an unrelated
+      finding that happens to share a location. It can't happen here for
+      two independent reasons: first, neither sentinel <code>file_path</code>
+      can ever be produced by a real diff — angle brackets are not valid
+      path characters a unified diff's <code>+++</code>/<code>---</code>
+      headers would ever emit, so no genuine <code>Finding</code> can share
+      the key. Second, the two sentinels don't even collide with
+      <em>each other</em>: they use two different literal
+      <code>file_path</code> strings, so a run that (hypothetically)
+      triggered both fallback paths would still keep both forced-CRITICAL
+      findings distinct through dedupe, rather than one silently winning
+      the collision and discarding the other's HITL signal.
+    </p>
+  </section>
+
+  <section id="budgetguard">
+    <h2><span class="num">6</span>BudgetGuard: one check, one query, one bug that bit twice</h2>
+    <p>
+      <code>backend/economics/budget.py</code>'s <code>BudgetGuard</code>
+      hard-blocks — raises, never warns — once today's real spend meets a
+      configured daily cap (default $20). Two design choices are worth
+      isolating from the rest of the milestone:
+    </p>
+    <h3>The check lives inside the client, not inside each node</h3>
+    <p>
+      <code>BudgetGuard.check_and_raise()</code> is the first statement
+      inside <code>AnthropicLLMClient.complete</code>/<code>complete_async</code>
+      — before the underlying Anthropic client is even constructed. The
+      original <code>context-graph.json</code> invariant described a
+      per-node check instead; an independent L4 VERIFY session judged the
+      built, centralized design better (no future caller of
+      <code>complete</code> can forget the check; it covers every current
+      and future call site uniformly, sync or async) and had the invariant
+      text reworded to match reality rather than requiring the code to
+      match a worse design retroactively. It is grep-verifiable: every
+      real <code>Anthropic(</code> construction and every real
+      <code>messages.create</code> call in <code>backend/</code> resolves
+      to exactly one call site, inside <code>complete</code>, reachable
+      only after <code>check_and_raise()</code> has already run.
+    </p>
+    <h3>Spend is read from M7's events spine, never an in-memory counter</h3>
+    <p>
+      <code>current_spend_usd()</code> queries real
+      <code>agent_events</code> rows, not a process-local variable — a
+      counter would reset on every restart and disagree with any other
+      process spending against the same budget. This is exactly the reason
+      M7 built an append-only events spine with a real <code>cost_usd</code>
+      column: so a later milestone (this one) would have a shared source
+      of truth to query instead of inventing a second, parallel one.
+    </p>
+    <h3>The day-window bug that bit twice</h3>
+    <p>
+      The second bug the L1 BUILD session found in its own work: an
+      integration test proving <code>BudgetGuard</code> reads real spend
+      pinned its fixture rows to a far-future day (2030-06-15) "for test
+      isolation." Because the original query,
+      <code>sum_llm_cost_since</code>, only checked <code>ts &gt;=
+      start_of_today</code> with no upper bound, a row dated in 2030 is
+      still <code>&gt;=</code> today's midnight — it silently counted
+      toward the <em>live</em> budget's real spend. Running the demo CLI
+      immediately afterward raised a spurious
+      <code>BudgetExceededError: spent $2119.000446 of $20 cap</code>, the
+      sum of every future-pinned fixture row the test suite itself had
+      written.
+    </p>
+    <p>
+      The first attempt at a fix re-pinned the fixture day to the past
+      instead of touching the query — which relocated the symptom without
+      touching the defect. An independent L4 VERIFY session proved this
+      empirically by writing its <em>own</em> 2099-dated boundary-test
+      rows and re-triggering the identical failure mode ($40.00 of a $20
+      cap). The real fix bounds the query itself to a genuine half-open
+      window and renames it to say what it now does:
+    </p>
+    <pre><code>-- before: WHERE event_type = 'llm.call' AND ts >= day_start
+-- after:
+WHERE event_type = %s AND ts >= %s AND ts &lt; %s   -- [day_start, day_start + 1 day)</code></pre>
+    <p>
+      <code>sum_llm_cost_since</code> was renamed
+      <code>sum_llm_cost_for_day</code> since the old name no longer
+      described what it does. A future-dated row is now excluded from the
+      day it doesn't belong to — a design decision, not an oversight: the
+      hot-path check stays a single cheap bounded scan rather than growing
+      a second "scan for anomalies" query nobody asked for yet.
+    </p>
+    <div class="callout ok">
+      <p class="label">Verified against this session's own real data</p>
+      <p>
+        The two 2030-dated fixture rows ($2119.000446 each) are still
+        sitting in the append-only <code>agent_events</code> table today —
+        they can never be deleted, only excluded. Querying
+        <code>BudgetGuard.current_spend_usd()</code> for real during this
+        session's live-demo closeout returned <code>$0.002408</code>,
+        exactly the sum of three real, same-day <code>llm.call</code> rows
+        — proof the bounded window keeps working against the exact rows
+        that broke the unbounded one.
+      </p>
+    </div>
+  </section>
+
+  <section id="reliability">
+    <h2><span class="num">7</span>Reusing M6, disabling SDK retries, and the bug only a real key could find</h2>
+    <p>
+      <code>AnthropicLLMClient.complete</code> wraps the real
+      <code>anthropic.Anthropic().messages.create(...)</code> call in the
+      exact <code>retry(breaker(timeout(call)))</code> composition
+      <code>RedisJobQueue</code> and <code>EventRepository</code> already
+      use — reused, not reinvented, because a brand-new unprotected
+      outbound call here would violate the same "every outbound call has a
+      timeout / circuit-breaker" gate M6 and M7 were each held to.
+    </p>
+    <p>
+      The Anthropic SDK client is constructed with <code>max_retries=0</code>:
+      this project's own retry/breaker/timeout stack is the single source
+      of retry behavior. Leaving the SDK's own default (2 retries) enabled
+      underneath it would silently double-retry every failure, confusing
+      both real latency and the exact attempt counts this milestone's
+      fault-injection tests assert on.
+    </p>
+    <h3>The bug: a rejected credential crashed the orchestrator; a missing one didn't</h3>
+    <p>
+      This was found the hard way — while trying to unblock the live demo
+      with what was believed to be a real credential, Anthropic rejected
+      it outright (a genuine 401 <code>authentication_error</code>,
+      confirmed independently with a raw <code>curl</code>). A
+      <em>missing</em> key was already handled correctly: it never reaches
+      the SDK at all — <code>LLMConfigurationError</code> is raised
+      earlier, inside <code>_client()</code>, before any network call is
+      attempted, and <code>security_node</code> already turns that into a
+      forced-HITL finding. An <em>invalid</em> key is a fundamentally
+      similar situation — "the analysis did not happen" — but was not
+      treated the same:
+    </p>
+    <div class="flow vertical">
+      <div class="node bad">anthropic.AuthenticationError raised by messages.create</div>
+      <div class="arrow">↓</div>
+      <div class="node warn">call_with_retry: it's in _NON_RETRYABLE_EXCEPTIONS → re-raised immediately, uncaught, on attempt 1 (correct — a bad key must never be retried 3 times)</div>
+      <div class="arrow">↓</div>
+      <div class="node bad">complete()'s except (RetryExhaustedError, CircuitOpenError): never catches it — it was never wrapped into either</div>
+      <div class="arrow">↓</div>
+      <div class="node bad">propagates raw out of AnthropicLLMClient, through SecurityAgent.analyze (deliberately doesn't catch infrastructure failures), and crashes security_node</div>
+    </div>
+    <p>
+      Widening <code>security_node</code>'s own catch tuple to also
+      recognize <code>anthropic.AuthenticationError</code> (fixing it at
+      the node) was considered and rejected: it would either require
+      importing the vendor SDK into <code>backend/orchestrator/</code> — a
+      layering violation this project has never had, since
+      <code>nodes.py</code> has never imported <code>anthropic</code> — or
+      duplicating the SDK's exception list a second time outside
+      <code>backend/tools/llm_client.py</code>, the one module whose whole
+      job is to be that vendor boundary.
+    </p>
+    <p>
+      The fix is at the boundary instead. <code>complete</code> now also
+      catches <code>anthropic.AnthropicError</code> — the SDK's common
+      base class, covering its <em>entire</em> exception family, not
+      merely <code>AuthenticationError</code> — around the
+      retry/breaker/timeout call, and re-raises it as this project's own
+      <code>LLMCallFailedError</code>:
+    </p>
+    <pre><code>except (RetryExhaustedError, CircuitOpenError) as exc:
+    raise LLMCallFailedError(
+        f"LLM call failed (retries exhausted or circuit breaker open): {exc}"
+    ) from exc
+except AnthropicError as exc:
+    # re-raised immediately by call_with_retry, never wrapped in
+    # RetryExhaustedError -- would otherwise escape all the way to
+    # security_node, which only recognizes this project's own types.
+    raise LLMCallFailedError(
+        f"LLM call failed (non-retryable provider error): "
+        f"{type(exc).__name__}: {exc}"
+    ) from exc</code></pre>
+    <p>
+      This costs nothing at the already-correct fast-fail path (a bad key
+      still fails on attempt 1, never retried) and means
+      <code>security_node</code>'s existing, <em>unchanged</em> catch —
+      <code>BudgetExceededError</code>, <code>LLMConfigurationError</code>,
+      <code>LLMCallFailedError</code> — now reaches it, producing exactly
+      the same forced-HITL synthetic finding a budget block already
+      produces. The non-retryable set also gained
+      <code>RequestTooLargeError</code> (413 — the same "retrying the
+      identical oversized body can never help" family, simply missed
+      before). Transient failures — rate limits, overload, timeouts — stay
+      deliberately retryable; this is not a blanket "never retry the
+      vendor" change, only a fix for the family that can never succeed no
+      matter how many times it's retried.
+    </p>
+  </section>
+
+  <section id="live-demo">
+    <h2><span class="num">8</span>What the real call actually produced</h2>
+    <p>
+      With a valid credential finally in place, PLAN.md's exact demo
+      command was run for real:
+    </p>
+    <pre><code>ANTHROPIC_API_KEY=... python -m backend.agents.security_agent --diff tests/fixtures/sqli_diff.patch</code></pre>
+    <p>
+      (run with the key sourced from <code>.env</code> via pydantic-settings,
+      never typed literally on the command line). It exited 0 and printed
+      two findings against a fixture diff containing two real, deliberately
+      planted SQL-injection sinks — string concatenation in
+      <code>find_by_username</code>, f-string interpolation in a new
+      <code>find_by_id_unsafe</code> method:
+    </p>
+    <div class="finding-card">
+      <span class="sev">CRITICAL</span> · <span class="loc">app/db.py:15-16</span>
+      <span class="conf">confidence 0.999</span>
+      <p class="rationale">"The find_by_username method now uses string concatenation instead of parameterized queries, allowing direct SQL injection via the username parameter. An attacker can inject arbitrary SQL by providing input like &quot;' OR '1'='1&quot;."</p>
+    </div>
+    <div class="finding-card">
+      <span class="sev">CRITICAL</span> · <span class="loc">app/db.py:19-20</span>
+      <span class="conf">confidence 0.999</span>
+      <p class="rationale">"The find_by_id_unsafe method uses f-string interpolation to build SQL queries directly, allowing SQL injection via the user_id parameter. An attacker can inject arbitrary SQL by providing input like &quot;1; DROP TABLE users;--&quot;."</p>
+    </div>
+    <p>
+      Both findings validate against the <code>Finding</code> Pydantic
+      schema (checked explicitly via <code>Finding.model_validate</code>
+      on each, not merely by the fact that they printed without error).
+    </p>
+    <h3>Is it actually correct?</h3>
+    <p>
+      Judged against the fixture diff directly, not just against the
+      schema: yes, substantively. Both real SQL-injection sinks were
+      found, categorized correctly (<code>sql_injection</code>), scored
+      CRITICAL with high confidence, and nothing was hallucinated — no
+      third, invented vulnerability, no false claim about an unrelated
+      part of the file. The line ranges are close but not pixel-perfect:
+      the diff's new-file line numbering puts the actual vulnerable
+      <code>query = ...</code> statement for <code>find_by_username</code>
+      at line 16 (the model's reported range, 15&ndash;16, includes the
+      preceding comment line rather than the following
+      <code>execute(query)</code> call at line 17) — a one-line imprecision
+      in <em>which</em> lines bound the issue, not a wrong location or a
+      wrong diagnosis. The second finding's range (19&ndash;20) lines up
+      exactly with the function definition and its vulnerable query line.
+      A schema-valid finding is not automatically a correct one (see
+      section 4's callout) — this is the case where it happens to be both.
+    </p>
+    <p>
+      A second, separate real call (passing
+      <code>review_id="m8-closeout-demo2"</code>, since the demo CLI
+      itself never passes one — there is nothing to correlate an ad hoc
+      CLI run's spend against) produced a real <code>llm.call</code> row:
+    </p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>model</th><th>tokens_in</th><th>tokens_out</th><th>cost_usd</th><th>latency_ms</th></tr></thead>
+        <tbody>
+          <tr><td><code>claude-haiku-4-5</code></td><td>797</td><td>273</td><td>0.002162</td><td>2735</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      Hand-checked against <code>backend/economics/pricing.py</code>'s
+      table for <code>claude-haiku-4-5</code> ($1.00 / $5.00 per million
+      input/output tokens):
+      797 &times; ($1.00 / 1,000,000) + 273 &times; ($5.00 / 1,000,000) =
+      $0.000797 + $0.001365 = <strong>$0.002162</strong> — exact match.
+    </p>
+  </section>
+
+  <section id="limits">
+    <h2><span class="num">9</span>Honest limits</h2>
+    <ol class="gaps">
+      <li>
+        <strong>No <code>llm.call</code> event on a failed call.</strong>
+        <code>AnthropicLLMClient.complete</code> only calls
+        <code>emit_llm_call</code> on success — a call that exhausts
+        retries or hits an open circuit breaker records nothing in
+        <code>agent_events</code> beyond whatever the caller's own error
+        handling logs elsewhere. A future milestone building real
+        alerting/dashboards off the events spine may want a failure-shaped
+        event too; not built here since the <code>outcome</code>/token/cost
+        fields don't have an obvious "this failed" shape without a schema
+        change.
+      </li>
+      <li>
+        <strong>Three specialists are still stubs.</strong> Only SECURITY
+        is real. QUALITY, TESTS, and DOCS remain M4's canned findings,
+        per this milestone's explicit scope — M10's job.
+      </li>
+      <li>
+        <strong><code>complete_async</code> has no live call site yet.</strong>
+        The one live call this milestone built runs on a LangGraph worker
+        thread, never an asyncio event loop, so the synchronous
+        <code>complete</code> is correct there. The async path is directly
+        tested (the offload mechanism is proven to work) but unused,
+        forward-looking infrastructure — the same category as M7's own
+        <code>emit_tool_call</code>.
+      </li>
+      <li>
+        <strong>No per-model or per-agent budget breakdown.</strong>
+        <code>BudgetGuard</code> sums all <code>llm.call</code> cost
+        across every model/agent/review for the day against one global
+        cap — there is no way today to ask "how much did QUALITY
+        specifically spend."
+      </li>
+    </ol>
+  </section>
+
+  <section id="quiz">
+    <h2><span class="num">10</span>Quiz</h2>
+    <p>Three questions. Click each one to reveal the answer.</p>
+
+    <details class="quiz">
+      <summary class="q">1. A model response of {"findings": []} and a model response where every item in a non-empty findings list fails Finding validation both produce the same Python value at the point the original (buggy) parser checked it: an empty list. Why must these two cases never be treated the same way?</summary>
+      <div class="answer">
+        <p class="verdict">Because they mean opposite things: an empty findings list from a genuinely empty items list is a valid, confident "nothing to flag" result for a clean diff, while a non-empty items list where every item failed validation means the model's response was untrustworthy garbage. Collapsing them means "the model found nothing" and "the model's output could not be trusted" become indistinguishable.</p>
+        <p>
+          The real-world consequence was concrete, not theoretical: the
+          original parser routed every genuinely clean diff through the
+          same forced-HITL CRITICAL fallback a total parse failure uses —
+          because it could not tell the two cases apart, it treated the
+          common case (a clean diff) as if it were the rare, alarming one
+          (unparseable output). The fix checks whether the pre-validation
+          <code>items</code> list was itself non-empty before deciding
+          whether an empty result is a clean report or a real failure —
+          <code>if not findings and items: raise ResponseParseError(...)</code>
+          — so only "non-empty input, zero survivors" raises, not "empty
+          input, zero survivors."
+        </p>
+      </div>
+    </details>
+
+    <details class="quiz">
+      <summary class="q">2. BudgetGuard.check_and_raise() reads spend via a query bounded to [day_start, day_start + 1 day). An earlier version of the query only checked "ts >= day_start" with no upper bound, and this was "fixed" once by re-pinning a test fixture's future-dated rows to the past instead of changing the query. Why did that first fix not actually work?</summary>
+      <div class="answer">
+        <p class="verdict">Because the defect was in the query, not in any one test's fixture data. An unbounded ">=" query counts any row timestamped today or later — including any future-dated row, from any source, that anyone ever inserts into the append-only table. Re-pinning one test's own fixture rows to a safely-past date only stopped THAT test from re-triggering the bug; it did nothing to stop a different future-dated row from causing the exact same failure.</p>
+        <p>
+          That's exactly what happened: an independent verifier wrote its
+          own far-future boundary-test rows to check the exact same query,
+          and reproduced the identical class of failure
+          (<code>BudgetExceededError</code> against inflated spend) with
+          its own data. The real fix bounds the query itself to a genuine
+          half-open window, <code>ts &gt;= day_start AND ts &lt;
+          day_start + 1 day</code>, so <em>any</em> future-dated row —
+          regardless of which test, session, or future bug produced it —
+          is excluded from "today's" spend by construction, not by every
+          test author remembering to avoid future dates.
+        </p>
+      </div>
+    </details>
+
+    <details class="quiz">
+      <summary class="q">3. anthropic.AuthenticationError was already listed in _NON_RETRYABLE_EXCEPTIONS before the fix in this milestone, so call_with_retry correctly re-raised it on attempt 1 without retrying 3 times. Given that the non-retryable behavior was already correct, why did a bad API key still crash the whole orchestrator run instead of forcing human review?</summary>
+      <div class="answer">
+        <p class="verdict">Because "re-raised without retrying" and "wrapped into this project's own exception type" are two different things, and only the first one was happening. call_with_retry re-raises a non-retryable exception immediately and uncaught -- it never becomes a RetryExhaustedError. complete()'s own exception handler only caught (RetryExhaustedError, CircuitOpenError), so the raw anthropic.AuthenticationError sailed straight past that handler untouched.</p>
+        <p>
+          From there it propagated through <code>SecurityAgent.analyze</code>
+          (which deliberately does not catch infrastructure failures) and
+          reached <code>security_node</code>, whose catch tuple only
+          recognizes this project's own exception types
+          (<code>BudgetExceededError</code>, <code>LLMConfigurationError</code>,
+          <code>LLMCallFailedError</code>) — never a vendor SDK type — so
+          it crashed the node instead of routing to the forced-HITL
+          fallback a missing key already triggers correctly. The fix adds
+          a second <code>except AnthropicError</code> clause inside
+          <code>complete</code> itself, wrapping the SDK's entire exception
+          family into <code>LLMCallFailedError</code> at the one module
+          whose job is to be the vendor boundary — so the fast-fail
+          behavior stays identical, but the failure now arrives at
+          <code>security_node</code> in a shape it already knows how to
+          handle.
+        </p>
+      </div>
+    </details>
+  </section>
+
+  <footer>
+    Generated by the <code>explain-diff-html</code> skill during L4 VERIFY housekeeping for
+    milestone M8 of the <code>pr-review-agent</code> genesis-kit project. Diff range:
+    <code>8b2c7ac</code> (feat(core): add M8 settings for the driver model, BudgetGuard cap, and
+    LLM reliability knobs) through <code>300cd59</code> (fix: wrap non-retryable Anthropic SDK
+    errors into LLMCallFailedError) — 16 commits, 24 files changed, 4630 insertions(+), 20
+    deletions(-). Self-contained: no external stylesheets, fonts, scripts, or images. No API
+    key material of any kind appears anywhere on this page.
+  </footer>
+
+</div>
+</body>
+</html>
