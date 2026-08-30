@@ -1,7 +1,7 @@
 {
   "$comment": "nodes=modules, edges=[cause,effect] where cause is imported-by effect. ADD invariants by hand.",
   "project": ".",
-  "generated": "2026-08-30T06:45:45.301Z",
+  "generated": "2026-08-30T07:27:54.374Z",
   "nodes": [
     "__future__",
     "__init__",
@@ -11,11 +11,13 @@
     "arq_worker",
     "asyncio",
     "base",
+    "base_agent",
     "collections",
     "conftest",
     "connections",
     "constants",
     "contextlib",
+    "contracts",
     "dataclasses",
     "datetime",
     "decimal",
@@ -44,6 +46,7 @@
     "pydantic",
     "pydantic_settings",
     "pytest",
+    "queue",
     "re",
     "redis",
     "redis_arq",
@@ -57,6 +60,8 @@
     "sqlite3",
     "state",
     "sys",
+    "test_aggregator",
+    "test_hitl_gate",
     "test_models",
     "test_orchestrator_fanout",
     "test_queue_roundtrip",
@@ -76,6 +81,14 @@
     [
       "__future__",
       "arq_worker"
+    ],
+    [
+      "__future__",
+      "base_agent"
+    ],
+    [
+      "__future__",
+      "contracts"
     ],
     [
       "__future__",
@@ -107,6 +120,10 @@
     ],
     [
       "__future__",
+      "queue"
+    ],
+    [
+      "__future__",
       "redis_arq"
     ],
     [
@@ -127,6 +144,14 @@
     ],
     [
       "__future__",
+      "test_aggregator"
+    ],
+    [
+      "__future__",
+      "test_hitl_gate"
+    ],
+    [
+      "__future__",
       "test_orchestrator_fanout"
     ],
     [
@@ -144,6 +169,10 @@
     [
       "__future__",
       "workflow_engine"
+    ],
+    [
+      "abc",
+      "base_agent"
     ],
     [
       "abc",
@@ -168,6 +197,14 @@
     [
       "asyncio",
       "redis_arq"
+    ],
+    [
+      "base_agent",
+      "contracts"
+    ],
+    [
+      "base_agent",
+      "test_aggregator"
     ],
     [
       "base",
@@ -198,8 +235,20 @@
       "redis_arq"
     ],
     [
+      "contracts",
+      "nodes"
+    ],
+    [
+      "contracts",
+      "test_aggregator"
+    ],
+    [
       "dataclasses",
       "interface"
+    ],
+    [
+      "datetime",
+      "nodes"
     ],
     [
       "datetime",
@@ -215,6 +264,14 @@
     ],
     [
       "datetime",
+      "test_aggregator"
+    ],
+    [
+      "datetime",
+      "test_hitl_gate"
+    ],
+    [
+      "datetime",
       "test_models"
     ],
     [
@@ -227,11 +284,31 @@
     ],
     [
       "decimal",
+      "queue"
+    ],
+    [
+      "decimal",
       "review"
     ],
     [
       "decimal",
+      "settings"
+    ],
+    [
+      "decimal",
+      "test_aggregator"
+    ],
+    [
+      "decimal",
+      "test_hitl_gate"
+    ],
+    [
+      "decimal",
       "test_models"
+    ],
+    [
+      "decimal",
+      "test_orchestrator_fanout"
     ],
     [
       "enum",
@@ -359,6 +436,14 @@
     ],
     [
       "models",
+      "base_agent"
+    ],
+    [
+      "models",
+      "contracts"
+    ],
+    [
+      "models",
       "in_memory"
     ],
     [
@@ -375,11 +460,23 @@
     ],
     [
       "models",
+      "queue"
+    ],
+    [
+      "models",
       "redis_arq"
     ],
     [
       "models",
       "state"
+    ],
+    [
+      "models",
+      "test_aggregator"
+    ],
+    [
+      "models",
+      "test_hitl_gate"
     ],
     [
       "models",
@@ -451,11 +548,19 @@
     ],
     [
       "pydantic",
+      "test_aggregator"
+    ],
+    [
+      "pydantic",
       "test_models"
     ],
     [
       "pydantic",
       "webhook"
+    ],
+    [
+      "pytest",
+      "test_aggregator"
     ],
     [
       "pytest",
@@ -472,6 +577,14 @@
     [
       "pytest",
       "test_webhook_validator"
+    ],
+    [
+      "queue",
+      "nodes"
+    ],
+    [
+      "queue",
+      "test_hitl_gate"
     ],
     [
       "redis_arq",
@@ -520,6 +633,10 @@
     [
       "settings",
       "main"
+    ],
+    [
+      "settings",
+      "nodes"
     ],
     [
       "settings",
