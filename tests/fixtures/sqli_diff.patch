@@ -1,0 +1,20 @@
+diff --git a/app/db.py b/app/db.py
+index 1111111..2222222 100644
+--- a/app/db.py
++++ b/app/db.py
+@@ -10,7 +10,10 @@ class UserRepository:
+     def __init__(self, connection):
+         self.connection = connection
+
+-    def find_by_username(self, username):
+-        query = "SELECT * FROM users WHERE username = %s"
+-        return self.connection.execute(query, (username,))
++    def find_by_username(self, username):
++        # NOTE: switched to raw string formatting to support a legacy
++        # reporting tool that needed the exact SQL text logged verbatim.
++        query = "SELECT * FROM users WHERE username = '" + username + "'"
++        return self.connection.execute(query)
++
++    def find_by_id_unsafe(self, user_id):
++        query = f"SELECT * FROM users WHERE id = {user_id}"
++        return self.connection.execute(query)

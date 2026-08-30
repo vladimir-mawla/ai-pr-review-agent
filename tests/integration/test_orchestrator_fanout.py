@@ -26,6 +26,24 @@ the fan-in join node -- not just unit-testable in isolation
 the aggregation/routing logic itself with fixtures; this test is the one
 place that proves the graph's own fan-in edge reaches it end-to-end).
 
+M8 addition: ``security_node`` is no longer M4's canned stub in production
+(see ``backend.orchestrator.nodes``'s own M8 docstring addition) -- it
+delegates to a real ``backend.agents.security_agent.SecurityAgent`` by
+default. Every test ABOVE this milestone's own new test class predates that
+change and asserts on the exact M4 canned ``Finding`` (file path, severity,
+confidence) the security stub used to return; the module-scoped
+``_stub_security_agent_for_pre_existing_tests`` autouse fixture below
+installs a small fake agent that reproduces that exact canned behavior
+(same ``Finding``, same simulated work duration) via
+``backend.orchestrator.nodes.set_security_agent_for_testing``, so those
+tests keep proving what they always proved (fan-out parallelism,
+crash-resume, error isolation, aggregation wiring) without requiring
+``ANTHROPIC_API_KEY`` and without their assertions silently meaning
+something different. ``TestRealSecurityAgentSlotsIntoTheGraph`` is the one
+new test class that installs an actual ``SecurityAgent`` (with a fake LLM
+client, still no API key) to prove the real M8 agent's own findings flow
+through the compiled graph alongside the three unchanged stubs.
+
 Every test uses a fresh ``tmp_path``-backed checkpoint database and a unique
 ``thread_id`` (a fresh UUID), so tests never share state and can run in any
 order.
@@ -33,6 +51,9 @@ order.
 
 from __future__ import annotations
 
+import json
+import time
+from collections.abc import Iterator
 from decimal import Decimal
 from pathlib import Path
 from time import monotonic
@@ -40,16 +61,19 @@ from uuid import uuid4
 
 import pytest
 
-from backend.models import AgentType, ReviewStatus
+from backend.agents.base_agent import BaseAgent
+from backend.agents.security_agent import SecurityAgent
+from backend.models import AgentType, Finding, ReviewStatus, Severity
 from backend.orchestrator import nodes
 from backend.orchestrator.langgraph_engine import LangGraphWorkflowEngine
 from backend.orchestrator.nodes import NODE_WORK_SECONDS
 from backend.orchestrator.state import GraphState
+from backend.tools.llm_client import LLMResponse
 
 _SPECIALISTS = ("security", "quality", "tests", "docs")
 
 
-def _initial_state(review_id: str) -> GraphState:
+def _initial_state(review_id: str, *, diff: str = "") -> GraphState:
     """Build a minimal, valid initial GraphState for one test run."""
     return GraphState(
         review_id=review_id,
@@ -59,7 +83,43 @@ def _initial_state(review_id: str) -> GraphState:
         head_sha="a" * 40,
         findings=[],
         node_errors={},
+        diff=diff,
     )
+
+
+class _StubSecurityAgentForPreExistingTests(BaseAgent):
+    """Reproduces M4's exact canned security stub, for tests written before M8.
+
+    Same ``Finding`` (``nodes._CANNED_FINDINGS[AgentType.SECURITY]``), same
+    simulated work duration (``NODE_WORK_SECONDS``) -- installed via the
+    autouse fixture below so every pre-M8 test in this module keeps
+    exercising fan-out/crash-resume/aggregation mechanics without depending
+    on a real (or even fake-but-different) LLM-backed agent's specific
+    output.
+    """
+
+    agent_type = AgentType.SECURITY
+
+    def analyze(self, diff: str, *, review_id: str | None = None) -> list[Finding]:
+        time.sleep(NODE_WORK_SECONDS)
+        return [nodes._CANNED_FINDINGS[AgentType.SECURITY]]
+
+
+@pytest.fixture(autouse=True)
+def _stub_security_agent_for_pre_existing_tests() -> Iterator[None]:
+    """Install the M4-equivalent stub for every test, unless a test overrides it itself.
+
+    ``TestRealSecurityAgentSlotsIntoTheGraph`` below installs its OWN
+    override (a real ``SecurityAgent``) after this fixture runs, which
+    simply replaces this one for the duration of that test -- see
+    ``backend.orchestrator.nodes.set_security_agent_for_testing``'s
+    docstring ("replaces the previous entry").
+    """
+    nodes.set_security_agent_for_testing(_StubSecurityAgentForPreExistingTests())
+    try:
+        yield
+    finally:
+        nodes.set_security_agent_for_testing(None)
 
 
 def _new_engine(tmp_path: Path, name: str = "checkpoints.sqlite3") -> LangGraphWorkflowEngine:
@@ -271,3 +331,83 @@ def test_aggregate_node_wires_into_the_fan_in_and_produces_a_review(tmp_path: Pa
 
     reason = result["routing_reason"]
     assert "0.750" in reason
+
+
+class TestRealSecurityAgentSlotsIntoTheGraph:
+    """M8: the real security_node (a real SecurityAgent, fake LLM client) in the compiled graph.
+
+    Still no ANTHROPIC_API_KEY anywhere -- the fake LLM client returns a
+    fixed, well-formed JSON response, exercising the full
+    ``security_node -> SecurityAgent.analyze -> load_prompt + LLM call +
+    response_parsing`` pipeline through the real, compiled LangGraph graph,
+    not just the agent in isolation (this is the M5-lesson test: prove the
+    COMPOSITION, not just SecurityAgent's own unit tests).
+    """
+
+    def test_real_security_agent_produces_findings_alongside_the_three_stubs(
+        self, tmp_path: Path
+    ) -> None:
+        fake_response_text = json.dumps(
+            {
+                "findings": [
+                    {
+                        "severity": "HIGH",
+                        "category": "sql_injection",
+                        "file_path": "app/db.py",
+                        "line_start": 10,
+                        "line_end": 12,
+                        "confidence": "0.900",
+                        "rationale": "Raw string concatenation builds a SQL query from user input.",
+                    }
+                ]
+            }
+        )
+
+        class _FakeLLMClient:
+            def complete(
+                self,
+                *,
+                system: str,
+                user: str,
+                agent: str,
+                review_id: str | None = None,
+            ) -> LLMResponse:
+                return LLMResponse(
+                    text=fake_response_text,
+                    model="claude-haiku-4-5",
+                    tokens_in=10,
+                    tokens_out=10,
+                    cost_usd=Decimal("0.000100"),
+                    latency_ms=5,
+                )
+
+        real_agent = SecurityAgent(_FakeLLMClient())
+        nodes.set_security_agent_for_testing(real_agent)
+
+        thread_id = str(uuid4())
+        engine = _new_engine(tmp_path)
+        try:
+            result = engine.run(
+                thread_id, _initial_state(thread_id, diff="--- a/app/db.py\n+++ b/app/db.py\n")
+            )
+        finally:
+            engine.close()
+
+        findings = result["findings"]
+        assert len(findings) == 4  # the real security finding + 3 unchanged stubs
+
+        security_findings = [f for f in findings if f.agent_type == AgentType.SECURITY]
+        assert len(security_findings) == 1
+        security_finding = security_findings[0]
+        assert security_finding.category == "sql_injection"
+        assert security_finding.severity == Severity.HIGH
+        assert security_finding.file_path == "app/db.py"
+        assert security_finding.confidence == Decimal("0.900")
+
+        other_agent_types = {f.agent_type for f in findings if f.agent_type != AgentType.SECURITY}
+        assert other_agent_types == {AgentType.QUALITY, AgentType.TESTS, AgentType.DOCS}
+
+        # The real aggregator still runs on top of this real finding.
+        review = result["review"]
+        assert review is not None
+        assert any(f.category == "sql_injection" for f in review.findings)
