@@ -21,14 +21,29 @@ close to reviewing a real pull request yet.
   GitHub's HMAC-SHA256 webhook signature over the raw request body and
   de-duplicates retried deliveries by `X-GitHub-Delivery` before anything is
   enqueued.
+- **M3 — Queue + Worker (Dockerized Redis/ARQ).** A validated webhook enqueues
+  a job to Redis via ARQ (`backend/job_queue/redis_arq.py`), and a separate
+  worker process dequeues and logs it — behind the same `JobQueue` interface
+  M2 already coded against, so the router needed zero changes.
+- **M4 — Orchestrator Fan-Out (Stub Agents).** A LangGraph `StateGraph`
+  (`backend/orchestrator/`) fans out to four parallel stub specialist nodes
+  via the Send API and fans back in through a join node, checkpointed with a
+  file-backed SQLite saver so a crashed run resumes from where it left off
+  instead of re-running completed nodes. See the note under Architecture
+  below: this orchestrator exists and is tested in isolation, but nothing
+  yet calls it from the webhook/queue path.
 
-**Not built yet:** the queue/worker (M3, Redis + ARQ), the LangGraph
-orchestrator (M4), the four specialist agents and aggregator/HITL gate (M5,
-M8, M10), retrieval/memory (M9), real GitHub posting (M11), and the dashboard
+**Not built yet:** the aggregator and confidence-weighted HITL gate (M5), the
+reliability layer (M6), the events/audit spine (M7), the four *real*
+LLM-backed specialist agents (M8, M10), hybrid retrieval/memory (M9), real
+GitHub posting (M11), the Tiger Cloud migration (M12), and the dashboard
 (M13). None of those exist in this repository today — see
 [`.genesis/PLAN.md`](.genesis/PLAN.md) for the full milestone list and demo
-commands. Right now this repo can accept and validate a signed webhook and
-enqueue it in memory. It does not review anything yet.
+commands. Right now this repo can accept and validate a signed webhook, queue
+it in Redis, and — as a separate, not-yet-wired-in capability — run a
+LangGraph graph that fans a job out to four canned stub agents and merges
+their (fake) findings back. It does not review anything yet, and enqueuing a
+webhook does not currently trigger the orchestrator.
 
 ## Architecture
 
@@ -38,23 +53,33 @@ Planned end-to-end shape:
 GitHub webhook --> FastAPI ingress --> queue --> LangGraph orchestrator --> [security | quality | tests | docs] agents --> aggregator --> HITL gate --> GitHub
 ```
 
+**This is the target shape, not the current wiring.** Ingress, the queue,
+and the orchestrator each exist and are independently tested today, but the
+arrows into and out of the orchestrator in that diagram are not implemented
+yet: nothing in `backend/webhook_receiver/` or `backend/job_queue/` calls
+`LangGraphWorkflowEngine`, and the orchestrator's four specialists are canned
+stubs, not real agents. Treat every component below as real in isolation,
+and the connections between them as still planned unless marked otherwise.
+
 What exists today vs. what's planned:
 
 | Component | Status | Notes |
 |---|---|---|
-| FastAPI webhook ingress (`backend/webhook_receiver/`, `backend/api/`) | **Built (M2)** | HMAC-SHA256 verification, idempotency, in-memory job queue behind an interface |
-| Queue (Redis / ARQ) | Planned (M3) | Ingress already codes against a `JobQueue` interface (`backend/job_queue/interface.py`) so the in-memory stand-in can be swapped without touching the router |
-| Orchestrator (LangGraph) | Planned (M4) | Fan-out to four agent nodes with crash-resumable checkpointing |
-| Specialist agents (security, quality, tests, docs) | Planned (M5, M8, M10) | LLM-backed reasoners, each validated against the `Finding` schema |
+| FastAPI webhook ingress (`backend/webhook_receiver/`, `backend/api/`) | **Built (M2)** | HMAC-SHA256 verification, idempotency, job queue behind an interface |
+| Queue (Redis / ARQ) | **Built (M3)** | `RedisJobQueue` (`backend/job_queue/redis_arq.py`) behind the same `JobQueue` interface the router codes against, plus an ARQ worker (`backend/job_queue/arq_worker.py`) whose job handler is still a stub |
+| Orchestrator (LangGraph) | **Built (M4), not wired in** | `backend/orchestrator/` fans out to four stub agent nodes via the Send API with file-backed SQLite checkpointing; crash-resumable and covered by integration tests, but nothing in the webhook/queue path invokes it yet — that wiring is a later milestone |
+| Specialist agents (security, quality, tests, docs) | Planned (M5, M8, M10) | M4's four nodes are canned stubs (no LLM call); real LLM-backed reasoners, each validated against the `Finding` schema, land in M8/M10 |
 | Retrieval / memory (TimescaleDB + pgvector, later Tiger Cloud) | Planned (M9, M12) | Hybrid vector + full-text search over codebase chunks |
-| Aggregator + confidence-weighted HITL gate | Planned (M5) | Dedupes findings, routes low-confidence/critical reviews to a human queue |
+| Aggregator + confidence-weighted HITL gate | Planned (M5) | M4's join node is an intentional no-op; dedup, confidence scoring, and HITL routing land in M5 |
 | Dashboard (Next.js) | Planned (M13) | Renders the HITL queue and per-agent cost/latency |
 
 Domain contracts (`Finding`, `Review`, `WebhookEvent`) already live in
 `backend/models/` and are shared by every layer above them; `backend/core/`
-holds cross-cutting base abstractions (currently just `Settings`) that
-nothing else may depend outward from, per ADR-002's inward-only dependency
-rule (mechanically enforced by `import-linter`, see `.importlinter`).
+holds cross-cutting base abstractions (`Settings`, and now the ADR-001
+`WorkflowEngine` Protocol that `LangGraphWorkflowEngine` structurally
+satisfies) that nothing else may depend outward from, per ADR-002's
+inward-only dependency rule (mechanically enforced by `import-linter`, see
+`.importlinter`).
 
 ## Setup
 
@@ -109,6 +134,19 @@ rather than silently accepting a well-known secret.
   means replay protection resets: a `X-GitHub-Delivery` id this process
   already saw before the recreate will be treated as new and re-enqueued
   after it. A volume would fix this but isn't configured today.
+- **The 9 queue integration tests need a real Redis and skip cleanly without
+  one.** `tests/integration/test_queue_roundtrip.py` checks for a reachable
+  Redis at collection time and skips (not fails) if it can't connect. Run
+  `docker compose up -d redis` first if you want them to actually execute;
+  otherwise `pytest -v` still passes, just with those 9 reported as
+  `skipped` rather than `passed` — check the summary line, since a skip is
+  not the same thing as a pass.
+- **The M4 orchestrator has no CLI demo yet.** Unlike M2/M3, there is no
+  script that runs a LangGraph review end-to-end from the command line — its
+  behavior (parallel fan-out, crash/resume) is proven entirely by
+  `tests/integration/test_orchestrator_fanout.py`, which needs no Docker and
+  no external services (its checkpoint database is a plain local SQLite
+  file).
 
 ## Running the checks
 
@@ -153,14 +191,38 @@ python scripts/send_signed_webhook.py --secret change-me-to-a-real-shared-secret
 ```
 
 A successful run prints `POST ... -> 200` and a JSON body with
-`"status": "accepted"`. Run it a second time with the same delivery ID and
-you'll get `"status": "duplicate"` instead — that's the idempotency check.
+`"status": "accepted"`. By default the script generates a fresh random
+delivery ID every time it runs, so running the exact command above twice
+produces two `"accepted"` responses, not a duplicate. To see the idempotency
+check itself, pass the same `--delivery-id` (a well-formed UUID) both times:
+
+```bash
+python scripts/send_signed_webhook.py --secret change-me-to-a-real-shared-secret --url http://localhost:8000/webhook --delivery-id 11111111-1111-1111-1111-111111111111
+```
+
+Run that exact line again and you'll get `"status": "duplicate"` instead —
+that's the idempotency check.
 
 You can also run the webhook test suite directly, without starting a server:
 
 ```bash
 pytest tests/unit/test_webhook_validator.py -v
 ```
+
+## Running the orchestrator tests
+
+This proves the M4 slice: fan-out to four stub agents is genuinely parallel
+(not a sequential chain), their findings merge correctly, and a simulated
+worker crash mid-run resumes from a checkpoint instead of re-doing completed
+work. No Docker, API key, or running server is needed — every test uses a
+temporary, per-test SQLite checkpoint file:
+
+```bash
+pytest tests/integration/test_orchestrator_fanout.py -v -k "fanout or checkpoint_resume"
+```
+
+This is the orchestrator's own test suite, not a webhook-to-review demo —
+nothing currently connects it to the `/webhook` endpoint above.
 
 ## Development process
 
