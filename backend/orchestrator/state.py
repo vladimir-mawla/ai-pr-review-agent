@@ -1,4 +1,4 @@
-"""Typed state that flows through the M4 fan-out/fan-in graph.
+"""Typed state that flows through the M4 fan-out / M5 fan-in graph.
 
 Owns: the single ``GraphState`` shape every node in ``backend.orchestrator.
 graph`` reads and writes. Built as a ``TypedDict`` (not a Pydantic model)
@@ -19,14 +19,23 @@ last would "win" and the other three's findings/errors would be silently
 lost. ``operator.add`` (for the findings list) and ``_merge_dicts`` (for the
 per-node error map) tell LangGraph to combine every branch's contribution
 instead of clobbering it.
+
+M5 addition: ``review`` and ``routing_reason`` give the real ``aggregate_node``
+(``backend.orchestrator.nodes``) somewhere to write its output. Both are
+``NotRequired`` rather than plain required keys so every existing M4 caller
+that builds a ``GraphState`` without them (e.g. ``tests/integration/
+test_orchestrator_fanout.py``'s ``_initial_state``) stays valid under
+``mypy --strict`` — the initial state legitimately has no ``Review`` yet;
+only the join node, running once (not in parallel), ever writes these two
+keys, so neither needs a merge reducer.
 """
 
 from __future__ import annotations
 
 import operator
-from typing import Annotated, TypedDict
+from typing import Annotated, NotRequired, TypedDict
 
-from backend.models import Finding
+from backend.models import Finding, Review
 
 
 def _merge_dicts(left: dict[str, str], right: dict[str, str]) -> dict[str, str]:
@@ -61,6 +70,17 @@ class GraphState(TypedDict):
             rather than allowed to fail the whole run (see
             ``backend.orchestrator.nodes.AgentExecutionError``). Empty when
             every node succeeded.
+        review: The aggregated ``Review`` the M5 join node
+            (``aggregate_node``) builds from the merged, deduplicated
+            findings — absent until that node runs, since it is the only
+            writer. ``NotRequired`` so pre-M5 callers building an initial
+            state need not supply it.
+        routing_reason: The human-readable explanation
+            ``backend.hitl.queue.route_review`` produced for ``review``'s
+            status (why it auto-posted or was queued for human review).
+            Kept alongside ``review`` rather than folded into one of its
+            fields because it is diagnostic output about the *routing
+            decision*, not a property of the review itself.
     """
 
     review_id: str
@@ -70,3 +90,5 @@ class GraphState(TypedDict):
     head_sha: str
     findings: Annotated[list[Finding], operator.add]
     node_errors: Annotated[dict[str, str], _merge_dicts]
+    review: NotRequired[Review]
+    routing_reason: NotRequired[str]

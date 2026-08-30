@@ -18,6 +18,14 @@ proven with assertions, not a manual demo:
 - one specialist's own failure is isolated and does not cost the other
   three their findings (``test_fanout_isolates_single_node_failure``)
 
+M5 addition: ``test_aggregate_node_wires_into_the_fan_in_and_produces_a_review``
+proves the real aggregator (``backend.orchestrator.nodes.aggregate_node``,
+no longer M4's no-op stub) is actually wired into this same compiled graph as
+the fan-in join node -- not just unit-testable in isolation
+(``tests/unit/test_aggregator.py`` / ``tests/unit/test_hitl_gate.py`` cover
+the aggregation/routing logic itself with fixtures; this test is the one
+place that proves the graph's own fan-in edge reaches it end-to-end).
+
 Every test uses a fresh ``tmp_path``-backed checkpoint database and a unique
 ``thread_id`` (a fresh UUID), so tests never share state and can run in any
 order.
@@ -25,13 +33,14 @@ order.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from pathlib import Path
 from time import monotonic
 from uuid import uuid4
 
 import pytest
 
-from backend.models import AgentType
+from backend.models import AgentType, ReviewStatus
 from backend.orchestrator import nodes
 from backend.orchestrator.langgraph_engine import LangGraphWorkflowEngine
 from backend.orchestrator.nodes import NODE_WORK_SECONDS
@@ -234,3 +243,31 @@ def test_fanout_isolates_single_node_failure(tmp_path: Path) -> None:
     assert len(findings) == 3
     agent_types = {finding.agent_type for finding in findings}
     assert agent_types == {AgentType.SECURITY, AgentType.TESTS, AgentType.DOCS}
+
+
+def test_aggregate_node_wires_into_the_fan_in_and_produces_a_review(tmp_path: Path) -> None:
+    """M5: the real aggregator actually runs as the graph's fan-in join node.
+
+    The four canned M4 stub findings (confidences 0.900/0.800/0.700/0.600,
+    one per agent, on four distinct stub file paths -- see
+    ``nodes._CANNED_FINDINGS``) never collide on ``(file_path, line_start)``,
+    so dedup is a no-op here and overall_confidence is exactly their mean:
+    (0.900+0.800+0.700+0.600)/4 = 0.750 -- exactly the default
+    HITL_CONFIDENCE_THRESHOLD, which this milestone's boundary rule defines
+    as auto-post (see backend/hitl/queue.py).
+    """
+    thread_id = str(uuid4())
+    engine = _new_engine(tmp_path)
+    try:
+        result = engine.run(thread_id, _initial_state(thread_id))
+    finally:
+        engine.close()
+
+    review = result["review"]
+    assert review is not None
+    assert len(review.findings) == 4
+    assert review.overall_confidence == Decimal("0.750")
+    assert review.status == ReviewStatus.POSTED
+
+    reason = result["routing_reason"]
+    assert "0.750" in reason

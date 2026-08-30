@@ -1,10 +1,22 @@
-"""Stub specialist nodes for the M4 orchestrator skeleton.
+"""Stub specialist nodes (M4) plus the real aggregator join node (M5).
 
 Owns: the four parallel "specialist" nodes (security, quality, tests, docs)
 that the graph in ``backend.orchestrator.graph`` fans out to, plus the join
 node they converge on. Per M4's scope, every specialist is a STUB: it
 returns a canned, deterministic ``Finding`` and makes no LLM call and reads
 no API key. Wiring in real reasoning is M8's job, not this one's.
+
+``aggregate_node`` (the join point) is no longer a stub as of M5: it dedupes
+the merged findings (``backend.agents.contracts.dedupe_findings``), computes
+``overall_confidence`` (``backend.models.review.compute_overall_confidence``),
+runs the HITL gate (``backend.hitl.queue.route_review``), and writes the
+resulting ``Review`` plus the routing reason into ``GraphState`` (see
+``backend.orchestrator.state`` for why those two fields are ``NotRequired``).
+No LLM call happens here either — M5's whole aggregation/routing pipeline is
+pure Python over already-produced ``Finding`` objects, which is exactly what
+makes it testable without one (``tests/unit/test_aggregator.py`` and
+``tests/unit/test_hitl_gate.py`` exercise this logic directly, with
+fixtures, faster and more precisely than driving it through the graph).
 
 This module also owns two things needed only to *prove* M4's behavior in
 tests, not for any production purpose:
@@ -36,12 +48,16 @@ from __future__ import annotations
 import threading
 import time
 from collections import defaultdict
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 
-from backend.models import AgentType, Finding, Severity
+from backend.agents.contracts import dedupe_findings
+from backend.core.settings import get_settings
+from backend.hitl.queue import route_review
+from backend.models import AgentType, Finding, Review, Severity, compute_overall_confidence
 from backend.orchestrator.state import GraphState
 
 # Simulated per-node work duration. Large enough that overlapping windows are
@@ -267,13 +283,52 @@ def docs_node(state: GraphState, config: RunnableConfig) -> dict[str, Any]:
 
 
 def aggregate_node(state: GraphState, config: RunnableConfig) -> dict[str, Any]:
-    """Join point the four specialists converge on.
+    """Join point the four specialists converge on: the real M5 aggregator.
 
-    Deliberately a no-op at M4: real aggregation (dedup by file/line keeping
-    highest confidence, computing overall confidence, routing to post vs.
-    HITL) is M5's scope. This node exists so the graph has one place all
-    four branches fan back into, per M4's "fans back in" requirement, and so
-    a later milestone has a natural place to add that logic without
-    reshaping the graph's edges.
+    Fed by ``GraphState.findings`` — every specialist's contribution already
+    merged by the ``operator.add`` reducer (see ``state.py``), in whatever
+    order the parallel branches happened to finish. This node:
+
+    1. Dedupes same-``(file_path, line_start)`` findings, keeping the
+       highest-confidence one (``backend.agents.contracts.dedupe_findings``
+       — see that module for the deterministic tie-break rule).
+    2. Computes ``overall_confidence`` from the *surviving* (deduped)
+       findings via the one formula ``Review`` itself enforces
+       (``backend.models.review.compute_overall_confidence``) — using
+       anything else here would immediately fail ``Review``'s own
+       consistency check below.
+    3. Runs the HITL gate (``backend.hitl.queue.route_review``) against the
+       configured threshold to decide POSTED vs. QUEUED_FOR_HITL, and builds
+       the reason string explaining why.
+    4. Constructs the ``Review`` and returns it (plus the reason) as a
+       partial state update — LangGraph merges this into ``GraphState`` on
+       ``review``/``routing_reason`` since neither has a reducer and this is
+       the only node that ever writes them (see ``state.py``).
+
+    No LLM call, no GitHub post, no queue write: those are M8/M10/M11's
+    scope. This node's whole job ends at "here is the Review and why it was
+    routed that way".
     """
-    return {}
+    deduped = dedupe_findings(state["findings"])
+    overall_confidence = compute_overall_confidence(deduped)
+    threshold = get_settings().hitl_confidence_threshold
+    status, reason = route_review(overall_confidence, deduped, threshold=threshold)
+
+    review = Review(
+        review_id=state["review_id"],
+        pr_number=state["pr_number"],
+        repository_owner=state["repository_owner"],
+        repository_name=state["repository_name"],
+        head_sha=state["head_sha"],
+        findings=deduped,
+        overall_confidence=overall_confidence,
+        status=status,
+        created_at=datetime.now(UTC),
+        # error_message defaults to None on Review, but mypy --strict's
+        # dataclass_transform-based reading of `Field(None, ...)` (as
+        # opposed to a plain `= None` class-body default) does not detect
+        # that as optional, so it must be passed explicitly here — the one
+        # call site in backend/ that actually constructs a Review.
+        error_message=None,
+    )
+    return {"review": review, "routing_reason": reason}
