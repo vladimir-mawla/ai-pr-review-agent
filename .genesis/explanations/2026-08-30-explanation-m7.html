@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>M7 Explained — Events Spine (Local Audit/Trace Log)</title>
+<style>
+  :root {
+    --bg: #f7f7f5;
+    --bg-card: #ffffff;
+    --ink: #1b1f23;
+    --mut: #5b6472;
+    --line: #e2e4e8;
+    --accent: #2f6feb;
+    --accent-ink: #ffffff;
+    --ok: #1a7f37;
+    --warn: #9a6700;
+    --bad: #cf222e;
+    --code-bg: #f0f1f3;
+    --pill-bg: #eef2ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1117;
+      --bg-card: #161b22;
+      --ink: #e6edf3;
+      --mut: #9aa4b2;
+      --line: #2d333b;
+      --accent: #6ea8fe;
+      --accent-ink: #0d1117;
+      --ok: #3fb950;
+      --warn: #d29922;
+      --bad: #f85149;
+      --code-bg: #1c2128;
+      --pill-bg: #1c2440;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1117;
+    --bg-card: #161b22;
+    --ink: #e6edf3;
+    --mut: #9aa4b2;
+    --line: #2d333b;
+    --accent: #6ea8fe;
+    --accent-ink: #0d1117;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --bad: #f85149;
+    --code-bg: #1c2128;
+    --pill-bg: #1c2440;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    font-size: 16px;
+  }
+  .page { max-width: 880px; margin: 0 auto; padding: 40px 20px 100px; }
+  header.hero { margin-bottom: 32px; }
+  header.hero .kicker {
+    color: var(--accent);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-size: 12.5px;
+    margin: 0 0 10px;
+  }
+  h1 { font-size: clamp(26px, 4vw, 36px); margin: 0 0 12px; line-height: 1.2; }
+  .lede { color: var(--mut); font-size: 17px; max-width: 70ch; }
+  nav.toc {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin: 28px 0 40px;
+  }
+  nav.toc h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--mut);
+    margin: 0 0 10px;
+  }
+  nav.toc ol { margin: 0; padding-left: 20px; columns: 2; column-gap: 24px; }
+  nav.toc li { margin: 4px 0; break-inside: avoid; }
+  nav.toc a { color: var(--ink); text-decoration: none; border-bottom: 1px dashed var(--line); }
+  nav.toc a:hover { border-bottom-color: var(--accent); color: var(--accent); }
+
+  section { margin: 56px 0; }
+  section > h2 {
+    font-size: 22px;
+    margin: 0 0 16px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--line);
+  }
+  section > h2 .num { color: var(--accent); font-variant-numeric: tabular-nums; margin-right: 10px; }
+  h3 { font-size: 17px; margin: 26px 0 10px; }
+  p { margin: 12px 0; }
+  a { color: var(--accent); }
+  a:focus-visible, button:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .card { background: var(--bg-card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 22px; margin: 16px 0; }
+  .callout { border-left: 4px solid var(--accent); background: var(--pill-bg); border-radius: 8px; padding: 14px 18px; margin: 18px 0; }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.ok { border-left-color: var(--ok); }
+  .callout.bad { border-left-color: var(--bad); }
+  .callout .label {
+    font-weight: 700;
+    font-size: 12.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--mut);
+    margin-bottom: 6px;
+  }
+
+  code {
+    background: var(--code-bg);
+    padding: 1px 6px;
+    border-radius: 5px;
+    font-size: 0.9em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    white-space: pre;
+    font-size: 13.5px;
+    line-height: 1.55;
+  }
+  pre code { background: none; padding: 0; border-radius: 0; }
+
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14.5px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--mut); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .tablewrap { overflow-x: auto; }
+
+  .pill {
+    display: inline-block;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 2px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    color: var(--mut);
+    white-space: nowrap;
+  }
+  .pill.ok { color: var(--ok); border-color: var(--ok); }
+  .pill.bad { color: var(--bad); border-color: var(--bad); }
+  .pill.warn { color: var(--warn); border-color: var(--warn); }
+
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 18px 0; }
+  .flow .node {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 13.5px;
+    min-width: 120px;
+    text-align: center;
+  }
+  .flow .node.core { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .flow .node.bad { border-color: var(--bad); color: var(--bad); font-weight: 600; }
+  .flow .node.ok { border-color: var(--ok); color: var(--ok); font-weight: 600; }
+  .flow .node.warn { border-color: var(--warn); color: var(--warn); font-weight: 600; }
+  .flow .arrow { color: var(--mut); font-size: 18px; }
+  .flow.vertical { flex-direction: column; align-items: stretch; }
+  .flow.vertical .node { text-align: left; }
+  .flow.vertical .arrow { text-align: center; }
+
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+  @media (max-width: 640px) { .compare { grid-template-columns: 1fr; } }
+  .compare .col { border-radius: 12px; padding: 16px 18px; border: 1px solid var(--line); }
+  .compare .col.before { background: color-mix(in srgb, var(--bad) 6%, var(--bg-card)); }
+  .compare .col.after { background: color-mix(in srgb, var(--ok) 6%, var(--bg-card)); }
+  .compare h4 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .compare.before-after .before h4 { color: var(--bad); }
+  .compare.before-after .after h4 { color: var(--ok); }
+
+  .module-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin: 18px 0; }
+  .module-card { background: var(--bg-card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .module-card h4 {
+    margin: 0 0 6px;
+    font-size: 15px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: var(--accent);
+  }
+  .module-card p { margin: 6px 0 0; font-size: 14px; color: var(--mut); }
+
+  .lane-grid { display: flex; flex-wrap: wrap; gap: 12px; margin: 18px 0; align-items: stretch; }
+  .lane {
+    flex: 1 1 220px;
+    border-radius: 12px;
+    border: 2px solid var(--line);
+    padding: 14px 16px;
+    background: var(--bg-card);
+  }
+  .lane .lane-tag {
+    font-size: 11.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--mut);
+    margin-bottom: 6px;
+  }
+  .lane.busy { border-color: var(--bad); }
+  .lane.busy .lane-tag { color: var(--bad); }
+  .lane p { font-size: 13.5px; margin: 6px 0 0; }
+
+  .collision-table td.dropped-tag { color: var(--bad); font-weight: 600; }
+  .collision-table td.kept-tag { color: var(--ok); font-weight: 600; }
+
+  ol.gaps li, ul.plain li { margin: 8px 0; }
+
+  .timeline { margin: 20px 0; padding: 0; list-style: none; }
+  .timeline li {
+    position: relative;
+    padding: 4px 0 18px 26px;
+    border-left: 2px solid var(--line);
+    margin-left: 6px;
+  }
+  .timeline li:last-child { border-left-color: transparent; padding-bottom: 0; }
+  .timeline li::before {
+    content: "";
+    position: absolute;
+    left: -7px;
+    top: 6px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--bg-card);
+    border: 2px solid var(--accent);
+  }
+  .timeline li.reject::before { border-color: var(--bad); }
+  .timeline li.approve::before { border-color: var(--ok); }
+  .timeline li .when { font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .timeline li.reject .when { color: var(--bad); }
+  .timeline li.approve .when { color: var(--ok); }
+
+  details.quiz {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 18px;
+    margin: 16px 0;
+  }
+  details.quiz summary { cursor: pointer; font-weight: 600; list-style: none; }
+  details.quiz summary::-webkit-details-marker { display: none; }
+  details.quiz summary::before { content: "▸ "; color: var(--accent); }
+  details.quiz[open] summary::before { content: "▾ "; }
+  details.quiz .q { font-weight: 600; margin-bottom: 4px; }
+  details.quiz .answer { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
+  details.quiz .answer .verdict { font-weight: 700; color: var(--ok); }
+
+  footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--mut); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <p class="kicker">Genesis L4 · Explain Diff · Milestone M7</p>
+    <h1>Events Spine: Local Audit/Trace Log</h1>
+    <p class="lede">
+      Why one append-only, time-ordered Postgres table can be a trace
+      viewer, an audit trail, and a cost ledger at once; why "append-only"
+      only becomes true the moment the database itself refuses to let it be
+      otherwise; the gap a row-level trigger leaves open for
+      <code>TRUNCATE</code>; and the centerpiece — an independent verifier
+      who caught a synchronous Postgres write freezing every concurrent
+      webhook request on uvicorn's one event-loop thread, the fix that
+      followed, and a second independent verifier who re-proved it rather
+      than trusting the first session's word. Covers commits
+      <code>8a4e3f5</code>&nbsp;&hellip;&nbsp;<code>d3f835d</code> on
+      <code>main</code> — 16 commits (10 original build commits plus 6 fix
+      commits from the L2 DEBUG loop the first L4 VERIFY REJECT triggered),
+      23 files changed, 2893 insertions(+), 47 deletions(-).
+    </p>
+  </header>
+
+  <nav class="toc">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#background">Background: one table, three jobs</a></li>
+      <li><a href="#enforcement">Enforcing append-only in the database, not by convention</a></li>
+      <li><a href="#truncate-gap">The TRUNCATE gap a row-level trigger leaves open</a></li>
+      <li><a href="#restricted-role">Why the app connects as a restricted role</a></li>
+      <li><a href="#centerpiece">The centerpiece: blocking the event loop</a></li>
+      <li><a href="#fix">The fix: a real timeout, an offload, a reused breaker</a></li>
+      <li><a href="#reverify">Independent re-verification, not trust</a></li>
+      <li><a href="#policy">Failure policy: log-and-continue, except for our own bugs</a></li>
+      <li><a href="#limits">Known limits, stated honestly</a></li>
+      <li><a href="#quiz">Quiz</a></li>
+    </ol>
+  </nav>
+
+  <section id="background">
+    <h2><span class="num">1</span>Background: one table, three jobs</h2>
+    <p>
+      Every milestone through M6 built a piece of the review pipeline —
+      webhook ingress, a queue, an orchestrator, an aggregator, a
+      reliability layer — but none of them left a record of what actually
+      happened while a review ran. If a reviewer asks "why did PR #42 get
+      auto-posted?", or "how much did the security agent's LLM calls cost
+      last week?", or "prove nobody edited this audit record after the
+      fact" — M6's codebase has no answer. M7's job is a single new table,
+      <code>agent_events</code>, and a small emission API in front of it
+      (<code>backend/observability/events.py</code>), wired into the
+      webhook route and the four orchestrator specialist nodes.
+    </p>
+    <p>
+      The interesting design decision is not "add a table" — it's that
+      <em>one</em> table, append-only and ordered by timestamp, is enough to
+      serve three purposes that might otherwise look like they need three
+      separate systems:
+    </p>
+    <div class="module-grid">
+      <div class="module-card">
+        <h4>trace viewer</h4>
+        <p>
+          <code>backend.observability.audit.reconstruct_review_trace</code>
+          reads every row for one <code>review_id</code>,
+          <code>ORDER BY ts ASC, id ASC</code> — a complete, time-ordered
+          story of one review from the webhook decision through every
+          specialist's <code>span.start</code>/<code>span.end</code> to the
+          aggregator's final <code>decision</code>, reconstructed from
+          nothing but the id.
+        </p>
+      </div>
+      <div class="module-card">
+        <h4>audit trail</h4>
+        <p>
+          The same rows, but the property that matters here isn't order —
+          it's that they can never be altered or deleted after being
+          written (Section&nbsp;2). An audit record you can edit after the
+          fact isn't an audit record; it's a note.
+        </p>
+      </div>
+      <div class="module-card">
+        <h4>cost ledger</h4>
+        <p>
+          <code>AgentEvent</code>'s <code>tokens_in</code>,
+          <code>tokens_out</code>, and <code>cost_usd</code> columns (see
+          <code>backend/database/models.py</code>) exist on every
+          <code>llm.call</code> row. Summing <code>cost_usd</code> across a
+          <code>review_id</code>, or across a day, is the same
+          <code>SELECT</code> shape as the trace query, just aggregated
+          differently.
+        </p>
+      </div>
+    </div>
+    <p>
+      Nothing about the schema privileges any one of these three readings
+      over the others — they are three different <code>WHERE</code>/
+      aggregation shapes over the same append-only stream, not three
+      separate stores that need to agree with each other. That is the
+      actual argument for "one events spine" instead of a trace-only log
+      plus a separate cost table plus a separate audit table: there is
+      nothing to keep in sync, because there is only one place the facts
+      live.
+    </p>
+    <div class="callout">
+      <div class="label">Where this lives</div>
+      Schema and enforcement: <code>backend/database/migrations/0001_agent_events.sql</code>.
+      Typed row + the fixed <code>EventType</code> vocabulary:
+      <code>backend/database/models.py</code>. Read/write access (the only
+      file in the codebase allowed to run SQL against this table):
+      <code>backend/database/repository.py</code>. The emission API every
+      call site actually imports, plus this milestone's failure policy:
+      <code>backend/observability/events.py</code>. Wired into
+      <code>backend/webhook_receiver/router.py</code> (one <code>decision</code>
+      event per verified webhook outcome) and
+      <code>backend/orchestrator/nodes.py</code> (a span per specialist,
+      one decision from the aggregator).
+    </div>
+  </section>
+
+  <section id="enforcement">
+    <h2><span class="num">2</span>Enforcing append-only in the database, not by convention</h2>
+    <p>
+      "Append-only" is easy to promise in a docstring and easy to break by
+      accident — one future <code>UPDATE agent_events SET outcome = ...</code>
+      slipped into a bugfix, and the audit trail's core property is gone,
+      silently. Migration 0001 makes the promise true two different ways,
+      and the reason there are two is that each one closes a gap the other
+      leaves open.
+    </p>
+    <div class="module-grid">
+      <div class="module-card">
+        <h4>1. a BEFORE trigger</h4>
+        <p>
+          <code>agent_events_no_update</code> and
+          <code>agent_events_no_delete</code> fire on any UPDATE or DELETE,
+          for <em>any role</em>, and raise unconditionally. This is the
+          primary mechanism, not a backstop — see below for why.
+        </p>
+      </div>
+      <div class="module-card">
+        <h4>2. a restricted writer role</h4>
+        <p>
+          <code>agent_events_writer</code> is granted only
+          <code>SELECT, INSERT</code>; <code>UPDATE, DELETE, TRUNCATE</code>
+          are explicitly <code>REVOKE</code>d. The application connects as
+          this role, never as an admin.
+        </p>
+      </div>
+    </div>
+    <p>
+      The trigger has to be the primary mechanism, because a PostgreSQL
+      superuser bypasses ordinary privilege checks entirely — a
+      <code>REVOKE</code> on its own means nothing against a connection
+      using the <code>postgres</code> role (exactly the role migration 0001
+      itself runs as, and the role a human operator would use for a manual
+      fix at 2am). A <code>BEFORE</code> trigger, by contrast, fires
+      unconditionally regardless of who issues the statement — it is what
+      actually makes "nobody can mutate this table" true, rather than
+      merely documented policy that a superuser connection can walk
+      straight through. The <code>REVOKE</code> on the restricted role is
+      still worth keeping — it makes the file's intent unambiguous to a
+      future reader, and it means the ordinary application connection gets
+      a clean permissions error instead of ever reaching the trigger at all
+      — but it is defense in depth, not the thing doing the actual work.
+    </p>
+  </section>
+
+  <section id="truncate-gap">
+    <h2><span class="num">3</span>The TRUNCATE gap a row-level trigger leaves open</h2>
+    <p>
+      The first L1 BUILD shipped exactly the two row-level triggers above
+      and a comment claiming they made append-only true "regardless of
+      which role issues it." That comment was wrong, and the same L4
+      VERIFY session that caught this milestone's centerpiece bug
+      (Section&nbsp;5) caught this one too: <code>TRUNCATE agent_events;</code>,
+      run as the <code>postgres</code> superuser, silently wiped every row
+      — 94 of them at the time — with no exception and no trigger firing at
+      all.
+    </p>
+    <p>
+      The reason is a genuine PostgreSQL quirk worth understanding on its
+      own terms, not just patching around: <code>TRUNCATE</code> is not
+      "a big <code>DELETE</code>." A <code>DELETE</code> is row-level DML —
+      Postgres walks the table and removes matching rows one at a time,
+      which is exactly the hook a <code>FOR EACH ROW</code> trigger sits
+      on. <code>TRUNCATE</code>, instead, deallocates the table's storage
+      pages wholesale without ever visiting individual rows — it behaves
+      more like a DDL operation than a per-row delete. Because no row is
+      ever individually touched, PostgreSQL has nothing to invoke a
+      <code>FOR EACH ROW</code> trigger <em>on</em> — the row-level
+      trigger machinery is architecturally absent from the TRUNCATE code
+      path, not merely unlucky to miss it. PostgreSQL does support a
+      separate trigger granularity, <code>FOR EACH STATEMENT</code>, that
+      fires once per statement regardless of how many rows it touches (or
+      doesn't touch) — and critically, a table's <code>FOR EACH ROW</code>
+      triggers and its <code>FOR EACH STATEMENT</code> triggers are
+      registered, and fired, completely independently of each other.
+    </p>
+    <div class="compare before-after">
+      <div class="col before">
+        <h4>Before the fix</h4>
+        <p>
+          Only <code>agent_events_no_update</code>/
+          <code>agent_events_no_delete</code> (both <code>FOR EACH ROW</code>)
+          exist. <code>TRUNCATE agent_events;</code> matches neither
+          trigger's registration — it succeeds silently, every row gone.
+        </p>
+      </div>
+      <div class="col after">
+        <h4>After the fix</h4>
+        <p>
+          A third trigger, <code>agent_events_no_truncate</code>
+          (<code>BEFORE TRUNCATE ... FOR EACH STATEMENT</code>), registered
+          separately. It uses its own trigger function
+          (<code>agent_events_forbid_truncate</code>) rather than reusing
+          the row-level one, because a statement-level trigger has no
+          per-row <code>OLD</code>/<code>NEW</code> context to read.
+          <code>TRUNCATE agent_events;</code> now raises
+          <code>agent_events is append-only: TRUNCATE is not permitted</code>
+          before anything is removed.
+        </p>
+      </div>
+    </div>
+    <p>
+      The transferable lesson is the specific one, not "add more triggers":
+      when a table has more than one way to be mutated, each PostgreSQL
+      trigger <em>granularity</em> (row-level vs. statement-level) has to
+      be checked against every mutating statement type independently —
+      "I added a BEFORE trigger" is not automatically the same claim as "no
+      mutation gets through," because a granularity mismatch, not a missing
+      trigger, is exactly the gap that opened here.
+    </p>
+  </section>
+
+  <section id="restricted-role">
+    <h2><span class="num">4</span>Why the app connects as a restricted role</h2>
+    <p>
+      Two separate connection strings exist in <code>Settings</code>:
+      <code>database_url</code> (the <code>agent_events_writer</code> role —
+      <code>SELECT, INSERT</code> only) and <code>database_admin_url</code>
+      (the <code>postgres</code> superuser). <code>EventRepository</code>,
+      the only application code that touches this table, is constructed
+      from <code>database_url</code> exclusively. The admin DSN is used in
+      exactly one place: <code>backend.database.postgres.apply_migrations</code>,
+      which runs migration 0001 itself — creating the table, the triggers,
+      and the restricted role all require privileges that restricted role
+      is deliberately never granted, so the restricted role could not apply
+      its own migration even if application code tried to.
+    </p>
+    <p>
+      This is the same "least privilege for the request path, elevated
+      privilege only for setup" split you'd want for any production
+      database user, made concrete here by the fact that the two DSNs
+      literally differ in which role they authenticate as. If application
+      code were ever compromised or simply buggy enough to attempt an
+      <code>UPDATE</code>, connecting as the restricted role means that
+      attempt fails on a permissions check before it would even reach the
+      trigger that (independently) also forbids it.
+    </p>
+  </section>
+
+  <section id="centerpiece">
+    <h2><span class="num">5</span>The centerpiece: blocking the event loop</h2>
+    <p>
+      This is the part of M7's history worth understanding in full, not
+      smoothing into a footnote — a first, independent L4 VERIFY session
+      rejected M7's original build for a real bug, not a nitpick.
+    </p>
+    <h3>What "blocking the event loop" means, for a reader who hasn't thought about it</h3>
+    <p>
+      FastAPI (via uvicorn) can serve many concurrent requests using a
+      single OS thread, because each request handler is a coroutine —
+      Python code that periodically hands control back to an
+      <em>event loop</em> at every <code>await</code>. The event loop's job
+      is to look at every in-flight coroutine and run whichever one is
+      ready to make progress, switching between them whenever one hits an
+      <code>await</code> and is waiting on something (a network read, a
+      timer). This is how ten requests can be "in progress" at once on one
+      thread: none of them ever occupies the thread for long — they take
+      turns.
+    </p>
+    <p>
+      That entire arrangement depends on every coroutine actually handing
+      control back promptly. If one coroutine calls a plain, ordinary
+      Python function that blocks — no <code>await</code>, just a
+      synchronous call that doesn't return for a while — the event loop has
+      no opportunity to switch to anything else. It isn't "this request
+      waits a while"; it's "the one thread the entire process depends on to
+      run <em>any</em> coroutine is now occupied," which means every other
+      concurrent request, no matter how unrelated, is frozen too. A single
+      stalled call inside one handler can make the whole server look dead,
+      not just the one request that made the call.
+    </p>
+    <div class="lane-grid">
+      <div class="lane busy">
+        <div class="lane-tag">what actually happened</div>
+        <p>
+          <code>backend.webhook_receiver.router.receive_webhook</code> is
+          <code>async def</code>. The original build called
+          <code>EventRepository.insert_event</code> — a plain, synchronous
+          <code>psycopg.connect(...)</code> — directly, with no
+          <code>await</code> and no offload. Every other concurrent webhook
+          request shares the same event loop thread.
+        </p>
+      </div>
+    </div>
+    <h3>The proof, not just the theory</h3>
+    <p>
+      L4 VERIFY did not stop at reasoning about this abstractly — it
+      reproduced the failure against a live server. An admin session held
+      <code>LOCK TABLE agent_events IN ACCESS EXCLUSIVE MODE</code> (the
+      strongest lock Postgres has — it blocks every other statement against
+      the table, including the plain <code>INSERT</code> the events write
+      performs) for several seconds. While that lock was held, three
+      concurrent, otherwise-unrelated webhook POSTs were sent to a live
+      uvicorn process:
+    </p>
+    <pre><code>three concurrent webhook POSTs, events table locked ACCESS EXCLUSIVE:
+each request: ~4.4s (normal, unlocked case: sub-10ms)
+&rarr; SERIALIZED, not concurrent: one blocked write held the event
+  loop thread every other in-flight request also needed.</code></pre>
+    <p>
+      Every request's own events write blocked on the same table lock —
+      that part is expected, one connection waiting for one lock. What is
+      <em>not</em> expected, and what makes this a real bug rather than "the
+      slow request was slow," is that the other two requests, which never
+      touched the locked table themselves, took just as long — because the
+      one request's blocking call froze the event loop thread they all
+      depended on to run at all. This also violates
+      <code>.genesis/DONE.html</code>'s own section 2 gate — "every outbound
+      call has a timeout / circuit-breaker" — since <code>connect_timeout</code>
+      was the only bound in place, and it does not cover this failure mode
+      at all (Section&nbsp;6).
+    </p>
+  </section>
+
+  <section id="fix">
+    <h2><span class="num">6</span>The fix: a real timeout, an offload, a reused breaker</h2>
+    <p>
+      The L2 DEBUG loop that followed the REJECT applied three changes,
+      each closing a distinct part of the failure — none of them a
+      hand-rolled one-off, all three reusing existing primitives.
+    </p>
+    <h3>1. <code>statement_timeout</code>, because <code>connect_timeout</code> never covered this</h3>
+    <p>
+      <code>EventRepository</code> already passed
+      <code>connect_timeout</code> to <code>psycopg.connect</code> before
+      the fix. It did nothing to prevent the bug above, and understanding
+      why is the key distinction: <code>connect_timeout</code> bounds only
+      the initial TCP handshake — the time it takes to establish the
+      connection itself. It has nothing to say about how long a query
+      takes to <em>execute</em> once the connection exists, and nothing to
+      say about time spent waiting to acquire a lock the query needs before
+      it can run at all — which is exactly the situation the
+      <code>ACCESS EXCLUSIVE</code> lock created: the connection opened
+      fine, and then the <code>INSERT</code> sat waiting for a lock that
+      wouldn't release for seconds. A timeout on the handshake is silent
+      about everything that happens after the handshake succeeds.
+    </p>
+    <p>
+      The fix sets Postgres's own <code>statement_timeout</code> GUC (via
+      libpq's <code>options</code> connection parameter,
+      <code>-c statement_timeout=&lt;ms&gt;</code>, applied from the moment
+      the connection is established) — a bound enforced by the database
+      itself on query execution, including lock-wait time. Default 2000ms
+      (<code>Settings.events_statement_timeout_ms</code>). Once this bound
+      is in place, a query stuck behind a lock for longer than the timeout
+      is cancelled by Postgres, not left to hang indefinitely.
+    </p>
+    <h3>2. <code>asyncio.to_thread</code>, to get the call off the loop</h3>
+    <p>
+      A real query-level bound alone still leaves the original problem
+      half-solved: even a 2-second bounded block is still 2 seconds of the
+      <em>entire event loop</em> being unavailable to every other request.
+      The actual fix for "blocking the event loop" is not a shorter block —
+      it's not blocking the loop thread at all. <code>backend.observability.events</code>
+      gained <code>emit_decision_async</code>, and the router now
+      <code>await</code>s it instead of calling the synchronous
+      <code>emit_decision</code> directly:
+    </p>
+    <div class="compare before-after">
+      <div class="col before">
+        <h4>Before</h4>
+        <pre><code>emit_decision(event_repository, review_id, agent=None, outcome=outcome)
+# a plain synchronous call, unawaited, on the event loop thread</code></pre>
+      </div>
+      <div class="col after">
+        <h4>After</h4>
+        <pre><code>await emit_decision_async(event_repository, review_id, agent=None, outcome=outcome)
+# runs emit_decision on asyncio's default thread-pool executor via
+# asyncio.to_thread; only THIS request's own coroutine awaits it</code></pre>
+      </div>
+    </div>
+    <p>
+      <code>asyncio.to_thread</code> submits the blocking call to asyncio's
+      own default executor — a bounded worker thread pool the event loop
+      already manages, not a new thread spun up per call — and hands back
+      an awaitable. The calling coroutine suspends at the <code>await</code>
+      exactly like any other I/O wait, which is precisely the point: the
+      event loop is free again the instant the write is handed off, and
+      every other concurrent request's coroutine keeps making progress on
+      it while this one write happens on a separate thread. The response
+      still waits for the write to finish (or fail-and-be-swallowed, per
+      Section&nbsp;8) before answering — this is not "fire and forget," only
+      "don't make everyone else wait too."
+    </p>
+    <p>
+      Note what did <em>not</em> need this change:
+      <code>backend/orchestrator/nodes.py</code>'s span/decision emissions
+      call the plain synchronous <code>emit_span_start</code>/
+      <code>emit_span_end</code>/<code>emit_decision</code> functions
+      directly, with no <code>asyncio.to_thread</code> wrapper — correctly,
+      because LangGraph already runs a synchronous graph's nodes on its own
+      worker-thread pool, never on an asyncio event loop. There is no event
+      loop at that call site for a blocking call to starve, so offloading
+      again there would be solving a problem that doesn't exist in that
+      lane.
+    </p>
+    <h3>3. A dedicated <code>CircuitBreaker</code>, reused from M6, not hand-rolled</h3>
+    <p>
+      <code>insert_event</code> now runs through a
+      <code>CircuitBreaker</code> — M6's own class
+      (<code>backend.reliability.circuit_breaker</code>), instantiated
+      fresh for the events path with independent knobs
+      (<code>events_circuit_breaker_failure_threshold</code>, default 5;
+      <code>events_circuit_breaker_reset_timeout_seconds</code>, default
+      30.0) rather than sharing state with <code>RedisJobQueue</code>'s
+      breaker. Once the events database has failed 5 consecutive times, the
+      6th call fails immediately with <code>CircuitOpenError</code> — no
+      connection attempt, no waiting out another <code>statement_timeout</code>
+      window — until the reset window elapses. This is the same
+      "fail fast instead of retrying at full cost on every request" logic
+      M6 built for Redis, composed the same way rather than re-implemented
+      for Postgres.
+    </p>
+  </section>
+
+  <section id="reverify">
+    <h2><span class="num">7</span>Independent re-verification, not trust</h2>
+    <p>
+      A second, independent L4 VERIFY session did not take the L2 DEBUG
+      session's word that the fix worked — it re-ran the same concurrency
+      experiment against the fixed code and measured the numbers itself,
+      then went further and stress-tested the specific mechanism
+      (<code>asyncio.to_thread</code> offloading) under saturation.
+    </p>
+    <div class="callout ok">
+      <div class="label">Reported by the second independent verifier (see <code>.genesis/checkpoints/CURRENT.md</code>)</div>
+      <p>
+        The same three-concurrent-webhook-POSTs-under-a-locked-table
+        experiment, re-run against the fixed code:
+        <strong>~2.03s per request</strong>, <strong>~2.09s total wall time</strong>
+        for all three — concurrent, not stacked to something close to
+        3&times;2.03s. The near-equality of "total wall time" and
+        "per-request time" is itself the signal: if the three requests were
+        still serialized behind one blocked event loop, the total would
+        scale with the count of requests; here it doesn't, because all
+        three genuinely overlap.
+      </p>
+      <p>
+        A separate saturation check went after the offloading mechanism
+        directly rather than only the end-to-end timing: 40 event
+        emissions were driven against a deliberately small, 14-thread
+        executor, while a concurrent heartbeat coroutine ticked every
+        0.1 seconds on the same event loop. Result: the 40 emissions
+        completed in <strong>3 clean FIFO batches</strong> (the small pool
+        queuing work in submission order once its 14 threads filled up —
+        exactly the behavior a bounded thread pool should show under more
+        work than it has threads), while the heartbeat ticked
+        <strong>61 times out of 61</strong>, with no gaps. A stalled or
+        gap-riddled heartbeat would have meant the event loop was still
+        getting starved somewhere even after the fix; 61/61 with clean
+        timing is the loop staying fully responsive while 40 blocking
+        writes were in flight on background threads.
+      </p>
+    </div>
+    <p>
+      These specific figures come from the verification sessions' own
+      reports, as recorded in <code>.genesis/checkpoints/CURRENT.md</code>
+      and <code>.genesis/PLAN.md</code>'s M7 progress entry — the
+      concurrency and saturation experiments are ad hoc, one-time repros
+      against a live server and a custom executor, not scripts preserved
+      as permanent, re-runnable tests in this repository (unlike
+      <code>tests/integration/test_events_spine.py</code>'s own
+      <code>TestConcurrentWebhookWritesAreNotSerializedByALockedEventsTable</code>,
+      which asserts the same underlying property — no individual request
+      approaches the full lock-hold duration, and the batch completes in
+      close to one <code>statement_timeout</code> window rather than
+      scaling with the request count — using its own lock-hold and timeout
+      parameters).
+    </p>
+    <ul class="timeline">
+      <li class="reject"><span class="when">L4 VERIFY — Reject</span><br>Independent session locks <code>agent_events</code> ACCESS EXCLUSIVE, measures three concurrent webhook POSTs at ~4.4s each (sub-10ms normally), and rejects M7's L1 BUILD for a real reliability defect.</li>
+      <li><span class="when">L2 DEBUG</span><br>Adds <code>statement_timeout</code>, offloads the webhook's events write via <code>emit_decision_async</code>/<code>asyncio.to_thread</code>, wraps the write in a dedicated <code>CircuitBreaker</code>; also closes the TRUNCATE gap and narrows an exception swallow (Sections&nbsp;3 and 8), and fixes the demo command's clean-shell/tiebreak bugs.</li>
+      <li class="approve"><span class="when">L4 VERIFY — Approve</span><br>A second, independent session reproduces ~2.03s/request and ~2.09s total wall time for three genuinely concurrent requests, proves the loop stays responsive under executor saturation (40 emissions, 3 FIFO batches, heartbeat 61/61), and approves M7.</li>
+    </ul>
+  </section>
+
+  <section id="policy">
+    <h2><span class="num">8</span>Failure policy: log-and-continue, except for our own bugs</h2>
+    <p>
+      Writing an audit/trace event must never take down the request it is
+      observing — a webhook POST must still verify, dedupe, and enqueue
+      correctly even if the events Postgres is completely unreachable.
+      <code>backend.observability.events._emit</code> implements this by
+      catching <code>psycopg.Error</code>, <code>OSError</code>, and
+      <code>CircuitOpenError</code> around the actual write, logging a
+      warning, and returning normally — the caller never sees the failure.
+    </p>
+    <p>
+      The same L4 VERIFY session that caught the event-loop bug also caught
+      a second problem with this policy, narrower but real: the original
+      <code>except (psycopg.Error, OSError)</code> is broad enough to also
+      catch <code>psycopg.errors.IntegrityError</code> — a
+      <code>CHECK</code>-constraint violation, for example, is a subclass
+      of <code>psycopg.Error</code>. Concretely: <code>agent_events</code>'s
+      <code>event_type</code> column has a <code>CHECK</code> constraint
+      limiting it to the five known event kinds
+      (<code>backend/database/migrations/0001_agent_events.sql</code>). If
+      a future bug ever managed to construct an <code>AgentEvent</code>
+      with a value outside that set (or violated a future
+      <code>NOT NULL</code>/<code>UNIQUE</code> constraint the same way),
+      that is a bug in <em>this codebase's own logic</em>, not evidence the
+      database is unavailable — and the original broad <code>except</code>
+      would have silently swallowed it into the exact same log line as a
+      genuine outage, hiding a real defect behind the same message used for
+      "Postgres is down right now, which is expected and fine."
+    </p>
+    <div class="callout bad">
+      <div class="label">The fix</div>
+      <code>_emit</code> now catches <code>IntegrityError</code> first and
+      re-raises it immediately, before the broad
+      <code>(psycopg.Error, OSError, CircuitOpenError)</code> clause runs —
+      a genuine schema-rejects-this-row bug propagates loudly, while a
+      real connectivity failure is still swallowed exactly as before. Every
+      <code>emit_*</code> function also constructs its <code>AgentEvent</code>
+      <em>outside</em> the try/except entirely, so a pydantic
+      <code>ValidationError</code> from bad caller input (e.g. a string
+      where <code>tokens_in</code> expects an int) was never at risk of
+      being caught by this policy in the first place — it was always a
+      programmer error, not a database outage, and always propagated.
+    </div>
+  </section>
+
+  <section id="limits">
+    <h2><span class="num">9</span>Known limits, stated honestly</h2>
+    <ol class="gaps">
+      <li>
+        <strong>The breaker can drop events for up to <code>reset_timeout_seconds</code>
+        (30s default) under a sustained outage.</strong> Once
+        <code>EventRepository</code>'s breaker opens, every write attempt
+        fails fast and is logged-and-swallowed by
+        <code>backend.observability.events</code>'s policy (Section&nbsp;8)
+        for as long as the breaker stays OPEN. Every drop is logged, and
+        this is a judged, deliberate trade-off — a bounded gap in the audit
+        trail is preferable to an unbounded request stall — but it is worth
+        stating plainly rather than glossing over: an audit log that can
+        silently (from the request path's point of view) drop entries for
+        up to 30 seconds has an integrity concern distinct from ordinary
+        availability. There is no <code>/health</code> surface yet that
+        would make an open events breaker visible operationally, rather
+        than discoverable only by grepping logs after the fact.
+      </li>
+      <li>
+        <strong>The exact same defect class this milestone just fixed still
+        exists in M6-scope code that already passed its own L4 VERIFY.</strong>
+        <code>backend/webhook_receiver/router.py</code>'s
+        <code>queue.enqueue(event)</code> call (line 239, inside
+        <code>async def receive_webhook</code>) is a plain, synchronous,
+        unawaited call — no <code>await</code>, no
+        <code>asyncio.to_thread</code>. <code>RedisJobQueue.enqueue</code>
+        (<code>backend/job_queue/redis_arq.py</code>) itself blocks the
+        calling thread: its <code>_enqueue_arq_job</code> hands work across
+        a sync/async bridge via
+        <code>asyncio.run_coroutine_threadsafe(...)</code> and then waits
+        on that future with <code>future.result(timeout=...)</code>
+        (<code>backend.reliability.timeout.await_future</code>) — a real,
+        bounded wait, but one made synchronously from inside a coroutine,
+        on the event loop thread. A slow-but-not-fully-down Redis (elevated
+        latency rather than a hard outage) would serialise every concurrent
+        webhook request behind that wait the same way the pre-fix events
+        write did. This was found during M7's own L4 VERIFY passes, not
+        fixed as part of them — <code>backend/job_queue/redis_arq.py</code>
+        and this router call site sit outside M7's freeze boundary. It is
+        recorded in <code>.genesis/checkpoints/CURRENT.md</code>'s Deferred
+        list as a high-priority item for its own dedicated fix loop, most
+        likely mirroring this milestone's own <code>emit_decision_async</code>
+        pattern.
+      </li>
+      <li>
+        <strong><code>events_statement_timeout_ms</code>'s 2000ms default</strong>
+        is judged reasonable for the single-row inserts this milestone
+        performs, but is a best-guess default worth revisiting once real
+        load/latency data exists.
+      </li>
+    </ol>
+  </section>
+
+  <section id="quiz">
+    <h2><span class="num">10</span>Quiz</h2>
+    <p>Three questions. Click each one to reveal the answer.</p>
+
+    <details class="quiz">
+      <summary class="q">1. EventRepository already passed connect_timeout to psycopg.connect before the fix, yet three concurrent webhook requests still took ~4.4s each under a locked events table. Why didn't connect_timeout catch this?</summary>
+      <div class="answer">
+        <p class="verdict">connect_timeout only bounds the initial TCP handshake -- how long it takes to establish the connection. It says nothing about how long a query takes to execute afterward, or how long it waits to acquire a lock it needs before running. The lock-wait was the entire problem here: the connection opened fine, and the INSERT then sat blocked waiting on the ACCESS EXCLUSIVE lock, a phase connect_timeout has no visibility into at all.</p>
+        <p>
+          The fix that actually covers this is Postgres's own
+          <code>statement_timeout</code> GUC, which bounds query execution
+          <em>including</em> lock-wait time, because it's enforced by the
+          database itself on the statement, not by the client on the
+          connection attempt. That's why the fix sets both: the pre-existing
+          <code>connect_timeout</code> stays (it still guards against an
+          unreachable host), and a new <code>statement_timeout</code> is
+          added for everything <code>connect_timeout</code> was never
+          designed to cover.
+        </p>
+      </div>
+    </details>
+
+    <details class="quiz">
+      <summary class="q">2. The row-level agent_events_no_update and agent_events_no_delete triggers fire for any role, including a superuser, on UPDATE or DELETE. Why did TRUNCATE agent_events; still silently wipe every row before the fix?</summary>
+      <div class="answer">
+        <p class="verdict">TRUNCATE never fires a row-level (FOR EACH ROW) trigger at all, for any role -- it isn't a row-by-row operation the way DELETE is, so there's no per-row hook for that trigger granularity to attach to. PostgreSQL requires a separate, statement-level (FOR EACH STATEMENT) trigger to intercept TRUNCATE, registered independently of the row-level pair.</p>
+        <p>
+          This is why the fix adds a third trigger,
+          <code>agent_events_no_truncate</code>
+          (<code>BEFORE TRUNCATE ... FOR EACH STATEMENT</code>), with its
+          own trigger function rather than reusing the row-level one --
+          a statement-level trigger has no per-row <code>OLD</code> value to
+          reference. The lesson generalizes: a table's row-level and
+          statement-level trigger sets are independent, so "I added a
+          BEFORE trigger" only covers whichever mutation types actually use
+          that trigger's granularity.
+        </p>
+      </div>
+    </details>
+
+    <details class="quiz">
+      <summary class="q">3. The webhook router now does "await emit_decision_async(...)" instead of calling emit_decision(...) directly, but backend/orchestrator/nodes.py still calls emit_span_start/emit_span_end/emit_decision directly, with no asyncio.to_thread wrapper. Why is that difference correct rather than an inconsistency?</summary>
+      <div class="answer">
+        <p class="verdict">The router's handler is an async def coroutine running on uvicorn's single event loop, where a blocking call directly freezes every other concurrent request -- that's the bug this milestone fixed. The orchestrator's nodes run as plain synchronous functions on LangGraph's own worker-thread pool for a sync graph, never on an asyncio event loop at all.</p>
+        <p>
+          Since there's no event loop at the orchestrator's call site to
+          starve in the first place, wrapping those calls in
+          <code>asyncio.to_thread</code> would add an unnecessary layer of
+          indirection without fixing anything -- there's nothing broken
+          there to fix. The rule isn't "always offload blocking calls";
+          it's "offload a blocking call only when it would otherwise run on
+          a shared event loop thread other concurrent work depends on,"
+          which is true for exactly one of these two call sites.
+        </p>
+      </div>
+    </details>
+  </section>
+
+  <footer>
+    Generated by the <code>explain-diff-html</code> skill during L4 VERIFY housekeeping for
+    milestone M7 of the <code>pr-review-agent</code> genesis-kit project. Diff range:
+    <code>8a4e3f5</code> (feat(infra): add local Postgres service for the M7 events spine)
+    through <code>d3f835d</code> (chore(genesis): record L4 REJECT and the M7 L2 DEBUG fix) —
+    16 commits (10 original build commits, 6 L2 DEBUG fix commits following the first L4
+    VERIFY REJECT), 23 files changed, 2893 insertions(+), 47 deletions(-). Self-contained: no
+    external stylesheets, fonts, scripts, or images.
+  </footer>
+
+</div>
+</body>
+</html>
