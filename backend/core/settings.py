@@ -42,6 +42,22 @@ _DEFAULT_IDEMPOTENCY_TTL_SECONDS = 7 * 24 * 60 * 60
 # a second hardcoded default, so there is exactly one number to keep in sync.
 _DEFAULT_HITL_CONFIDENCE_THRESHOLD = Decimal("0.750")
 
+# M6 reliability-layer defaults. These back RedisJobQueue's retry/circuit
+# breaker/timeout wrapping of its two real Redis calls (the idempotency SET
+# and the cross-thread ARQ enqueue) and are deliberately conservative for a
+# request-path dependency: few, fast retries (a webhook POST handler should
+# not sit retrying for many seconds before answering GitHub) and a breaker
+# that trips quickly but also recovers on a human-scale timeline.
+_DEFAULT_RETRY_MAX_ATTEMPTS = 3
+_DEFAULT_RETRY_BASE_DELAY_SECONDS = 0.1
+_DEFAULT_RETRY_MAX_DELAY_SECONDS = 2.0
+# Replaces the M3-era hardcoded `future.result(timeout=10)` /
+# `_ENQUEUE_TIMEOUT_SECONDS` / `_POOL_CREATE_TIMEOUT_SECONDS` magic numbers
+# in backend/job_queue/redis_arq.py with one configurable value.
+_DEFAULT_RELIABILITY_TIMEOUT_SECONDS = 10.0
+_DEFAULT_CIRCUIT_BREAKER_FAILURE_THRESHOLD = 5
+_DEFAULT_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS = 30.0
+
 
 class Settings(BaseSettings):
     """Runtime configuration for the pr-review-agent backend.
@@ -72,6 +88,24 @@ class Settings(BaseSettings):
             and no CRITICAL finding, auto-posts; otherwise it is queued for
             human review. See ``backend.hitl.queue.route_review``. Default
             0.750, per PLAN.md.
+        retry_max_attempts: M6 reliability layer. Total attempts (including
+            the first) ``RedisJobQueue`` makes per Redis call before giving
+            up. See ``backend.reliability.retry.RetryPolicy``.
+        retry_base_delay_seconds: M6 reliability layer. Delay before the
+            second attempt; grows exponentially (capped by
+            ``retry_max_delay_seconds``) after that.
+        retry_max_delay_seconds: M6 reliability layer. Upper bound the
+            exponential backoff delay is clamped to.
+        reliability_timeout_seconds: M6 reliability layer. Bound (seconds)
+            on each individual Redis call ``RedisJobQueue`` makes — both the
+            synchronous idempotency ``SET`` and the cross-thread ARQ
+            enqueue future. Replaces the previous hardcoded
+            ``future.result(timeout=10)``.
+        circuit_breaker_failure_threshold: M6 reliability layer. Consecutive
+            failures required to trip ``RedisJobQueue``'s breaker to OPEN.
+        circuit_breaker_reset_timeout_seconds: M6 reliability layer. How
+            long the breaker stays OPEN before allowing a single HALF_OPEN
+            probe through.
     """
 
     github_webhook_secret: str = Field(
@@ -120,6 +154,60 @@ class Settings(BaseSettings):
             "HITL gate cutoff: a review with overall_confidence >= this "
             "value and no CRITICAL finding auto-posts; otherwise it is "
             "queued for human review. Default 0.750."
+        ),
+    )
+
+    retry_max_attempts: int = Field(
+        default=_DEFAULT_RETRY_MAX_ATTEMPTS,
+        ge=1,
+        description=(
+            "Total attempts (including the first) RedisJobQueue makes per "
+            "Redis call before giving up. Default 3."
+        ),
+    )
+
+    retry_base_delay_seconds: float = Field(
+        default=_DEFAULT_RETRY_BASE_DELAY_SECONDS,
+        gt=0,
+        description=(
+            "Delay (seconds) before the second retry attempt; grows "
+            "exponentially after that, capped at "
+            "RETRY_MAX_DELAY_SECONDS. Default 0.1."
+        ),
+    )
+
+    retry_max_delay_seconds: float = Field(
+        default=_DEFAULT_RETRY_MAX_DELAY_SECONDS,
+        gt=0,
+        description="Upper bound (seconds) the exponential backoff delay is clamped to. Default 2.0.",
+    )
+
+    reliability_timeout_seconds: float = Field(
+        default=_DEFAULT_RELIABILITY_TIMEOUT_SECONDS,
+        gt=0,
+        description=(
+            "Bound (seconds) on each individual outbound Redis call "
+            "RedisJobQueue makes. Replaces the previous hardcoded "
+            "future.result(timeout=10). Default 10.0."
+        ),
+    )
+
+    circuit_breaker_failure_threshold: int = Field(
+        default=_DEFAULT_CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+        ge=1,
+        description=(
+            "Consecutive failures required to trip RedisJobQueue's "
+            "circuit breaker to OPEN. Default 5."
+        ),
+    )
+
+    circuit_breaker_reset_timeout_seconds: float = Field(
+        default=_DEFAULT_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS,
+        gt=0,
+        description=(
+            "How long (seconds) RedisJobQueue's circuit breaker stays "
+            "OPEN before allowing a single HALF_OPEN probe through. "
+            "Default 30.0."
         ),
     )
 
