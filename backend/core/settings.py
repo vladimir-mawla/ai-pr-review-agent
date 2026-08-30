@@ -15,6 +15,7 @@ signatures) and a documented, typed surface instead of scattered
 
 from __future__ import annotations
 
+from decimal import Decimal
 from functools import lru_cache
 from typing import Literal
 
@@ -32,6 +33,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # unboundedly" finding: every key now expires, it just doesn't expire
 # before it can plausibly still matter).
 _DEFAULT_IDEMPOTENCY_TTL_SECONDS = 7 * 24 * 60 * 60
+
+# M5's HITL gate (backend.hitl.queue.route_review) auto-posts a review whose
+# overall_confidence is at/above this value (and has no CRITICAL finding);
+# below it, the review is queued for human review. PLAN.md pins the default
+# to 0.75 explicitly, so this is the one place that default is spelled out —
+# route_review itself takes the threshold as a required argument rather than
+# a second hardcoded default, so there is exactly one number to keep in sync.
+_DEFAULT_HITL_CONFIDENCE_THRESHOLD = Decimal("0.750")
 
 
 class Settings(BaseSettings):
@@ -58,6 +67,11 @@ class Settings(BaseSettings):
             remembered in Redis before it expires and its key is
             reclaimed. See module-level comment above for why the default
             is one week.
+        hitl_confidence_threshold: The HITL confidence gate's cutoff (M5).
+            A review with ``overall_confidence`` at or above this value,
+            and no CRITICAL finding, auto-posts; otherwise it is queued for
+            human review. See ``backend.hitl.queue.route_review``. Default
+            0.750, per PLAN.md.
     """
 
     github_webhook_secret: str = Field(
@@ -94,6 +108,18 @@ class Settings(BaseSettings):
             "Seconds a delivery-id idempotency key survives in Redis "
             "before expiring. Must comfortably outlive GitHub's ~24h "
             "webhook redelivery window. Default is one week."
+        ),
+    )
+
+    hitl_confidence_threshold: Decimal = Field(
+        default=_DEFAULT_HITL_CONFIDENCE_THRESHOLD,
+        ge=Decimal("0.000"),
+        le=Decimal("1.000"),
+        decimal_places=3,
+        description=(
+            "HITL gate cutoff: a review with overall_confidence >= this "
+            "value and no CRITICAL finding auto-posts; otherwise it is "
+            "queued for human review. Default 0.750."
         ),
     )
 
