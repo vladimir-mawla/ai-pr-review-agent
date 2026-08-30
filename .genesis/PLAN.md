@@ -251,3 +251,36 @@ milestones needing a paid/external credential (M8, M10, M11, M12, M13) are order
   file before resume causes a fresh run instead of a false-positive resume,
   confirming the resume path is actually reading persisted state rather than
   vacuously succeeding). No blocking defects.
+
+- **2026-08-30 — M5 (Aggregator + Confidence-Weighted HITL Gate):** L1 BUILD
+  shipped the pure-Python aggregator (`dedupe_findings`), the HITL confidence
+  gate (`route_review`), and the M1-deferred `overall_confidence` consistency
+  fix, all wired into `aggregate_node` as the graph's real fan-in. A first,
+  independent L4 VERIFY session **REJECTED** this build for a real safety
+  bug, not a nitpick: `dedupe_findings` ordered its dedup tie-break purely by
+  confidence, with severity playing no role at all, so a SECURITY/CRITICAL
+  finding (confidence 0.751) colliding on the same file+line with a
+  DOCS/INFO finding (confidence 0.752) lost the collision — `route_review`
+  then saw no CRITICAL finding in the post-dedupe list and returned POSTED,
+  auto-posting a review whose real CRITICAL finding had been silently
+  discarded. An L2 DEBUG loop applied the approved fix: severity is now
+  compared first in `_is_better` (via an explicit `SEVERITY_RANK` map in
+  `backend/models/enums.py`), with confidence demoted to a tie-break used
+  only within the same severity; a true end-to-end regression test
+  (`TestDedupeAndRoutingInteraction::test_end_to_end_critical_survives_dedupe_and_forces_hitl`)
+  was proven to fail against the old ordering before the fix and pass after
+  it. A second, independent L4 VERIFY session re-ran everything against the
+  fixed code and **APPROVEd** M5. Demo command
+  `pytest tests/unit/test_aggregator.py tests/unit/test_hitl_gate.py -v`
+  exits 0 (49 of 49 tests pass); the full suite (`pytest -v`) exits 0 with
+  114 tests passing overall — 62 carried over from M1–M4 plus 52 new M5
+  tests (the 49 in the demo command's two files, plus 2 new regression
+  tests in `test_models.py` for the closed M1 gap and 1 new integration
+  test proving `aggregate_node` is wired into the real fan-in), including
+  the property-based CRITICAL-survives-every-permutation check and the
+  dedupe→routing interaction tests that closed the exact test-design gap
+  the original bug slipped through. This rejection-then-fix
+  cycle, not the final green run alone, is the most valuable part of M5's
+  history and is recorded here rather than smoothed over — see
+  `checkpoints/CURRENT.md` and `.genesis/explanations/2026-08-30-explanation-m5.html`
+  for the full account.
