@@ -289,9 +289,12 @@ def aggregate_node(state: GraphState, config: RunnableConfig) -> dict[str, Any]:
     merged by the ``operator.add`` reducer (see ``state.py``), in whatever
     order the parallel branches happened to finish. This node:
 
-    1. Dedupes same-``(file_path, line_start)`` findings, keeping the
-       highest-confidence one (``backend.agents.contracts.dedupe_findings``
-       — see that module for the deterministic tie-break rule).
+    1. Dedupes same-``(file_path, line_start)`` findings, keeping the one
+       that matters most: higher severity wins first, confidence only
+       breaks a tie *within* the same severity
+       (``backend.agents.contracts.dedupe_findings`` — see that module for
+       the full deterministic tie-break rule and why severity must come
+       first).
     2. Computes ``overall_confidence`` from the *surviving* (deduped)
        findings via the one formula ``Review`` itself enforces
        (``backend.models.review.compute_overall_confidence``) — using

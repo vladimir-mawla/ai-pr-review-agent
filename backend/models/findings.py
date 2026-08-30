@@ -13,7 +13,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field, model_validator
 
-from backend.models.enums import AgentType, Severity
+from backend.models.enums import SEVERITY_RANK, AgentType, Severity
 
 
 class Finding(BaseModel):
@@ -88,12 +88,17 @@ class Finding(BaseModel):
         return self
 
     def __lt__(self, other: object) -> bool:
-        """Sort findings by severity (descending) then confidence (descending)."""
+        """Sort findings by severity (descending) then confidence (descending).
+
+        Uses the canonical ``SEVERITY_RANK`` map (rather than a second,
+        locally-declared severity ordering) so this ranking can never drift
+        from the one ``backend.agents.contracts.dedupe_findings`` uses --
+        see ``Severity``'s docstring in ``backend.models.enums`` for why a
+        second hand-rolled ordering here would be exactly the kind of
+        silent-drift risk that caused M5's dedup bug.
+        """
         if not isinstance(other, Finding):
             return NotImplemented
-        if self.severity.value != other.severity.value:
-            severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
-            return severity_order.get(self.severity.value, 5) < severity_order.get(
-                other.severity.value, 5
-            )
+        if self.severity != other.severity:
+            return SEVERITY_RANK[self.severity] < SEVERITY_RANK[other.severity]
         return self.confidence > other.confidence

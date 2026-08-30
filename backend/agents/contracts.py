@@ -3,35 +3,65 @@
 Owns: ``dedupe_findings``, the pure-Python core of M5's aggregator outcome
 ("merges the four specialists' finding lists into one Review... dedupe
 findings that multiple agents raised on the same (file, line), keeping the
-highest confidence"). No LLM call, no I/O, fully deterministic -- testable
-with plain fixtures (``tests/unit/test_aggregator.py``), exactly as M5's
-outcome requires ("all testable without any LLM").
+one that matters most"). No LLM call, no I/O, fully deterministic --
+testable with plain fixtures (``tests/unit/test_aggregator.py``), exactly
+as M5's outcome requires ("all testable without any LLM").
 
 Dedup key: ``(file_path, line_start)`` -- an exact match on both. Two
 findings on the same file at *different* lines, or at the same line number
 in *different* files, are never considered duplicates; only an agent raising
 essentially the same issue at the identical location is.
 
-Deterministic tie-break, in order:
-1. Highest ``confidence`` wins (the spec's explicit rule).
-2. On an exact confidence tie: the agent earlier in
+KNOWN DEFERRED GAP (L4 VERIFY, M5 REJECT round): a wide-span finding (e.g.
+``line_start=42, line_end=80``) collapses into any other finding that
+merely shares ``line_start=42``, even one with an unrelated, much narrower
+span. Widening the key to ``(file_path, line_start, line_end)`` was
+considered and deliberately rejected for this fix -- it does not solve the
+general "do these two findings actually overlap" problem (two spans can
+overlap without sharing either endpoint) and was explicitly called out as
+out of scope by the user. Tracked in ``.genesis/checkpoints/CURRENT.md``'s
+Deferred section; not fixed here.
+
+Deterministic tie-break, in order (SEVERITY FIRST -- see the L4 VERIFY
+REJECT this ordering fixes, below):
+1. Higher ``severity`` wins, ranked by ``backend.models.enums.SEVERITY_RANK``
+   (CRITICAL > HIGH > MEDIUM > LOW > INFO) -- **not** confidence, and
+   **not** the two findings' arrival order. This is the fix for a real
+   safety bug an independent L4 VERIFY session caught and rejected M5 for:
+   the previous rule ("highest confidence wins", severity ignored) let a
+   SECURITY agent's CRITICAL finding (confidence 0.751) be discarded in
+   favor of a DOCS agent's unrelated INFO finding at the same file/line
+   that merely had a marginally higher confidence (0.752) -- and because
+   ``backend.hitl.queue.has_critical_finding`` only ever sees the
+   *post-dedupe* list, the CRITICAL finding vanished silently and the
+   review auto-posted instead of requiring human review. A CRITICAL
+   finding must never lose a dedup collision to a lower-severity one,
+   regardless of either finding's confidence.
+2. Within the *same* severity: higher ``confidence`` wins (the previous
+   rule, now demoted to the second tie-break level instead of the first).
+3. On an exact confidence tie too: the agent earlier in
    ``backend.agents.base_agent.AGENT_PRECEDENCE`` wins (SECURITY beats
    QUALITY beats TESTS beats DOCS) -- see that module's docstring for why.
-3. On an agent-type tie too (two findings from the *same* specialist at the
-   same key -- not expected from M4/M5's one-finding-per-agent stubs, but
-   not ruled out for a future real agent that could emit more than one
+4. On an agent-type tie as well (two findings from the *same* specialist at
+   the same key -- not expected from M4/M5's one-finding-per-agent stubs,
+   but not ruled out for a future real agent that could emit more than one
    finding per node): lexicographically smaller ``category`` wins, then
    lexicographically smaller ``rationale`` wins. These last two steps exist
    purely so the result never depends on the *input list's* order (which,
    coming out of a parallel LangGraph fan-out, is not itself guaranteed) --
    every comparison is over fields intrinsic to the findings being compared,
-   never over "which one arrived first".
+   never over "which one arrived first". This is verified for the whole
+   chain, not just the old confidence-only levels: dedup output is
+   permutation-invariant even when a CRITICAL and a higher-confidence
+   lower-severity finding collide (see
+   ``tests/unit/test_aggregator.py::TestSeverityBeforeConfidenceDedupe``).
 """
 
 from __future__ import annotations
 
 from backend.agents.base_agent import AGENT_PRECEDENCE
 from backend.models import Finding
+from backend.models.enums import SEVERITY_RANK
 
 
 def _agent_rank(finding: Finding) -> int:
@@ -46,8 +76,19 @@ def _agent_rank(finding: Finding) -> int:
         return len(AGENT_PRECEDENCE)
 
 
+def _severity_rank(finding: Finding) -> int:
+    """Rank of ``finding``'s severity via ``SEVERITY_RANK`` (lower = more severe = wins).
+
+    Deliberately goes through the explicit rank map rather than the enum's
+    declaration order or member name -- see ``Severity``'s docstring in
+    ``backend.models.enums`` for why relying on either of those would be
+    an accident waiting to break.
+    """
+    return SEVERITY_RANK[finding.severity]
+
+
 def _tie_break_key(finding: Finding) -> tuple[int, str, str]:
-    """Deterministic ranking used once two findings' confidences are equal.
+    """Deterministic ranking used once two same-severity findings' confidences are equal.
 
     Lower tuple wins (used as "is finding strictly better than current").
     """
@@ -55,7 +96,17 @@ def _tie_break_key(finding: Finding) -> tuple[int, str, str]:
 
 
 def _is_better(candidate: Finding, current: Finding) -> bool:
-    """True if ``candidate`` should replace ``current`` at the same dedup key."""
+    """True if ``candidate`` should replace ``current`` at the same dedup key.
+
+    Severity is compared FIRST, ahead of confidence: a higher-severity
+    finding always wins the dedup collision, even against a
+    lower-severity finding with higher confidence. This is the exact fix
+    for the M5 L4 VERIFY REJECT (see module docstring) -- confidence and
+    the rest of the tie-break chain only ever run to break a tie *within*
+    the same severity, never to override it.
+    """
+    if candidate.severity != current.severity:
+        return _severity_rank(candidate) < _severity_rank(current)
     if candidate.confidence != current.confidence:
         return candidate.confidence > current.confidence
     return _tie_break_key(candidate) < _tie_break_key(current)
