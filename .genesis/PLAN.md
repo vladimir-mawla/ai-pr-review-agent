@@ -374,3 +374,82 @@ milestones needing a paid/external credential (M8, M10, M11, M12, M13) are order
   account, including the newly-found fact that `backend/webhook_receiver/
   router.py`'s Redis enqueue call has the exact same blocking-the-event-loop
   defect class in M6-scope code that already passed its own L4 VERIFY.
+
+- **2026-08-30 — M8 (First Real Specialist Agent, LLM-Backed):** L1 BUILD
+  shipped `backend/tools/llm_client.py`'s `AnthropicLLMClient` (real
+  `anthropic.Anthropic().messages.create(...)` against `claude-haiku-4-5`,
+  composed through M6's own retry/circuit-breaker/timeout primitives, never
+  hand-rolled), a versioned prompt registry (`backend/prompts/registry.py`,
+  `backend/prompts/templates/security/v1.md`), a drift-tolerant response
+  parser (`backend/agents/response_parsing.py`) with a forced-HITL
+  CRITICAL/confidence-0.000 fallback `Finding` on total parse failure, a
+  real `BudgetGuard` (`backend/economics/budget.py`) reading spend from
+  M7's `agent_events` table rather than an in-memory counter, and the real
+  `SecurityAgent` (`backend/agents/security_agent.py`) replacing the M4
+  stub `security_node`. The L1 BUILD session caught two real bugs in its
+  own work before L4 VERIFY ever saw them: the response parser originally
+  conflated a genuinely empty `findings: []` list (a clean diff, valid)
+  with "every item failed validation" (untrustworthy output, should raise),
+  misrouting every clean diff through the forced-HITL fallback; and an
+  integration test's fixture rows, pinned to a far-future day (2030-06-15)
+  for test isolation, silently polluted the live `BudgetGuard`'s real
+  accounting because `sum_llm_cost_since` had no upper bound, tripping a
+  spurious `BudgetExceededError: spent $2119.000446 of $20 cap` against
+  the demo CLI. A first, independent L4 VERIFY session APPROVEd M8 with
+  three non-blocking findings, all closed in a follow-up L2 DEBUG pass:
+  (1) the future-dated-row defect above was still live — the builder's
+  fixture re-pin had only relocated the symptom, and L4 VERIFY independently
+  re-triggered it with its own 2099-dated rows ($40.00 of $20) — fixed for
+  real this time by bounding the query itself to a half-open
+  `[day_start, day_start + 1 day)` window and renaming it
+  `sum_llm_cost_for_day`; (2) `security_node` caught `BudgetExceededError`
+  behind a bare `except Exception` and returned an empty findings list,
+  indistinguishable from a clean security review — fixed by narrowing the
+  catch to exactly the three infrastructure-failure exceptions and
+  returning one synthetic forced-HITL CRITICAL finding instead of `[]`; and
+  (3) `context-graph.json`'s `budget-guard-hard-blocks` invariant described
+  a per-node check that was never built — reworded to the real, centralized
+  design (the guard runs once, inside `AnthropicLLMClient.complete`). A
+  further L2 DEBUG pass, found only after the demo command was finally
+  attempted with a real credential, fixed a fourth defect: the real
+  `ANTHROPIC_API_KEY` in `.env` turned out to be rejected by Anthropic (a
+  genuine 401 `authentication_error`, confirmed by raw curl) and, unlike a
+  *missing* key (handled correctly via `LLMConfigurationError`), an
+  *invalid* key crashed the whole orchestrator run — `anthropic.
+  AuthenticationError` propagated raw out of `AnthropicLLMClient.complete`
+  because `call_with_retry` re-raises a non-retryable provider error
+  uncaught rather than wrapping it, and `complete`'s own
+  `except (RetryExhaustedError, CircuitOpenError)` never caught it. Fixed
+  at the client boundary: `complete`/`complete_async` now also catch
+  `anthropic.AnthropicError` (the SDK's whole exception family) around the
+  retry/breaker/timeout call and re-raise it as this project's own
+  `LLMCallFailedError`, so `security_node`'s existing, unchanged catch
+  reaches it and forces HITL exactly as a budget block already does. The
+  credential was then rotated to a valid one (a same-session environment
+  change, not a code fix) and the live demo finally ran for real. Demo
+  command `ANTHROPIC_API_KEY=... python -m backend.agents.security_agent
+  --diff tests/fixtures/sqli_diff.patch` (run via `.env`, no literal key on
+  the command line) exits 0 and prints 2 schema-valid CRITICAL findings
+  (`sql_injection`, confidence 0.999 each) correctly identifying both real
+  SQL-injection sinks in the fixture diff (string-concatenated
+  `find_by_username`, f-string-interpolated `find_by_id_unsafe`), with no
+  hallucinated finding and nothing obvious missed. A second real call
+  (passing `review_id="m8-closeout-demo2"`, since the demo CLI itself never
+  passes one) produced a real `llm.call` row in `agent_events`
+  (797 tokens in, 273 tokens out, cost $0.002162 — hand-checked against
+  `claude-haiku-4-5`'s $1.00/$5.00-per-million pricing and matching
+  exactly, latency 2735ms), and `BudgetGuard.current_spend_usd()` returned
+  a real, non-zero $0.002408 (the sum of today's three real `llm.call`
+  rows), correctly excluding the two future-dated 2030-pinned fixture rows
+  still sitting in the append-only table. The full suite (`pytest -v`)
+  exits 0 with 253 passed, 1 failed
+  (`test_hybrid_retrieval.py::TestVectorSearchFindsWhatKeywordMisses::
+  test_synonym_chunk_found_by_vector_even_though_fulltext_matches_nothing`
+  — uncommitted M9 hybrid-retrieval work-in-progress, unrelated to M8, left
+  untouched) — `test_security_agent_live.py` now runs and PASSES for real,
+  no longer skipped for lack of a credential. L4 VERIFY APPROVEd M8. This
+  is the first milestone whose demo command makes a real, paid call to an
+  external LLM and the first point real (non-deterministic) model behavior
+  entered this system; see `checkpoints/CURRENT.md` and
+  `.genesis/explanations/2026-08-30-explanation-m8.html` for the full
+  account.

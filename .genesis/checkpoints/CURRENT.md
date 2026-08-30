@@ -1,8 +1,45 @@
 # CURRENT
 - active_loop: none (between milestones)
-- target: M8
-- iteration: 3
-- last_gate: L2 DEBUG (2026-08-31) -- fixed a defect an invalid (rejected)
+- target: M9
+- iteration: 0
+- last_gate: L4 VERIFY APPROVE on M8
+- next_action: finish the in-progress M9 build (hybrid retrieval / local
+  vector memory -- `backend/memory/{embedder,context_retriever,
+  tiger_client}.py`, `migrations/`, `scripts/seed_code_chunks.py` are
+  already uncommitted work-in-progress in the tree; `tests/integration/
+  test_hybrid_retrieval.py::TestVectorSearchFindsWhatKeywordMisses::
+  test_synonym_chunk_found_by_vector_even_though_fulltext_matches_nothing`
+  is the one known-failing test in that WIP, left untouched per explicit
+  instruction not to touch M9 during M8 closeout)
+- M8 STATUS: DONE. PLAN.md's exact demo command
+  (`ANTHROPIC_API_KEY=... python -m backend.agents.security_agent --diff
+  tests/fixtures/sqli_diff.patch`, run via `.env`, no literal key on the
+  command line) was run for real against a now-valid credential and
+  exited 0, printing 2 schema-valid CRITICAL `sql_injection` findings
+  (confidence 0.999 each) that correctly identify both real SQL-injection
+  sinks in the fixture diff, with no hallucinated finding and nothing
+  obvious missed. A second real call (`SecurityAgent().analyze(diff,
+  review_id="m8-closeout-demo2")`) produced a real `llm.call` row in
+  `agent_events` (797 tokens in, 273 tokens out, cost $0.002162 -- hand-
+  checked against claude-haiku-4-5's $1.00/$5.00-per-million pricing and
+  matching exactly, latency 2735ms), and `BudgetGuard.current_spend_usd()`
+  returned a real, non-zero $0.002408 (the sum of today's three real
+  `llm.call` rows), correctly excluding two future-dated 2030-pinned
+  fixture rows still sitting in the append-only table from an earlier
+  test run. Full suite: 253 passed, 1 failed
+  (`test_hybrid_retrieval.py`, the uncommitted M9 WIP above, unrelated).
+  This is the first milestone whose demo makes a real, paid external LLM
+  call and the first point real (non-deterministic) model behavior
+  entered this system. See `.genesis/PLAN.md`'s Progress entry and
+  `.genesis/explanations/2026-08-30-explanation-m8.html` for the full
+  account.
+- model: claude-sonnet-5
+- tokens_used: 0
+- tokens_budget: 50000
+- skills_loaded: []
+
+## M8 history below (kept for context; superseded by the header above)
+- last_gate (superseded): L2 DEBUG (2026-08-31) -- fixed a defect an invalid (rejected)
   `ANTHROPIC_API_KEY` exposed: `anthropic.AuthenticationError` was not in
   `backend.orchestrator.nodes._SECURITY_INFRASTRUCTURE_FAILURE_EXCEPTIONS`
   and was never wrapped into this project's own `LLMCallFailedError`, so it
@@ -523,17 +560,24 @@ A second, independent L4 VERIFY session then re-ran all four gates plus PLAN.md'
   4 hand-written invariants confirmed present after the edit.
   `.genesis/DONE.html` section 2's BudgetGuard gate text was checked and
   needs no change -- it was already implementation-agnostic.
+- ~~Live demo BLOCKED on credential~~ -- now CLOSED: `ANTHROPIC_API_KEY` in
+  `.env` was rotated to a valid one and PLAN.md's exact M8 demo command
+  (`ANTHROPIC_API_KEY=... python -m backend.agents.security_agent --diff
+  tests/fixtures/sqli_diff.patch`, run via `.env`, no literal key on the
+  command line) was run for real: exit 0, 2 schema-valid CRITICAL
+  `sql_injection` findings (confidence 0.999 each), both real SQL-injection
+  sinks in the fixture diff correctly identified, no hallucinations. A
+  second real call with `review_id="m8-closeout-demo2"` produced a real
+  `llm.call` `agent_events` row (797 in / 273 out tokens, cost $0.002162,
+  hand-checked exactly against claude-haiku-4-5 pricing, latency 2735ms),
+  and `BudgetGuard.current_spend_usd()` returned a real $0.002408, correctly
+  excluding the future-dated 2030 fixture rows. See the header block above
+  and `.genesis/explanations/2026-08-30-explanation-m8.html` for the full
+  account.
 
 ## Deferred
 
 New from M8 (L1 BUILD), non-blocking except where noted:
-- **Live demo BLOCKED on credential, not a defect:** `ANTHROPIC_API_KEY` is
-  not present in `.env`. PLAN.md's exact M8 demo command cannot be run for
-  real; see the header's `last_gate` and `## M8 history` above for the
-  real, non-fabricated CLI traceback proving exactly where it stops
-  (`LLMConfigurationError`, at the point a real API call would be made).
-  L4 VERIFY should re-run the demo for real once the key is available;
-  until then this is the expected, honest state, not a build gap.
 - **`complete_async` (`backend.tools.llm_client.AnthropicLLMClient`) has no
   live call site yet** -- the one live call site this milestone built
   (`security_node` -> `SecurityAgent.analyze` -> `complete`) runs on a
