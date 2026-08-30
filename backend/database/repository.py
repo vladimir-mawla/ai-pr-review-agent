@@ -144,6 +144,7 @@ class EventRepository:
         statement_timeout_ms: int = 2000,
         circuit_breaker_failure_threshold: int = 5,
         circuit_breaker_reset_timeout_seconds: float = 30.0,
+        search_path: str | None = None,
     ) -> None:
         self._dsn = dsn
         # libpq's `connect_timeout` parameter is defined as a whole number of
@@ -162,6 +163,23 @@ class EventRepository:
         # moment it's established, including the very first one.
         self._statement_timeout_ms = statement_timeout_ms
         self._connect_options = f"-c statement_timeout={statement_timeout_ms}"
+        # L2 DEBUG (test-isolation fix): every SQL string in this file
+        # (_INSERT_SQL, _SELECT_BY_REVIEW_SQL, _SUM_LLM_COST_FOR_DAY_SQL)
+        # refers to `agent_events` unqualified, so which actual table it
+        # resolves to is entirely a function of the connection's Postgres
+        # `search_path`. `search_path=None` (the default, used by every
+        # production call site) leaves libpq's own default search_path
+        # (`"$user", public`) untouched -- production behavior is
+        # byte-for-byte unchanged from before this parameter existed.
+        # Tests that need a disposable table with the SAME shape and
+        # append-only triggers as production (see
+        # tests/integration/test_budget_guard_events.py) pass a per-test-run
+        # schema name here instead, so this same unqualified SQL transparently
+        # resolves into that schema's own `agent_events` table rather than
+        # production's -- no SQL string in this file needs to change, and no
+        # production code path is touched.
+        if search_path is not None:
+            self._connect_options += f" -c search_path={search_path}"
         # Own breaker per instance -- see _CIRCUIT_BREAKER_NAME's comment.
         self._breaker = register(
             CircuitBreaker(
