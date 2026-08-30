@@ -31,6 +31,22 @@ This module is also PLAN.md's named M8 demo entry point: running it as
 ``python -m backend.agents.security_agent --diff <path>`` reads a unified
 diff from disk, runs it through a real ``SecurityAgent``, and prints every
 resulting ``Finding``.
+
+M8 L2 DEBUG addition (post-L4-VERIFY): this module also exposes
+``infrastructure_failure_fallback_finding``, a SECOND forced-HITL fallback
+builder for a DIFFERENT failure class than ``_parse_failure_fallback_finding``
+above. That one fires when the model answered but its answer was garbage
+(a parse failure); this one is for when the security specialist could not
+even attempt or complete its analysis at all -- a ``BudgetGuard`` block, a
+misconfigured API key, or the provider unreachable after every retry (see
+this class's ``analyze`` docstring for exactly which exceptions those are).
+``backend.orchestrator.nodes.security_node`` is the one caller: reusing
+this module's existing CRITICAL/confidence-0.000/forced-HITL mechanism
+(rather than inventing a second, differently-shaped "infrastructure error"
+signal) is deliberate -- both failure classes share the same real-world
+consequence (this run's security review did not happen, so a human must
+look at it), and ``backend.hitl.queue.has_critical_finding``'s unconditional
+routing already exists to guarantee exactly that.
 """
 
 from __future__ import annotations
@@ -57,6 +73,12 @@ _PROMPT_VERSION = "v1"
 # visible to a human reader rather than pointing at a plausible-looking but
 # meaningless line number.
 _PARSE_FAILURE_FILE_PATH = "<llm-response-unparseable>"
+
+# Same idea, for the OTHER forced-HITL fallback (see
+# infrastructure_failure_fallback_finding below): no real diff location
+# caused this failure either -- the specialist never got far enough to look
+# at one.
+_INFRASTRUCTURE_FAILURE_FILE_PATH = "<security-specialist-unavailable>"
 
 
 class SecurityAgent(BaseAgent):
@@ -142,6 +164,43 @@ def _parse_failure_fallback_finding(exc: ResponseParseError) -> Finding:
         rationale=(
             "The security specialist's LLM response could not be parsed into "
             f"any valid finding ({exc}). Flagging as CRITICAL, confidence "
+            "0.000, purely to force mandatory human review of this run -- "
+            "this is NOT a claim that a real security issue exists."
+        ),
+    )
+
+
+def infrastructure_failure_fallback_finding(exc: BaseException) -> Finding:
+    """Build the synthetic, forced-HITL Finding an infrastructure failure returns.
+
+    CRITICAL + confidence 0.000, exactly like
+    ``_parse_failure_fallback_finding`` -- see this module's docstring for
+    why this reuses that mechanism instead of inventing a second one. Used
+    by ``backend.orchestrator.nodes.security_node`` when ``SecurityAgent.
+    analyze`` raises one of the handful of exceptions that mean "the
+    analysis did not happen at all" (``backend.economics.budget.
+    BudgetExceededError``, ``backend.tools.llm_client.
+    LLMConfigurationError``/``LLMCallFailedError``) rather than "the model
+    answered but its answer was garbage" (that is
+    ``_parse_failure_fallback_finding``'s case, handled inside ``analyze``
+    itself and never reaches the node as an exception at all).
+
+    Deliberately public (unlike ``_parse_failure_fallback_finding``): its
+    one caller lives in a different module (``backend.orchestrator.nodes``),
+    whereas the parse-failure fallback's only caller is ``analyze`` right
+    here in the same class.
+    """
+    return Finding(
+        agent_type=AgentType.SECURITY,
+        severity=Severity.CRITICAL,
+        category="security_specialist_unavailable",
+        file_path=_INFRASTRUCTURE_FAILURE_FILE_PATH,
+        line_start=1,
+        line_end=1,
+        confidence=Decimal("0.000"),
+        rationale=(
+            "The security specialist could not complete its analysis "
+            f"({type(exc).__name__}: {exc}). Flagging as CRITICAL, confidence "
             "0.000, purely to force mandatory human review of this run -- "
             "this is NOT a claim that a real security issue exists."
         ),

@@ -89,12 +89,14 @@ from langchain_core.runnables import RunnableConfig
 
 from backend.agents.base_agent import BaseAgent
 from backend.agents.contracts import dedupe_findings
-from backend.agents.security_agent import SecurityAgent
+from backend.agents.security_agent import SecurityAgent, infrastructure_failure_fallback_finding
 from backend.core.settings import get_settings
+from backend.economics.budget import BudgetExceededError
 from backend.hitl.queue import route_review
 from backend.models import AgentType, Finding, Review, Severity, compute_overall_confidence
 from backend.observability import emit_decision, get_event_repository, traced_span
 from backend.orchestrator.state import GraphState
+from backend.tools.llm_client import LLMCallFailedError, LLMConfigurationError
 
 # Simulated per-node work duration. Large enough that overlapping windows are
 # unambiguous under normal scheduling jitter, small enough that the fan-out
@@ -361,8 +363,53 @@ _CANNED_FINDINGS: dict[AgentType, Finding] = {
 }
 
 
+# M8 L2 DEBUG (post-L4-VERIFY): the specific "the security analysis could
+# not even be attempted or completed" exceptions security_node must turn
+# into a forced-HITL fallback Finding, never an empty findings list --see
+# security_node's docstring below for the full defect this fixes. Deliberately
+# narrow (mirroring how M7's own events-failure-policy swallow was narrowed
+# from bare `(psycopg.Error, OSError)` down to exactly the availability
+# exceptions that mean "the dependency, not our code, failed" -- see
+# `tests/unit/test_events_failure_policy.py`): a genuine programming bug in
+# our own code (a TypeError, a KeyError from a real defect) is NOT in this
+# tuple, so it propagates out of this node uncaught, exactly like
+# SimulatedNodeCrashError already does, instead of being silently
+# reinterpreted as "the security specialist is unavailable".
+_SECURITY_INFRASTRUCTURE_FAILURE_EXCEPTIONS: tuple[type[Exception], ...] = (
+    BudgetExceededError,
+    LLMConfigurationError,
+    LLMCallFailedError,
+)
+
+
 def security_node(state: GraphState, config: RunnableConfig) -> dict[str, Any]:
-    """Specialist: real, LLM-backed security review (M8). See module docstring."""
+    """Specialist: real, LLM-backed security review (M8). See module docstring.
+
+    M8 L2 DEBUG addition (post-L4-VERIFY): a BudgetGuard block (or any other
+    infrastructure/availability failure this specialist can hit --
+    ``LLMConfigurationError``, ``LLMCallFailedError``) used to be caught by
+    a bare ``except Exception`` and turned into ``{"findings": [], ...}`` --
+    an EMPTY findings list, indistinguishable from "the model ran and
+    genuinely found nothing to flag". That is a real defect, not a
+    theoretical one: today it's masked only because the three remaining
+    stub specialists keep ``overall_confidence`` below the HITL threshold
+    regardless, but once M10 makes them real, a budget block would silently
+    read as a clean security review and could auto-post. The fix narrows
+    the catch to ``_SECURITY_INFRASTRUCTURE_FAILURE_EXCEPTIONS`` (the exact
+    set ``SecurityAgent.analyze``'s own docstring names as "unable to even
+    attempt an analysis") and, on any of them, returns ONE synthetic
+    CRITICAL/confidence-0.000 Finding
+    (``backend.agents.security_agent.infrastructure_failure_fallback_finding``)
+    instead of an empty list -- reusing the exact mechanism
+    ``SecurityAgent``'s own total-parse-failure fallback already uses to
+    force human review (``backend.hitl.queue.has_critical_finding``'s
+    unconditional CRITICAL-forces-HITL routing), rather than inventing a
+    second one. The failure is still recorded in ``node_errors`` either way,
+    so it stays visible in the aggregated result. A genuine programming bug
+    (anything NOT in that tuple) is deliberately not caught here at all and
+    propagates, consistent with how M7 narrowed the events failure policy
+    to stop swallowing ``IntegrityError`` alongside real outages.
+    """
     with traced_span(get_event_repository(), state["review_id"], "security"):
         try:
             findings = _run_security(state, config)
@@ -370,16 +417,9 @@ def security_node(state: GraphState, config: RunnableConfig) -> dict[str, Any]:
             raise
         except AgentExecutionError as exc:
             return {"findings": [], "node_errors": {"security": str(exc)}}
-        # Isolate the real agent's own genuinely unhandled failures (a
-        # BudgetGuard block, a misconfigured/unreachable LLM provider after
-        # the reliability layer's retries are exhausted) the same way
-        # AgentExecutionError is isolated above -- one specialist's failure
-        # must not cost the other three their findings. A parse-failure
-        # fallback Finding is NOT this path (see
-        # backend.agents.security_agent's module docstring); this only
-        # catches SecurityAgent.analyze's genuinely unhandled exceptions.
-        except Exception as exc:  # noqa: BLE001
-            return {"findings": [], "node_errors": {"security": str(exc)}}
+        except _SECURITY_INFRASTRUCTURE_FAILURE_EXCEPTIONS as exc:
+            fallback = infrastructure_failure_fallback_finding(exc)
+            return {"findings": [fallback], "node_errors": {"security": str(exc)}}
     return {"findings": findings, "node_errors": {}}
 
 
