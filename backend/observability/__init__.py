@@ -18,6 +18,7 @@ backend.database, never outward toward api or orchestrator.
 from backend.observability.audit import reconstruct_review_trace
 from backend.observability.events import (
     emit_decision,
+    emit_decision_async,
     emit_llm_call,
     emit_span_end,
     emit_span_start,
@@ -30,6 +31,7 @@ __all__ = [
     "emit_span_start",
     "emit_span_end",
     "emit_decision",
+    "emit_decision_async",
     "emit_llm_call",
     "emit_tool_call",
     "traced_span",

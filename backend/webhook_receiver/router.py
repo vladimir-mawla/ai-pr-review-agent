@@ -48,7 +48,7 @@ Freeze-boundary note (M7): also outside M7's literal freeze boundary
 own instructions explicitly call for wiring event emission into "at minimum
 the webhook ingress" — this file is the only place that decision happens.
 The change is narrow and additive: a ``decision`` event
-(``backend.observability.emit_decision``) is now recorded for every
+(``backend.observability.emit_decision_async``) is now recorded for every
 outcome a *verified, parsed* ``pull_request`` webhook reaches (accepted,
 duplicate, or rejected for an unsupported action) — never for a request
 that fails HMAC verification, and never before verification runs, so this
@@ -59,6 +59,22 @@ response is unaffected either way (see
 ``backend.observability.events``'s module docstring for the full failure
 policy, and ``tests/integration/test_events_spine.py`` for the test
 proving the webhook still returns 200 with the events DB stopped).
+
+Freeze-boundary note (M7 L2 DEBUG fix, post-L4-REJECT): an independent L4
+VERIFY session proved that emitting the decision event via the plain
+synchronous ``emit_decision`` (calling ``EventRepository.insert_event`` --
+a blocking ``psycopg.connect`` -- directly from this ``async def`` route,
+never awaited, never offloaded) blocked the *entire* uvicorn event loop for
+as long as that write took, serialising every other concurrent, unrelated
+webhook request behind it (three concurrent POSTs each measured at ~4.4s
+instead of sub-10ms, with the events table held under an
+``ACCESS EXCLUSIVE`` lock). Every call below now goes through
+``backend.observability.emit_decision_async`` and is ``await``-ed instead:
+that function performs the identical write via ``asyncio.to_thread``, so
+only this request's own coroutine waits, not the event loop that every
+other in-flight request also depends on. See that function's docstring for
+why the orchestrator's own call sites (``backend.orchestrator.nodes``)
+did not need the same change.
 """
 
 from __future__ import annotations
@@ -74,7 +90,7 @@ from pydantic import ValidationError
 from backend.core.settings import Settings
 from backend.database.repository import EventRepository
 from backend.job_queue.interface import JobQueue, QueueUnavailableError
-from backend.observability import emit_decision, run_id_for_delivery
+from backend.observability import emit_decision_async, run_id_for_delivery
 from backend.webhook_receiver.parser import SUPPORTED_ACTIONS, parse_pull_request_payload
 from backend.webhook_receiver.validator import (
     InvalidSignatureError,
@@ -176,7 +192,7 @@ async def receive_webhook(
     # acknowledged (200) but otherwise ignored, per M2 scope.
     event_type = request.headers.get(_EVENT_HEADER)
     if event_type != _PULL_REQUEST_EVENT:
-        emit_decision(
+        await emit_decision_async(
             event_repository,
             run_id_for_delivery(delivery_id or "no-delivery-id"),
             agent=None,
@@ -189,7 +205,7 @@ async def receive_webhook(
 
     action = payload.get("action")
     if action not in SUPPORTED_ACTIONS:
-        emit_decision(
+        await emit_decision_async(
             event_repository,
             run_id_for_delivery(delivery_id or "no-delivery-id"),
             agent=None,
@@ -231,7 +247,7 @@ async def receive_webhook(
         ) from exc
 
     outcome = "accepted" if result.enqueued else "duplicate"
-    emit_decision(
+    await emit_decision_async(
         event_repository,
         run_id_for_delivery(delivery_id),
         agent=None,

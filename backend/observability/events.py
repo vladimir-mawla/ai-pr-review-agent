@@ -13,8 +13,11 @@ So every ``emit_*`` function below catches exactly ``psycopg.Error`` (any
 error raised because the database itself is unavailable, refused the
 connection, or rejected the statement -- including, notably, our own
 append-only trigger firing if a future bug ever attempted an UPDATE/DELETE
-through this path) and ``OSError`` (a lower-level connect-timeout/network
-failure that never reaches psycopg's own exception hierarchy), logs a
+through this path), ``OSError`` (a lower-level connect-timeout/network
+failure that never reaches psycopg's own exception hierarchy), and
+``CircuitOpenError`` (``backend.reliability.circuit_breaker`` -- the events
+DB's breaker has tripped after repeated failures and is failing fast; see
+``backend.database.repository.EventRepository.insert_event``), logs a
 warning, and returns normally.
 
 What this policy deliberately does NOT catch: a ``TypeError``,
@@ -26,10 +29,33 @@ allowed to propagate so a real bug is never silently swallowed alongside a
 real outage. This is why every ``emit_*`` function constructs
 ``AgentEvent(...)`` OUTSIDE the ``try``/``except`` in ``_emit``, which only
 ever wraps the already-validated event's actual database write.
+
+OFFLOADING THE ONE ASYNC CALL SITE (L2 DEBUG, post-L4-REJECT)
+---------------------------------------------------------------
+``EventRepository.insert_event`` is a synchronous, blocking call (a plain
+``psycopg.connect`` -- see that module for why). Every ``emit_*`` function
+here is therefore also synchronous and blocking, which is exactly right for
+this module's other call site (``backend.orchestrator.nodes``, which runs
+on a LangGraph-managed worker thread, not an asyncio event loop) but was
+proven to be a real bug at the webhook call site
+(``backend.webhook_receiver.router.receive_webhook``, an ``async def``
+route running on uvicorn's event loop): calling a blocking function
+directly (not awaited, not offloaded) from inside a coroutine blocks the
+*entire* event loop for as long as the call takes -- serialising every
+other concurrent, unrelated request behind it, which is exactly what an
+independent L4 VERIFY session demonstrated empirically (three concurrent
+webhook POSTs each taking ~4.4s instead of sub-10ms, with the events table
+held locked). ``emit_decision_async`` below is the one function that
+exists purely to fix that: it runs the same synchronous ``emit_decision``
+on a worker thread via ``asyncio.to_thread`` (which submits to asyncio's
+own default executor -- a bounded thread pool, not one thread per call) and
+is ``await``-ed by the router, so the route's own coroutine (not the whole
+event loop) is what waits.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -38,6 +64,7 @@ import psycopg
 
 from backend.database.models import AgentEvent, EventType
 from backend.database.repository import EventRepository
+from backend.reliability.circuit_breaker import CircuitOpenError
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +80,7 @@ def _emit(repository: EventRepository, event: AgentEvent) -> None:
     """
     try:
         repository.insert_event(event)
-    except (psycopg.Error, OSError) as exc:
+    except (psycopg.Error, OSError, CircuitOpenError) as exc:
         logger.warning(
             "failed to write %s event for review_id=%r: %s -- continuing without it",
             event.event_type.value,
@@ -118,6 +145,52 @@ def emit_decision(
         confidence=confidence,
     )
     _emit(repository, event)
+
+
+async def emit_decision_async(
+    repository: EventRepository,
+    review_id: str,
+    *,
+    agent: str | None,
+    outcome: str,
+    confidence: Decimal | None = None,
+) -> None:
+    """``emit_decision``, off the calling coroutine's thread.
+
+    The ONLY call site this exists for is
+    ``backend.webhook_receiver.router.receive_webhook`` -- an ``async def``
+    route on uvicorn's single event loop. ``emit_decision`` itself performs
+    a genuinely blocking, synchronous Postgres write
+    (``EventRepository.insert_event``); calling it directly (unawaited) from
+    a coroutine blocks the *entire* event loop for the write's duration, not
+    just the current request -- the exact defect an independent L4 VERIFY
+    session proved empirically (three concurrent, otherwise-unrelated
+    webhook POSTs each stalling for seconds while one Postgres write was
+    stuck behind a table lock). ``asyncio.to_thread`` runs the call on
+    asyncio's own default executor (a bounded thread pool -- see the
+    stdlib's ``loop.set_default_executor``/``run_in_executor`` docs; it is
+    not one new thread per call) and returns an awaitable, so only *this*
+    request's own task blocks while it waits -- every other concurrent
+    request keeps making progress on the same event loop.
+
+    This still *awaits* completion before returning (not "fire and
+    forget"): the caller sees the write finish (or fail-and-be-swallowed,
+    per ``_emit``'s policy) before the webhook response is sent, preserving
+    the exact same observable ordering ``tests/integration/
+    test_events_spine.py`` already asserts on (a decision event exists by
+    the time the HTTP response comes back) -- only *where* the blocking
+    happens has changed, not *whether* the caller waits for it.
+
+    ``backend.orchestrator.nodes`` (M7's other live call site) does not
+    need this: it calls ``emit_decision``/``emit_span_start``/
+    ``emit_span_end`` directly from plain functions that LangGraph already
+    runs on its own worker-thread pool for a sync graph, never on an
+    asyncio event loop, so there is no event loop for a blocking call there
+    to starve.
+    """
+    await asyncio.to_thread(
+        emit_decision, repository, review_id, agent=agent, outcome=outcome, confidence=confidence
+    )
 
 
 def emit_llm_call(

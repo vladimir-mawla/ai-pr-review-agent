@@ -50,16 +50,20 @@ Postgres is up for the other tests here anyway.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
 import re
+import threading
+import time
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
+import httpx
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
@@ -402,6 +406,136 @@ class TestEventsDbDownDoesNotBreakWebhook:
         # failure policy swallows the connection error internally.
         assert response.status_code == 200
         assert response.json()["status"] == "accepted"
+
+
+class TestConcurrentWebhookWritesAreNotSerializedByALockedEventsTable:
+    """Regression test for the defect an independent L4 VERIFY session
+    caught: ``EventRepository.insert_event`` opens a synchronous, blocking
+    ``psycopg.connect`` and was called directly (never awaited, never
+    offloaded) from ``async def receive_webhook``. L4 VERIFY proved this
+    empirically against a live uvicorn: with an admin session holding
+    ``LOCK TABLE agent_events IN ACCESS EXCLUSIVE MODE``, three concurrent,
+    otherwise-unrelated webhook POSTs each took ~4.4s instead of the normal
+    sub-10ms, because the blocking write monopolized the single event-loop
+    thread every other in-flight request also depended on.
+
+    This test reproduces the same mechanism without needing a real uvicorn
+    subprocess: ``httpx.ASGITransport`` drives the real ASGI app directly
+    on the CURRENT asyncio event loop (no real socket, no separate
+    process/thread for the server) -- exactly the "one event loop, multiple
+    concurrent tasks" model a real uvicorn worker uses. A synchronous,
+    unawaited blocking call inside one task's coroutine starves every other
+    task on that same loop regardless of whether the transport underneath
+    is a real socket or in-process ASGI plumbing; the bug (and the fix) is
+    about asyncio scheduling, not about the network.
+
+    Against the pre-fix router (``emit_decision`` called directly, not
+    ``await emit_decision_async(...)``), this test fails both assertions
+    below: every request's own latency balloons toward the full serialized
+    total instead of staying bounded near ``statement_timeout``, and the
+    whole batch's wall-clock time scales with the number of concurrent
+    requests instead of stayling flat -- see this milestone's build report
+    for the actual failing/passing output captured by temporarily
+    reverting the router to the old, unawaited call.
+    """
+
+    _LOCK_HOLD_SECONDS = 4.0
+    _STATEMENT_TIMEOUT_MS = 1200
+    _NUM_CONCURRENT_REQUESTS = 4
+
+    @staticmethod
+    def _hold_table_lock_in_background(hold_seconds: float, lock_acquired: threading.Event) -> None:
+        """Runs on its own OS thread: acquire the lock, signal, hold, release.
+
+        A dedicated connection/thread (not the test's own event loop) so
+        holding the lock for a fixed wall-clock duration is exact and
+        independent of whatever the test's asyncio loop is doing at the
+        same time.
+        """
+        with psycopg.connect(_DATABASE_ADMIN_URL, autocommit=False) as conn:
+            conn.execute("LOCK TABLE agent_events IN ACCESS EXCLUSIVE MODE")
+            lock_acquired.set()
+            time.sleep(hold_seconds)
+            conn.commit()
+
+    async def test_concurrent_webhook_posts_are_not_serialized_behind_a_locked_events_table(
+        self,
+    ) -> None:
+        lock_acquired = threading.Event()
+        lock_thread = threading.Thread(
+            target=self._hold_table_lock_in_background,
+            args=(self._LOCK_HOLD_SECONDS, lock_acquired),
+            daemon=True,
+        )
+        lock_thread.start()
+        try:
+            assert lock_acquired.wait(timeout=5.0), (
+                "background thread never acquired the ACCESS EXCLUSIVE lock "
+                "-- test setup itself is broken, not the thing under test"
+            )
+
+            repository = EventRepository(
+                _DATABASE_URL, statement_timeout_ms=self._STATEMENT_TIMEOUT_MS
+            )
+            app = create_app(
+                settings=Settings(github_webhook_secret=_WEBHOOK_SECRET),
+                job_queue=InMemoryJobQueue(),
+                event_repository=repository,
+            )
+
+            async def _one_request(index: int) -> float:
+                delivery_id = str(uuid.uuid4())
+                body = json.dumps(_sample_payload(pr_number=90_000 + index)).encode()
+                headers = {"X-Hub-Signature-256": _sign(body), **_webhook_headers(delivery_id)}
+                start = time.monotonic()
+                async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+                ) as client:
+                    response = await client.post("/webhook", content=body, headers=headers)
+                elapsed = time.monotonic() - start
+                # The webhook's own response is unaffected by whether its
+                # events write succeeded, timed out, or is still offloaded
+                # somewhere -- requirement (e): still 200/"accepted" either way.
+                assert response.status_code == 200
+                assert response.json()["status"] == "accepted"
+                return elapsed
+
+            overall_start = time.monotonic()
+            latencies = await asyncio.gather(
+                *[_one_request(i) for i in range(self._NUM_CONCURRENT_REQUESTS)]
+            )
+            overall_elapsed = time.monotonic() - overall_start
+        finally:
+            lock_thread.join(timeout=self._LOCK_HOLD_SECONDS + 5.0)
+
+        print(  # deliberate evidence output (tests/** is exempt from ruff's T20)
+            f"[concurrency proof] per-request latencies={[round(latency, 3) for latency in latencies]}s "
+            f"max={max(latencies):.3f}s overall_batch={overall_elapsed:.3f}s "
+            f"(lock_hold={self._LOCK_HOLD_SECONDS}s, statement_timeout={self._STATEMENT_TIMEOUT_MS}ms)"
+        )
+        statement_timeout_seconds = self._STATEMENT_TIMEOUT_MS / 1000
+        # THE FIX: no individual request waits anywhere near the full
+        # lock-hold duration -- each request's own events write is bounded
+        # by statement_timeout, not the table lock, because it happens on a
+        # worker thread the event loop keeps servicing other requests
+        # around. Against the pre-fix (unawaited, unoffloaded) call, the
+        # slowest request instead waits out close to the full serialized
+        # total (every other blocked request's turn plus its own).
+        assert max(latencies) < self._LOCK_HOLD_SECONDS * 0.75, (
+            f"slowest of {self._NUM_CONCURRENT_REQUESTS} concurrent requests took "
+            f"{max(latencies):.2f}s (lock held {self._LOCK_HOLD_SECONDS}s, statement_timeout "
+            f"{statement_timeout_seconds}s) -- looks like the events write blocked the event "
+            "loop instead of being offloaded to a worker thread"
+        )
+        # CONCURRENCY, NOT SERIALIZATION: N requests each individually
+        # bounded by ~statement_timeout must complete in close to that same
+        # window, not N times it -- the whole point of not blocking the
+        # event loop is that unrelated requests proceed in parallel.
+        assert overall_elapsed < self._LOCK_HOLD_SECONDS * 0.9, (
+            f"{self._NUM_CONCURRENT_REQUESTS} concurrent requests took {overall_elapsed:.2f}s "
+            "in total for a batch that should complete in about one statement_timeout window "
+            "-- looks serialized on a single blocked event loop thread, not concurrent"
+        )
 
 
 # ---------------------------------------------------------------------------
