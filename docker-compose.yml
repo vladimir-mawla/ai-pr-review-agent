@@ -18,6 +18,20 @@
 # REDIS_URL accordingly -- nothing else depends on the specific host port.
 services:
   redis:
+    # NOTE ON RECREATE: this service has no volume, on purpose -- adding
+    # one would be a design change nobody asked for, so this comment only
+    # documents current behavior. `docker compose down && docker compose
+    # up` therefore starts Redis empty every time (DBSIZE == 0 on boot),
+    # which wipes the ARQ job queue AND the idempotency store together
+    # (RedisJobQueue's `SET NX EX` keys in backend/job_queue/redis_arq.py
+    # live in this same instance). An empty queue after a clean restart is
+    # exactly M3's stated success criterion ("no orphaned jobs"); the
+    # corollary is that replay protection resets too -- a GitHub delivery
+    # this process already saw (and would normally no-op via its
+    # idempotency key) looks brand new again after a recreate and gets
+    # enqueued a second time. Persisting across recreates would require
+    # adding a named volume for Redis's data dir plus AOF/RDB persistence
+    # -- neither exists today.
     image: redis:7-alpine
     ports:
       - "6380:6379"

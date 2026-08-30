@@ -100,6 +100,16 @@ payloads with — see the demo below). There is no default value on purpose:
 `backend/core/settings.py` fails fast at startup if it's missing or blank,
 rather than silently accepting a well-known secret.
 
+## Local development notes
+
+- **`docker compose down && docker compose up` wipes Redis, including the
+  idempotency store.** The `redis` service in `docker-compose.yml` has no
+  volume, so a recreate always starts it empty. That's fine for M3's queue
+  (no orphaned jobs survive a restart, which is the point), but it also
+  means replay protection resets: a `X-GitHub-Delivery` id this process
+  already saw before the recreate will be treated as new and re-enqueued
+  after it. A volume would fix this but isn't configured today.
+
 ## Running the checks
 
 All four are expected to pass on `main`:

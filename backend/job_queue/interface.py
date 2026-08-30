@@ -44,9 +44,16 @@ class JobQueue(Protocol):
     def enqueue(self, event: WebhookEvent) -> EnqueueResult:
         """Enqueue a verified webhook event exactly once per ``delivery_id``.
 
-        Must return immediately (no heavy work, no blocking I/O on the
-        actual job processing) — the whole point of this interface is that
-        the request path only ever does this and returns.
+        Must return quickly and must never run the actual job processing
+        inline — the whole point of this interface is that the request
+        path only ever does this and returns. "Quickly" does not mean
+        "with zero I/O": an implementation may perform bounded blocking
+        I/O of its own (e.g. a synchronous idempotency check against a
+        real store, or a synchronous hand-off to whatever moves the job
+        onto a real queue) as long as it is a fixed, short round trip and
+        not the job's own work. Callers should treat this call as
+        potentially blocking for a bounded amount of time, not as
+        guaranteed non-blocking.
         """
         ...
 
