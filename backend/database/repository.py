@@ -58,7 +58,7 @@ rather than being free to block a worker thread indefinitely.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from math import ceil
 
@@ -82,19 +82,46 @@ _SELECT_BY_REVIEW_SQL = """
     ORDER BY ts ASC, id ASC
 """
 
-# M8: BudgetGuard's one read query. Deliberately NOT scoped to a single
-# review_id (unlike _SELECT_BY_REVIEW_SQL above) -- a daily USD cap is a
-# process-wide/organization-wide budget across every review that ran today,
-# not a per-review one. `COALESCE(..., 0)` turns "no llm.call rows yet
-# today" into a real 0 instead of SQL NULL, so callers never have to
-# special-case "no spend recorded yet" as a separate branch from "$0.00
-# spent". `ts >= %s` (not `ts::date = %s`) so the caller controls exactly
-# what "today" means (BudgetGuard passes UTC midnight) without this query
-# needing its own timezone opinion.
-_SUM_LLM_COST_SINCE_SQL = """
+# M8 (L2 DEBUG, post-L4-REJECT): BudgetGuard's one read query. Deliberately
+# NOT scoped to a single review_id (unlike _SELECT_BY_REVIEW_SQL above) -- a
+# daily USD cap is a process-wide/organization-wide budget across every
+# review that ran today, not a per-review one. `COALESCE(..., 0)` turns "no
+# llm.call rows yet today" into a real 0 instead of SQL NULL, so callers
+# never have to special-case "no spend recorded yet" as a separate branch
+# from "$0.00 spent".
+#
+# `ts >= %s AND ts < %s` -- a genuine half-open `[day_start, day_start + 1
+# day)` interval, BOTH bounds required. This query used to be open-ended
+# (`ts >= %s` alone, under the old name `sum_llm_cost_since`), on the
+# reasoning that "a real llm.call is never timestamped in the future, so an
+# upper bound is unnecessary". That reasoning was wrong, and it caused two
+# independent false BudgetExceededError failures in this project's own
+# history before it was fixed here: the M8 builder session hit "spent
+# $2119.000446 of $20 cap" from stray 2030-dated fixture rows an earlier
+# test run had written to the same append-only table, and an independent L4
+# VERIFY session hit "$40.00 of $20 cap" from its own 2099-dated boundary-
+# test fixture rows -- reproducing the exact defect class a second time
+# rather than merely re-pinning fixtures again. A future-dated row is not
+# normal, valid spend (nothing in this system's real call path can produce
+# `ts` ahead of `datetime.now(UTC)` -- see `backend.observability.events`),
+# it is a data-integrity signal: a clock that is wrong, a fixture that
+# leaked outside its test, or a bug. Silently counting it toward *today's*
+# spend was the defect. This query's fix is to IGNORE it for today's sum
+# (it simply falls outside every real day's `[day_start, day_start + 1
+# day)` window until that day genuinely arrives) rather than raise or
+# special-case it inline: `BudgetGuard.check_and_raise()` runs on this
+# milestone's hot path (once per LLM call), so this query stays the single,
+# cheap, already-necessary bounded scan it was before -- it does not grow a
+# second unbounded "scan every row for anomalies" query alongside it. A
+# future-dated row is silently, correctly excluded from every day's total
+# it doesn't belong to; surfacing it as an operator-visible anomaly (e.g. a
+# periodic off-path audit query) is left as follow-up infrastructure, not
+# built here, since nothing has asked for it yet and it does not belong on
+# this hot path.
+_SUM_LLM_COST_FOR_DAY_SQL = """
     SELECT COALESCE(SUM(cost_usd), 0)
     FROM agent_events
-    WHERE event_type = %s AND ts >= %s
+    WHERE event_type = %s AND ts >= %s AND ts < %s
 """
 
 # Name every EventRepository instance's circuit breaker is registered
@@ -240,17 +267,28 @@ class EventRepository:
             for row in rows
         ]
 
-    def sum_llm_cost_since(self, since: datetime) -> Decimal:
-        """Total ``cost_usd`` of every ``llm.call`` event at/after ``since``.
+    def sum_llm_cost_for_day(self, day_start: datetime) -> Decimal:
+        """Total ``cost_usd`` of every ``llm.call`` event within one UTC day.
 
-        M8: the one query ``backend.economics.budget.BudgetGuard`` needs to
-        derive real spend from the events spine, rather than tracking an
-        in-memory running total that would reset on every process restart
-        (and disagree with any other process, e.g. a worker and the API
-        server, spending against the same budget). This is the first real
-        consumer of ``agent_events`` beyond the trace-viewer's per-review
-        read above -- see that method's docstring and M7's own Deferred
-        notes for why the events spine exists at all.
+        The window is the half-open interval ``[day_start, day_start + 1
+        day)`` -- ``day_start`` counts, ``day_start + 1 day`` (the instant
+        the next day begins) does not. This is what makes it safe for
+        ``backend.economics.budget.BudgetGuard`` to derive real spend from
+        the events spine, rather than tracking an in-memory running total
+        that would reset on every process restart (and disagree with any
+        other process, e.g. a worker and the API server, spending against
+        the same budget). This is the first real consumer of
+        ``agent_events`` beyond the trace-viewer's per-review read above --
+        see that method's docstring and M7's own Deferred notes for why the
+        events spine exists at all.
+
+        RENAMED from ``sum_llm_cost_since`` (L2 DEBUG, post-L4-REJECT): the
+        old name and its `ts >= since`-only query promised (and delivered)
+        an unbounded "everything from `since` onward" read, which is not
+        what a daily budget check needs or what production ever safely got
+        -- see ``_SUM_LLM_COST_FOR_DAY_SQL``'s comment for the real defect
+        this caused twice. The new name says exactly what the method now
+        does: sum one bounded day, not an open-ended tail.
 
         A plain ``SELECT ... SUM(...)`` -- still no ``UPDATE``/``DELETE``
         anywhere in this file, preserving the ``events-table-append-only``
@@ -260,13 +298,16 @@ class EventRepository:
         sets the same ``statement_timeout`` so a stray slow aggregate query
         cannot hang forever either.
         """
+        day_end = day_start + timedelta(days=1)
         with psycopg.connect(
             self._dsn,
             connect_timeout=self._connect_timeout_seconds,
             autocommit=True,
             options=self._connect_options,
         ) as conn:
-            row = conn.execute(_SUM_LLM_COST_SINCE_SQL, (EventType.LLM_CALL.value, since)).fetchone()
+            row = conn.execute(
+                _SUM_LLM_COST_FOR_DAY_SQL, (EventType.LLM_CALL.value, day_start, day_end)
+            ).fetchone()
         if row is None or row[0] is None:
             return Decimal("0")
         return Decimal(row[0])

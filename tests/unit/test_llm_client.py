@@ -105,15 +105,15 @@ class _FakeAnthropicClient:
 @dataclass
 class _FakeEventRepository:
     """Duck-typed stand-in for ``EventRepository`` -- satisfies both methods
-    ``AnthropicLLMClient`` needs (``sum_llm_cost_since`` via ``BudgetGuard``,
-    ``insert_event`` via ``emit_llm_call``) without touching any real
-    Postgres connection at all.
+    ``AnthropicLLMClient`` needs (``sum_llm_cost_for_day`` via
+    ``BudgetGuard``, ``insert_event`` via ``emit_llm_call``) without
+    touching any real Postgres connection at all.
     """
 
     spend: Decimal = Decimal("0")
     inserted: list[AgentEvent] = field(default_factory=list)
 
-    def sum_llm_cost_since(self, since: datetime) -> Decimal:
+    def sum_llm_cost_for_day(self, day_start: datetime) -> Decimal:
         return self.spend
 
     def insert_event(self, event: AgentEvent) -> None:

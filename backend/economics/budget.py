@@ -9,7 +9,7 @@ wording:
    -- there is no "log a warning and proceed anyway" path anywhere in this
    module. A budget guard that only warns is not a guard.
 2. Spend is read from the real ``agent_events`` table
-   (``backend.database.repository.EventRepository.sum_llm_cost_since``),
+   (``backend.database.repository.EventRepository.sum_llm_cost_for_day``),
    never an in-memory running total. An in-memory counter would reset on
    every process restart and disagree with any other process spending
    against the same budget (e.g. a future worker process alongside the API
@@ -103,8 +103,17 @@ class BudgetGuard:
         return now.replace(hour=0, minute=0, second=0, microsecond=0)
 
     def current_spend_usd(self) -> Decimal:
-        """Real total ``llm.call`` cost recorded today, per ``agent_events``."""
-        return self._repository.sum_llm_cost_since(self._start_of_day_utc())
+        """Real total ``llm.call`` cost recorded today, per ``agent_events``.
+
+        "Today" is the bounded ``[start_of_day, start_of_day + 1 day)``
+        window ``EventRepository.sum_llm_cost_for_day`` sums -- a
+        future-dated row (a clock error, a leaked fixture, a bug) is never
+        counted toward today's spend, no matter how far in the future it is
+        timestamped. See that method's docstring for why an unbounded
+        `>=`-only query was a real, twice-reproduced defect, not a
+        theoretical one.
+        """
+        return self._repository.sum_llm_cost_for_day(self._start_of_day_utc())
 
     def check_and_raise(self) -> None:
         """Raise ``BudgetExceededError`` iff today's spend has met the cap.
