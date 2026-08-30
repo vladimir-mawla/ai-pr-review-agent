@@ -2,9 +2,107 @@
 - active_loop: none (between milestones)
 - target: M9
 - iteration: 1
-- last_gate: L2 DEBUG (2026-08-30) -- fixed the two connected defects an
-  independent L4 VERIFY session REJECTED M9 for.
+- last_gate: L2 DEBUG (2026-08-30) -- fixed the test-isolation defect the
+  M9 L2 DEBUG entry below flagged and deferred (M8's
+  test_budget_guard_events.py fixture rows accumulating in production
+  agent_events across pytest runs); M9's own two-defect L4 REJECT fix
+  further below is unrelated and still awaiting re-verification.
 - next_action: re-run L4 VERIFY on M9 (separate session)
+- M8 L2 DEBUG (2026-08-30) -- test-isolation fix for
+  `tests/integration/test_budget_guard_events.py`
+  (flagged, not fixed, by the M9 L2 DEBUG entry immediately below):
+
+  DEFECT: `agent_events` is append-only by design (M7: BEFORE UPDATE/
+  DELETE row-level triggers, a BEFORE TRUNCATE statement-level trigger,
+  and the restricted `agent_events_writer` role with UPDATE/DELETE/
+  TRUNCATE explicitly revoked -- see
+  `backend/database/migrations/0001_agent_events.sql`). Correct, and not
+  touched by this fix. But `test_budget_guard_events.py` wrote its
+  `llm.call` fixture rows, pinned to a fixed calendar day
+  (`_PINNED_DAY_START = 2020-06-15`), into that SAME production table --
+  and because nothing can ever delete an append-only row, every one of
+  those rows from every past `pytest` invocation against this project's
+  long-lived local Postgres container was still there. Confirmed directly
+  before touching anything: production `agent_events` held 2269 rows
+  (`llm.call` rows spanning 2020-06-14 through 2030-06-15, 90 of them on
+  the pinned 2020-06-15 day alone summing to $1197.0018) BEFORE this
+  session ran a single test; a real `pytest
+  tests/integration/test_budget_guard_events.py -v` run against that
+  state failed exactly one test,
+  `TestBudgetGuardReadsRealSpendFromAgentEvents::
+  test_events_from_a_previous_day_are_not_counted`
+  (`assert spend < Decimal("999")` -- actual `spend=1207.501800`), because
+  accumulated same-day spend from past runs had crossed that hardcoded
+  threshold. `sum_llm_cost_for_day` itself is correct and unchanged (a
+  daily budget is deliberately process/organization-wide, not scoped to
+  one review) -- the defect was fixture placement, not query logic.
+
+  FIX (isolate the tests, do not touch the invariant): added
+  `EventRepository.__init__`'s `search_path: str | None = None` keyword
+  argument (`backend/database/repository.py`) -- every SQL string in that
+  file already refers to `agent_events` unqualified, so which actual
+  table it resolves to is entirely a function of the connection's
+  Postgres `search_path`; passing `None` (every production call site,
+  unchanged) leaves libpq's own default search_path untouched, so
+  production behavior is byte-for-byte identical to before this
+  parameter existed. `test_budget_guard_events.py` now has a
+  module-scoped `_isolated_events_schema` fixture that creates a
+  uniquely-named schema (`test_events_<uuid>`) per test-module run,
+  applies the exact same `backend/database/migrations/*.sql` files
+  against it (with `search_path` pointed at the new schema first, so
+  every unqualified `CREATE TABLE`/`CREATE TRIGGER`/`GRANT` in those
+  files lands there instead of `public`) -- giving the disposable copy
+  the SAME columns, indexes, AND append-only triggers as production,
+  generated from the same source rather than hand-duplicated -- then
+  drops the schema (`CASCADE`) when the module's tests finish. The
+  `repository` fixture now constructs its `EventRepository` with
+  `search_path=f"{schema},public"`, so every read/write in this file goes
+  to the disposable copy; production's `agent_events` is no longer
+  touched by this file at all. Added
+  `TestIsolatedSchemaIsAppendOnly::test_update_is_rejected_on_the_isolated_table_too`
+  as a guardrail -- if the isolated schema's copy of the triggers were
+  ever missing or wrong, an append-only regression there would otherwise
+  sail through this suite undetected; production's own append-only
+  enforcement is independently, directly proven by
+  `tests/integration/test_events_spine.py::TestAppendOnlyEnforcement`
+  (unchanged by this fix).
+
+  PRODUCTION INVARIANT VERIFIED INTACT (real errors, not inspection):
+  after this fix, a fresh manual check against production `agent_events`
+  showed UPDATE and DELETE both rejected for the admin/superuser
+  connection with `RaiseException: agent_events is append-only: <OP> is
+  not permitted`, TRUNCATE likewise rejected
+  (`agent_events_forbid_truncate`), and UPDATE/DELETE/TRUNCATE all
+  rejected for the restricted `agent_events_writer` role with
+  `InsufficientPrivilege: permission denied for table agent_events` --
+  every mutation attempt left the probe row in place.
+
+  REPEATABILITY PROVEN: `pytest -v` run twice in a row, full suite, both
+  runs 258 passed/0 failed/1 unrelated deprecation warning, diffed
+  line-for-line identical. Production `agent_events`'s row count was
+  checked before and after two consecutive
+  `test_budget_guard_events.py` runs and did not change at all (no
+  leftover `test_events_%` schemas left behind either) -- confirming this
+  file no longer writes to production. (Production's row count DOES still
+  grow across full-suite runs, expectedly and unrelatedly: `test_events_
+  spine.py`'s own tests deliberately write directly to production to
+  prove the real table's real enforcement, which is correct, pre-existing
+  behavior this fix does not touch.) The 2269 pre-existing stale rows
+  (now higher, since this session's own first confirmatory run against
+  the UNFIXED code necessarily added 9 more before the fix landed -- per
+  this task's explicit instruction not to attempt to delete any of them,
+  since `agent_events` cannot be and must not be mutated) are simply
+  irrelevant to every assertion in this file now; each run starts its
+  disposable schema empty.
+
+  GATES (this session, all services up -- Redis 6380, Postgres 5433,
+  pgvector 5434): `ruff check .` clean; `mypy --strict backend/` clean
+  (60 source files); `pytest -v` run twice, 258 passed / 0 failed each
+  time, byte-identical; `lint-imports --config .importlinter` 2
+  contracts kept, 0 broken.
+
+  Committed granularly; pushed to origin/main.
+
 - M9 L2 DEBUG (2026-08-30) -- L4 VERIFY REJECTED, both halves now fixed:
   L4 VERIFY rejected M9 for two connected defects: (a) PLAN.md's own M9
   success criteria literally names "recall@5 on a 10-query fixture set is
