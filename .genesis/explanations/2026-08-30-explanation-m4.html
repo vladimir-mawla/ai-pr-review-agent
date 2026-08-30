@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>M4 Explained — Orchestrator Fan-Out (Stub Agents)</title>
+<style>
+  :root {
+    --bg: #f7f7f5;
+    --bg-card: #ffffff;
+    --ink: #1b1f23;
+    --mut: #5b6472;
+    --line: #e2e4e8;
+    --accent: #2f6feb;
+    --accent-ink: #ffffff;
+    --ok: #1a7f37;
+    --warn: #9a6700;
+    --bad: #cf222e;
+    --code-bg: #f0f1f3;
+    --pill-bg: #eef2ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1117;
+      --bg-card: #161b22;
+      --ink: #e6edf3;
+      --mut: #9aa4b2;
+      --line: #2d333b;
+      --accent: #6ea8fe;
+      --accent-ink: #0d1117;
+      --ok: #3fb950;
+      --warn: #d29922;
+      --bad: #f85149;
+      --code-bg: #1c2128;
+      --pill-bg: #1c2440;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1117;
+    --bg-card: #161b22;
+    --ink: #e6edf3;
+    --mut: #9aa4b2;
+    --line: #2d333b;
+    --accent: #6ea8fe;
+    --accent-ink: #0d1117;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --bad: #f85149;
+    --code-bg: #1c2128;
+    --pill-bg: #1c2440;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    font-size: 16px;
+  }
+  .page {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 40px 20px 100px;
+  }
+  header.hero {
+    margin-bottom: 32px;
+  }
+  header.hero .kicker {
+    color: var(--accent);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-size: 12.5px;
+    margin: 0 0 10px;
+  }
+  h1 {
+    font-size: clamp(26px, 4vw, 36px);
+    margin: 0 0 12px;
+    line-height: 1.2;
+  }
+  .lede {
+    color: var(--mut);
+    font-size: 17px;
+    max-width: 70ch;
+  }
+  nav.toc {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin: 28px 0 40px;
+  }
+  nav.toc h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--mut);
+    margin: 0 0 10px;
+  }
+  nav.toc ol {
+    margin: 0;
+    padding-left: 20px;
+    columns: 2;
+    column-gap: 24px;
+  }
+  nav.toc li { margin: 4px 0; break-inside: avoid; }
+  nav.toc a { color: var(--ink); text-decoration: none; border-bottom: 1px dashed var(--line); }
+  nav.toc a:hover { border-bottom-color: var(--accent); color: var(--accent); }
+
+  section { margin: 56px 0; }
+  section > h2 {
+    font-size: 22px;
+    margin: 0 0 16px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--line);
+  }
+  section > h2 .num {
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+    margin-right: 10px;
+  }
+  h3 { font-size: 17px; margin: 26px 0 10px; }
+  p { margin: 12px 0; }
+  a { color: var(--accent); }
+
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin: 16px 0;
+  }
+  .callout {
+    border-left: 4px solid var(--accent);
+    background: var(--pill-bg);
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin: 18px 0;
+  }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.ok { border-left-color: var(--ok); }
+  .callout .label {
+    font-weight: 700;
+    font-size: 12.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--mut);
+    margin-bottom: 6px;
+  }
+
+  code {
+    background: var(--code-bg);
+    padding: 1px 6px;
+    border-radius: 5px;
+    font-size: 0.9em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    white-space: pre;
+    font-size: 13.5px;
+    line-height: 1.55;
+  }
+  pre code { background: none; padding: 0; border-radius: 0; }
+  .diffline-add { color: var(--ok); }
+  .diffline-del { color: var(--bad); }
+
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14.5px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--mut); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.03em; }
+
+  .pill {
+    display: inline-block;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 2px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    color: var(--mut);
+    white-space: nowrap;
+  }
+  .pill.ok { color: var(--ok); border-color: var(--ok); }
+  .pill.bad { color: var(--bad); border-color: var(--bad); }
+  .pill.warn { color: var(--warn); border-color: var(--warn); }
+
+  .flow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin: 18px 0;
+  }
+  .flow .node {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 13.5px;
+    min-width: 120px;
+    text-align: center;
+  }
+  .flow .node.core { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .flow .node.bad { border-color: var(--bad); color: var(--bad); font-weight: 600; }
+  .flow .node.ok { border-color: var(--ok); color: var(--ok); font-weight: 600; }
+  .flow .arrow {
+    color: var(--mut);
+    font-size: 18px;
+  }
+  .flow.vertical { flex-direction: column; align-items: stretch; }
+  .flow.vertical .node { text-align: left; }
+  .flow.vertical .arrow { text-align: center; }
+
+  .parallel-lanes {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin: 18px 0;
+  }
+  @media (max-width: 640px) {
+    .parallel-lanes { grid-template-columns: repeat(2, 1fr); }
+  }
+  .parallel-lanes .lane {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 12px 10px;
+    text-align: center;
+    font-size: 13px;
+  }
+  .parallel-lanes .lane .bar {
+    height: 8px;
+    border-radius: 4px;
+    background: var(--accent);
+    margin: 8px 0 6px;
+    opacity: 0.85;
+  }
+
+  .badwrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 18px 0;
+  }
+  @media (max-width: 640px) {
+    .badwrap { flex-direction: column; align-items: stretch; }
+  }
+  .badwrap .arrow2 { font-size: 22px; color: var(--mut); }
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 16px 0;
+  }
+  @media (max-width: 640px) {
+    .compare { grid-template-columns: 1fr; }
+  }
+  .compare .col {
+    border-radius: 12px;
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+  }
+  .compare .col.before { background: color-mix(in srgb, var(--bad) 6%, var(--bg-card)); }
+  .compare .col.after { background: color-mix(in srgb, var(--ok) 6%, var(--bg-card)); }
+  .compare h4 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .compare.before-after .before h4 { color: var(--bad); }
+  .compare.before-after .after h4 { color: var(--ok); }
+
+  .module-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px;
+    margin: 18px 0;
+  }
+  .module-card {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px 18px;
+  }
+  .module-card h4 {
+    margin: 0 0 6px;
+    font-size: 15px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: var(--accent);
+  }
+  .module-card p { margin: 6px 0 0; font-size: 14px; color: var(--mut); }
+
+  ol.gaps li, ul.plain li { margin: 8px 0; }
+
+  details.quiz {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 18px;
+    margin: 16px 0;
+  }
+  details.quiz summary {
+    cursor: pointer;
+    font-weight: 600;
+    list-style: none;
+  }
+  details.quiz summary::-webkit-details-marker { display: none; }
+  details.quiz summary::before {
+    content: "▸ ";
+    color: var(--accent);
+  }
+  details.quiz[open] summary::before {
+    content: "▾ ";
+  }
+  details.quiz .q { font-weight: 600; margin-bottom: 4px; }
+  details.quiz .answer {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--line);
+  }
+  details.quiz .answer .verdict {
+    font-weight: 700;
+    color: var(--ok);
+  }
+
+  footer {
+    margin-top: 60px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    color: var(--mut);
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <p class="kicker">Genesis L4 · Explain Diff · Milestone M4</p>
+    <h1>Orchestrator Fan-Out (Stub Agents)</h1>
+    <p class="lede">
+      What a <code>StateGraph</code> actually is and why an orchestrator needs typed
+      state instead of a plain dict; why four specialist nodes run concurrently
+      instead of one after another and what that buys; why writing to the same state
+      key from four parallel branches needs a reducer or LangGraph refuses to guess;
+      what gets checkpointed, when, and why resuming a crashed run must skip finished
+      work rather than replay it; and why this build's "crash-resume actually works"
+      claim is backed by a real cross-process test and an independent falsification
+      probe, unlike a reference implementation that shipped the same claim in a
+      docstring with no checkpointer wired up at all. Covers commits
+      <code>9b8583f</code>&nbsp;&hellip;&nbsp;<code>82aee0c</code> on
+      <code>main</code> — 9 commits, the whole M4 slice from the LangGraph dependency
+      addition through the M4 checkpoint commit. 10 files changed, 1153
+      insertions(+), 5 deletions(-).
+    </p>
+  </header>
+
+  <nav class="toc">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#background">Background</a></li>
+      <li><a href="#typed-state">Typed state: why a graph needs a schema</a></li>
+      <li><a href="#fanout">Fan-out via the Send API</a></li>
+      <li><a href="#reducer">The reducer: operator.add, and life without it</a></li>
+      <li><a href="#checkpointing">Checkpointing: what, when, and why resume skips</a></li>
+      <li><a href="#proof">Proving resume is real, not theater</a></li>
+      <li><a href="#sqlite">Why SQLite, not Redis</a></li>
+      <li><a href="#isolation">Failure isolation: contained vs. propagated</a></li>
+      <li><a href="#limits">Known limits, stated honestly</a></li>
+      <li><a href="#quiz">Quiz</a></li>
+    </ol>
+  </nav>
+
+  <section id="background">
+    <h2><span class="num">1</span>Background</h2>
+    <p>
+      The system this project is building reviews a pull request with four
+      independent specialist reasoners — security, quality, tests, docs — then
+      merges what they find into one review. M1 through M3 built everything up to
+      the point where a validated webhook sits on a Redis queue, waiting to be
+      picked up. Nothing yet decides <em>what happens</em> to that job once a worker
+      dequeues it: which agents run, in what order, what happens if one of them
+      fails, and — because a worker process is not guaranteed to live forever — what
+      happens if the whole thing dies halfway through.
+    </p>
+    <p>
+      M4's job is to build that missing piece: an orchestrator. Concretely, it uses
+      <a href="https://langchain-ai.github.io/langgraph/" target="_blank" rel="noopener">LangGraph</a>,
+      a library purpose-built for exactly this shape of problem — a graph of steps
+      with shared state, some of which can run in parallel, all of which needs to
+      survive a crash. M4 does not yet wire in real agents (that's M8/M10) or real
+      aggregation logic (M5); it proves the orchestration mechanism itself works,
+      using four fast, deterministic stub nodes that each return one canned
+      <code>Finding</code>.
+    </p>
+  </section>
+
+  <section id="typed-state">
+    <h2><span class="num">2</span>Typed state: why a graph needs a schema</h2>
+    <p>
+      A <code>StateGraph</code> is LangGraph's core abstraction: a directed graph of
+      named nodes (plain functions) that all read from and write to one shared,
+      typed state object as execution moves through the graph. "Typed" is doing real
+      work in that sentence — it's not a mutable global dict; it's a schema
+      (<code>backend/orchestrator/state.py</code>'s <code>GraphState</code>, a
+      <code>TypedDict</code>) that says exactly which keys exist, what type each
+      holds, and — critically for this milestone — how to combine two nodes' writes
+      to the same key.
+    </p>
+    <p>
+      An orchestrator needs this structure for a reason a simple function call
+      doesn't: multiple independent pieces of work (four specialists) need to
+      contribute to one shared result, and some of them run at the same time. If
+      state were just "whatever the last function returned," two things break at
+      once — there is no defined shape a downstream node (the aggregator) can rely
+      on, and concurrent writers would silently stomp on each other. A typed schema
+      with per-field merge rules is what makes "four things happen in parallel and
+      all four results end up in the final answer" possible to state as a
+      guarantee rather than an accident of scheduling.
+    </p>
+    <div class="module-grid">
+      <div class="module-card">
+        <h4>review_id, pr_number, repository_owner, repository_name, head_sha</h4>
+        <p>Carried through unchanged by every node — identifying context for the
+          run, not yet acted on until a later milestone needs it.</p>
+      </div>
+      <div class="module-card">
+        <h4>findings: Annotated[list[Finding], operator.add]</h4>
+        <p>Every specialist's contribution, combined via <code>operator.add</code>
+          (list concatenation) rather than overwritten.</p>
+      </div>
+      <div class="module-card">
+        <h4>node_errors: Annotated[dict[str, str], _merge_dicts]</h4>
+        <p>Maps a failed specialist's name to its error message, combined via a
+          shallow dict merge.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="fanout">
+    <h2><span class="num">3</span>Fan-out via the Send API</h2>
+    <p>
+      <code>backend/orchestrator/graph.py</code> routes <code>START</code> through a
+      dispatcher function that returns four
+      <a href="https://langchain-ai.github.io/langgraph/concepts/low_level/#send" target="_blank" rel="noopener"><code>langgraph.types.Send</code></a>
+      objects, one per specialist:
+    </p>
+    <pre><code>def _dispatch(state: GraphState) -> list[Send]:
+    return [Send(node_name, state) for node_name in _SPECIALIST_NODES]
+
+builder.add_conditional_edges(START, _dispatch, _SPECIALIST_NODES)</code></pre>
+    <p>
+      A plain <code>add_edge(START, node)</code> per specialist would technically
+      also fan out to four nodes in the same super-step, but <code>Send</code> is
+      the API PLAN.md's M4 outcome names explicitly, and — more importantly — it
+      generalizes: <code>Send</code> lets the <em>number</em> of fanned-out tasks
+      depend on runtime data (imagine a future milestone with a variable number of
+      specialists), where a hardcoded set of <code>add_edge</code> calls cannot.
+    </p>
+    <p>
+      Why run the four specialists concurrently instead of one after another at
+      all? Because they are independent: security's read of the diff doesn't need
+      quality's answer first, and vice versa. Chained sequentially, four specialists
+      each taking real LLM latency (M4's stubs sleep 0.2s to simulate this) would
+      add up: run one after another and total wall time is roughly the sum of all
+      four. Run them concurrently and wall time is roughly the slowest single one —
+      the whole point of an orchestrator that fans out rather than just calling four
+      functions in a row.
+    </p>
+    <div class="parallel-lanes">
+      <div class="lane">security<div class="bar" style="width:100%"></div>~0.2s</div>
+      <div class="lane">quality<div class="bar" style="width:100%"></div>~0.2s</div>
+      <div class="lane">tests<div class="bar" style="width:100%"></div>~0.2s</div>
+      <div class="lane">docs<div class="bar" style="width:100%"></div>~0.2s</div>
+    </div>
+    <p style="text-align:center;color:var(--mut);font-size:13px;margin-top:-8px;">
+      all four bars run in the same window — total wall time ≈ one bar, not four
+    </p>
+    <div class="callout ok">
+      <div class="label">Verified, not just claimed</div>
+      <code>test_fanout_runs_nodes_in_parallel</code> doesn't just eyeball a
+      duration — it asserts wall time for all four nodes stays under half the sum
+      of their four individual sleeps (a sequential chain would blow past that
+      bound), and separately asserts every pair of nodes' recorded
+      <code>(start, end)</code> execution windows actually overlaps in time. The
+      real measured numbers logged during this build: ~0.31s wall time for all four
+      nodes vs. 1.2s (four × 0.3s) a sequential chain would need.
+    </div>
+  </section>
+
+  <section id="reducer">
+    <h2><span class="num">4</span>The reducer: <code>operator.add</code>, and life without it</h2>
+    <p>
+      Here is the concrete problem four parallel writers create. All four
+      specialist nodes run in the same LangGraph super-step, and each one returns a
+      partial state update — <code>{"findings": [finding], "node_errors": {}}</code>.
+      LangGraph has to fold all four of those partial updates into one new state
+      before the next super-step (the aggregator) runs. Without a merge rule, the
+      only sane default for "four things wrote to the same key" is <em>last write
+      wins</em> — whichever node's update LangGraph applies last simply overwrites
+      the other three. Four specialists would collapse into one surviving
+      <code>Finding</code>, with no error and no indication that three-quarters of
+      the review's findings quietly vanished.
+    </p>
+    <p>
+      <code>Annotated[list[Finding], operator.add]</code> on the <code>findings</code>
+      field is what tells LangGraph's Pregel engine to use a different rule for this
+      key specifically: instead of replacing the old value with the new one, call
+      <code>operator.add(old, new)</code> — for two lists, that's concatenation. Four
+      branches each contributing a one-element list combine into a four-element
+      list, in whatever order the merges happen to land in (order across branches is
+      explicitly not guaranteed — M5's aggregator, not M4, owns sorting).
+      <code>node_errors</code> gets its own reducer, <code>_merge_dicts</code>, doing
+      a shallow <code>{**left, **right}</code> union — safe here because each node
+      only ever writes its own key, so there's no ambiguity about which value wins
+      on a real collision.
+    </p>
+    <div class="callout warn">
+      <div class="label">What LangGraph does without a reducer</div>
+      This is the detail worth being precise about: LangGraph does not silently
+      pick last-write-wins as some kind of safe default for every case. For a
+      channel with no declared reducer, if more than one node in the same
+      super-step tries to write a new value to it, LangGraph raises
+      <code>InvalidUpdateError</code> and the run fails loudly. In other words: the
+      "silently drop three specialists' work" scenario above isn't actually what
+      an un-reduced <code>findings: list[Finding]</code> field would do — that
+      exact case is what forces you to add a reducer in the first place, because
+      LangGraph refuses to guess how to combine concurrent writes to a bare field
+      and fails the run instead. <code>operator.add</code> is what tells it
+      "concatenation is the correct way to combine these," turning an error into
+      defined, correct behavior.
+    </div>
+    <div class="callout ok">
+      <div class="label">Verified, not just claimed</div>
+      <code>test_fanout_state_merges_across_parallel_branches</code> asserts all
+      four findings survive as four independently valid <code>Finding</code>
+      objects (not a partially-merged fragment) and that <code>node_errors</code>
+      merged to an empty map when nothing failed — proving the reducers actually
+      combine branches correctly, not just that the graph runs without raising.
+    </div>
+  </section>
+
+  <section id="checkpointing">
+    <h2><span class="num">5</span>Checkpointing: what, when, and why resume skips</h2>
+    <p>
+      A checkpoint is a durable snapshot of <code>GraphState</code> plus which
+      nodes have completed, written after each super-step — not just once at the
+      very end of a run. <code>build_graph()</code> requires a checkpointer as a
+      mandatory parameter with no default, specifically so it is structurally
+      impossible to compile this graph without one:
+    </p>
+    <pre><code>def build_graph(
+    checkpointer: BaseCheckpointSaver[str],
+) -> CompiledStateGraph[GraphState, None, GraphState, GraphState]:
+    ...
+    return builder.compile(checkpointer=checkpointer)</code></pre>
+    <p>
+      Every call is scoped by a <code>thread_id</code> — the identifier the
+      checkpointer uses to correlate all state for one run (one PR review, in the
+      target design). <code>LangGraphWorkflowEngine.run(thread_id, state)</code>
+      starts a new run; if a node raises partway through, LangGraph's checkpointer
+      has already durably recorded whichever sibling branches in that same
+      super-step <em>did</em> complete, as "pending writes" against the last good
+      checkpoint, before the exception propagates out of <code>run()</code>.
+      <code>resume(thread_id)</code> — called with no fresh initial state, just the
+      same <code>thread_id</code> — tells LangGraph to continue that persisted run
+      from its last checkpoint.
+    </p>
+    <p>
+      Why must resume skip completed nodes rather than replay them, concretely?
+      Two reasons converge here. First, correctness: three of the four specialists
+      in M4's fan-out already succeeded and their findings are durably recorded —
+      re-running them would be wasted work at best, and for a real LLM-backed
+      specialist in a later milestone, an unnecessary paid API call and a chance of
+      a different (possibly worse) answer replacing a good one. Second, this is the
+      entire reason checkpointing exists in the first place: a worker process can
+      die at any point (an OOM kill, a deploy, a crash), and a review pipeline that
+      restarted every specialist from zero after every transient crash would never
+      make forward progress reliably at scale. LangGraph's checkpointer tracks
+      "pending writes" per super-step precisely so <code>resume</code> can look at
+      what's already durably committed and only re-invoke the tasks that never
+      finished.
+    </p>
+  </section>
+
+  <section id="proof">
+    <h2><span class="num">6</span>Proving resume is real, not theater</h2>
+    <p>
+      A checkpointing claim is easy to state and easy to fake — "compiled with a
+      checkpointer" proves almost nothing on its own if nothing actually exercises
+      the resume path against a genuinely new process. This is exactly the gap
+      DONE.html's M4 gate calls out by name: <em>"LangGraph checkpoints actually
+      resume after a simulated worker crash (compiled with a checkpointer, not
+      without)."</em>
+    </p>
+    <div class="callout warn">
+      <div class="label">Why this gate exists</div>
+      A prior reference implementation of this same milestone shape claimed
+      Redis-backed crash-resume in its comments and documentation, but the graph
+      it actually shipped was compiled with <em>no checkpointer at all</em> — the
+      claim and the code silently disagreed, and nothing in that codebase would
+      have caught it, because no test exercised resume across a real process
+      boundary. That gap is exactly why this project's DONE.html gate is worded
+      the way it is, and why this build treats "compiled with a checkpointer" as
+      the necessary-but-not-sufficient first step, not the finish line.
+    </div>
+    <p>
+      This build's central test, <code>test_checkpoint_resume_skips_completed_nodes</code>,
+      is deliberately built to make faking the result hard:
+    </p>
+    <ol class="gaps">
+      <li>Arm a simulated crash in the <code>docs</code> node, run the graph — it
+        raises. The other three specialists already committed a successful result.</li>
+      <li>Build a <strong>brand-new</strong> <code>LangGraphWorkflowEngine</code>
+        instance, pointed at the same on-disk SQLite checkpoint file, and call
+        <code>resume(thread_id)</code> — modeling an actual new worker process
+        picking up a dead one's work, not a retry against the same in-memory
+        Python objects.</li>
+      <li>Assert the three already-completed nodes' call counts are still exactly
+        1 (never re-invoked), while <code>docs</code> — which crashed once — shows
+        a call count of 2 (genuinely re-executed, this time to success).</li>
+    </ol>
+    <div class="callout ok">
+      <div class="label">The falsification probe</div>
+      L4 VERIFY additionally ran an independent check this build's own test suite
+      doesn't perform: after the simulated crash, delete the on-disk checkpoint
+      file before calling <code>resume</code>. If resume "succeeded" regardless
+      of whether real persisted state existed, that would mean the mechanism was
+      not actually reading from disk — the test would be structurally incapable
+      of catching a fake. With the checkpoint file deleted, resuming a
+      <code>thread_id</code> that LangGraph has no persisted state for behaves as
+      a fresh run rather than a false-positive resume, confirming the resume path
+      genuinely depends on the on-disk state it claims to read, not merely a
+      code path that always reports success.
+    </div>
+  </section>
+
+  <section id="sqlite">
+    <h2><span class="num">7</span>Why SQLite, not Redis</h2>
+    <p>
+      PLAN.md's original M4 outcome text said the graph "checkpoints state to
+      Redis" — the natural choice, given M3 already stood up a Redis instance
+      this project owns. Before writing any production code, this build installed
+      <code>langgraph-checkpoint-redis</code> (LangGraph's official Redis
+      checkpointer) and smoke-tested it directly against this project's own
+      <code>docker-compose.yml</code> Redis.
+    </p>
+    <div class="compare before-after">
+      <div class="col before">
+        <h4>What was tried</h4>
+        <p>
+          <code>langgraph-checkpoint-redis</code>'s <code>.setup()</code> issues
+          <code>FT.INFO</code> / <code>FT.CREATE</code> — RediSearch module
+          commands — to build a search index for checkpoint lookups. Plain
+          <code>redis:7-alpine</code> (M3's image) does not implement RediSearch.
+          The concrete, reproduced failure:
+          <code>redis.exceptions.ResponseError: unknown command 'FT.INFO'</code>.
+        </p>
+      </div>
+      <div class="col after">
+        <h4>What this build uses instead</h4>
+        <p>
+          <code>langgraph-checkpoint-sqlite</code>'s <code>SqliteSaver</code>, a
+          real, first-party LangGraph checkpointer — not a mock — backed by a
+          file (not <code>:memory:</code>) so state survives the writing process
+          exiting, which is the entire property "resume after a crash" depends
+          on being true.
+        </p>
+      </div>
+    </div>
+    <p>
+      Switching M3's Redis image to Redis Stack (which does bundle RediSearch)
+      would fix the original checkpointer, but that is a change to
+      <code>docker-compose.yml</code> outside M4's freeze boundary — not a
+      decision this milestone should make unilaterally on a shared piece of
+      infrastructure. This is a documented, justified tradeoff, not a silent
+      substitution: PLAN.md's M4 outcome now states plainly that the build uses a
+      durable file-backed SQLite checkpointer, with a parenthetical noting
+      Redis-backed checkpointing needs RediSearch/Redis Stack and was deferred.
+      L4 VERIFY reviewed this deviation directly and ruled it non-blocking,
+      since DONE.html's own gate asks only that the graph be "compiled with a
+      checkpointer, not without" — it does not name Redis specifically.
+    </p>
+  </section>
+
+  <section id="isolation">
+    <h2><span class="num">8</span>Failure isolation: contained vs. propagated</h2>
+    <p>
+      M4 deliberately proves two different failure modes, because conflating them
+      would hide a real design decision. <code>nodes.py</code> defines two
+      distinct exception types for this reason alone:
+    </p>
+    <table>
+      <thead><tr><th>Exception</th><th>Represents</th><th>What happens to it</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>AgentExecutionError</code></td>
+          <td>A specialist's own logic failing — a malformed diff, a future LLM
+            provider error, a response that fails schema validation.</td>
+          <td>Caught inside that node's wrapper function and recorded in
+            <code>GraphState.node_errors</code>. The run continues; the other
+            three specialists' findings still reach the final state.</td>
+        </tr>
+        <tr>
+          <td><code>SimulatedNodeCrashError</code></td>
+          <td>The worker <em>process itself</em> dying mid-node — what a real
+            OOM kill or crash looks like from the checkpointer's point of view.</td>
+          <td>Left to propagate uncaught, out of the node, out of the graph, out
+            of <code>WorkflowEngine.run</code>. The run fails, and only
+            <code>resume</code> against the persisted checkpoint can continue
+            it — see the checkpointing sections above.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>
+      This split is by design, not an oversight: a single specialist's own bug
+      must never cost the other three their work (that would make the whole
+      review as fragile as its flakiest agent), but an actual process death is a
+      fundamentally different event that a graph should not — and structurally
+      cannot — quietly paper over. It has to surface as a failed run so that
+      <code>resume</code>'s checkpoint-driven recovery path is what handles it,
+      not a caught-and-ignored exception pretending nothing happened.
+    </p>
+    <div class="callout ok">
+      <div class="label">Verified, not just claimed</div>
+      <code>test_fanout_isolates_single_node_failure</code> arms an
+      <code>AgentExecutionError</code> in the <code>quality</code> node and
+      asserts the run still completes with exactly 3 findings (security, tests,
+      docs) plus a non-empty <code>node_errors["quality"]</code> message — proving
+      isolation, not just claiming it. The crash-propagation half of this design
+      is exercised by <code>test_checkpoint_resume_skips_completed_nodes</code>
+      itself, which relies on <code>SimulatedNodeCrashError</code> actually
+      failing the run (via <code>pytest.raises</code>) before it can test resume
+      at all.
+    </div>
+  </section>
+
+  <section id="limits">
+    <h2><span class="num">9</span>Known limits, stated honestly</h2>
+    <p>
+      L4 VERIFY approved M4 — the demo command passes, all four gates are green,
+      and the crash-resume gate is satisfied by a real cross-process test plus an
+      independent falsification probe. It also flagged real, non-blocking
+      limitations:
+    </p>
+    <ol class="gaps">
+      <li>
+        <strong>LangGraph logs a deserialization warning on resume:</strong>
+        <code>"Deserializing unregistered type backend.models.enums.AgentType /
+        Severity / backend.models.findings.Finding from checkpoint. This will be
+        blocked in a future version."</code> This project's custom Pydantic
+        models and enums aren't registered with LangGraph's (de)serializer, so a
+        future LangGraph major could hard-block resume for these exact types
+        unless a mitigation (LangGraph's <code>allowed_msgpack_modules</code>, or
+        an equivalent registration mechanism) is configured first. Resume works
+        correctly today; this is a forward-looking upgrade risk, not a present
+        bug — recorded in <code>checkpoints/CURRENT.md</code> and as a comment in
+        <code>langgraph_engine.py</code> next to the checkpointer setup.
+      </li>
+      <li>
+        <strong>The default checkpoint path is untested outside the test
+        suite.</strong> <code>LangGraphWorkflowEngine</code>'s default,
+        <code>var/orchestrator_checkpoints.sqlite3</code>, is never exercised by
+        any test — every test uses a fresh <code>tmp_path</code>-scoped file
+        instead. The underlying mechanism (a real file-backed
+        <code>SqliteSaver</code>, resume across a new engine instance) is
+        verified; whether the specific default path works end-to-end in a real
+        local run is not evidenced one way or the other.
+      </li>
+      <li>
+        <strong>The orchestrator is not wired into the webhook/queue path.</strong>
+        Nothing in <code>backend.webhook_receiver</code> or
+        <code>backend.job_queue</code> calls <code>LangGraphWorkflowEngine</code>
+        yet. A validated, queued webhook and a working orchestrator both exist
+        today as separately-tested capabilities — connecting them (webhook →
+        queue → orchestrator run) is explicitly out of M4's freeze boundary and
+        expected in a later milestone.
+      </li>
+    </ol>
+    <div class="callout ok">
+      <div class="label">Why these aren't blockers</div>
+      None of the three contradicts what M4's plan entry or DONE.html's DoD gate
+      asked for: four stub nodes fan out in parallel, their outputs land in the
+      final state, and a simulated crash resumes from checkpoint rather than
+      re-running completed work. The demo command and all 5 new integration
+      tests prove exactly that. Recording the gaps keeps them visible for
+      whichever later milestone needs to close them, instead of quietly
+      forgetting them or scope-creeping M4 to cover work — real agents,
+      aggregation, wiring into the request path — that was never this
+      milestone's job.
+    </div>
+  </section>
+
+  <section id="quiz">
+    <h2><span class="num">10</span>Quiz</h2>
+    <p>Three questions. Click each one to reveal the answer.</p>
+
+    <details class="quiz">
+      <summary class="q">1. Why does <code>GraphState.findings</code> need <code>Annotated[list[Finding], operator.add]</code> instead of just <code>list[Finding]</code>, given that LangGraph refuses to silently pick a default for concurrent writes anyway?</summary>
+      <div class="answer">
+        <p class="verdict">Because without a declared reducer, LangGraph doesn't pick a safe default at all — it raises <code>InvalidUpdateError</code> and fails the whole run the moment more than one node in the same super-step writes to that key. <code>operator.add</code> is what tells LangGraph the correct way to combine four branches' contributions (list concatenation), turning a hard failure into defined, correct merge behavior.</p>
+        <p>
+          All four specialist nodes run in the same super-step and each returns
+          its own one-element <code>findings</code> list. A bare, un-reduced
+          field can't accept more than one writer per super-step at all — the
+          reducer isn't an optimization on top of working default behavior, it's
+          what makes concurrent writes to that key legal in the first place.
+          <code>test_fanout_state_merges_across_parallel_branches</code> proves
+          the actual merge: four distinct, independently valid findings survive,
+          not a silently collapsed one.
+        </p>
+      </div>
+    </details>
+
+    <details class="quiz">
+      <summary class="q">2. <code>test_checkpoint_resume_skips_completed_nodes</code> builds a brand-new <code>LangGraphWorkflowEngine</code> instance to call <code>resume()</code>, rather than reusing the engine instance that hit the simulated crash. Why does that distinction matter?</summary>
+      <div class="answer">
+        <p class="verdict">Because reusing the same in-memory engine/process would only prove "this Python object can retry its own work," not "a genuinely new worker process can pick up a dead one's work from disk" — which is the actual failure mode checkpointing exists to survive (a process crashing, not a function raising and being caught).</p>
+        <p>
+          A fresh engine instance means a fresh SQLite connection with no
+          in-memory state carried over from the crashed run — the only thing
+          connecting the two engine instances is the same on-disk checkpoint
+          file and the same <code>thread_id</code>. If resume worked only
+          because some in-process cache survived the crash, testing against a
+          brand-new instance would expose that immediately; testing it this way
+          is what makes the three untouched call counts (still 1) and the
+          re-executed <code>docs</code> node (count 2) a real result rather than
+          an artifact of test setup.
+        </p>
+      </div>
+    </details>
+
+    <details class="quiz">
+      <summary class="q">3. This build uses <code>langgraph-checkpoint-sqlite</code> instead of the Redis checkpointer PLAN.md originally named. Why wasn't the fix simply "add Redis Stack to docker-compose.yml" during this same milestone?</summary>
+      <div class="answer">
+        <p class="verdict">Because <code>docker-compose.yml</code> is not listed in M4's freeze boundary — the set of files this milestone is scoped to touch — so swapping M3's shared Redis image is a decision this milestone should not make unilaterally, even though it would technically unblock the original Redis checkpointer.</p>
+        <p>
+          The actual blocker was concrete and reproduced, not assumed:
+          <code>langgraph-checkpoint-redis</code>'s <code>.setup()</code> issues
+          RediSearch commands (<code>FT.INFO</code>) that plain
+          <code>redis:7-alpine</code> doesn't implement, confirmed by an actual
+          <code>ResponseError</code>. Given a real, working, first-party
+          LangGraph checkpointer (<code>SqliteSaver</code>) was available and
+          satisfies every behavior the milestone's gate actually asks for —
+          "compiled with a checkpointer, not without," durable across a process
+          restart — using it and documenting the tradeoff was the option that
+          didn't require an out-of-scope infrastructure change to a shared
+          service other milestones also depend on.
+        </p>
+      </div>
+    </details>
+  </section>
+
+  <footer>
+    Generated by the <code>explain-diff-html</code> skill during L4 VERIFY housekeeping for
+    milestone M4 of the <code>pr-review-agent</code> genesis-kit project. Diff range:
+    <code>9b8583f</code> (chore(build): add langgraph and langgraph-checkpoint-sqlite
+    dependencies) through <code>82aee0c</code> (the M4 checkpoint commit, HEAD at time
+    of writing) — 9 commits, 10 files changed, 1153 insertions(+), 5 deletions(-).
+    Self-contained: no external stylesheets, fonts, scripts, or images.
+  </footer>
+
+</div>
+</body>
+</html>
