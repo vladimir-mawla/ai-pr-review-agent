@@ -2,8 +2,10 @@
 - active_loop: none (between milestones)
 - target: M8
 - iteration: 0
-- last_gate: L4 VERIFY APPROVE on M7 (after REJECT and fix)
-- next_action: run G0 existence pre-flight on M8
+- last_gate: L2 DEBUG fix (2026-08-30) for the HIGH PRIORITY webhook-enqueue
+  defect M7's L4 VERIFY found living in M6-scope code (see Resolved, below)
+- next_action: L4 VERIFY this fix (separate session), then G0 existence
+  pre-flight on M8
 - model: claude-sonnet-5
 - tokens_used: 0
 - tokens_budget: 50000
@@ -133,22 +135,6 @@ A second, independent L4 VERIFY session then re-ran all four gates plus PLAN.md'
 ## Deferred
 
 New from M7 (L4 VERIFY, both rounds), non-blocking except where noted:
-- **HIGH PRIORITY, NEWLY FOUND -- the M6-scope Redis enqueue call has the
-  exact same defect class M7 just fixed:** `backend/webhook_receiver/
-  router.py`'s `queue.enqueue(event)` is still a plain synchronous call
-  made directly from inside `async def receive_webhook`; `RedisJobQueue.
-  enqueue` (`backend/job_queue/redis_arq.py`) blocks the calling thread via
-  `asyncio.run_coroutine_threadsafe(...).result(timeout=...)`. This is the
-  same class of bug M7's L2 DEBUG loop just fixed for the events path (a
-  synchronous, blocking call made directly from a coroutine on uvicorn's
-  single event-loop thread) -- except this instance lives in M6-scope code
-  that already passed its own independent L4 VERIFY. A slow-but-not-fully-
-  down Redis (elevated latency, not unreachable) would serialise every
-  concurrent webhook request the same way the pre-fix events write did.
-  Not fixed in M7 -- `backend/job_queue/redis_arq.py` and the router's
-  enqueue call site are outside M7's freeze boundary. Needs its own
-  dedicated fix loop (most likely `asyncio.to_thread`, mirroring M7's own
-  `emit_decision_async` pattern).
 - The events circuit breaker opening means events can be dropped for up to
   `reset_timeout_seconds` (30s default) under a sustained events-store
   outage. Every drop is logged, and this is a judged, deliberate tradeoff
@@ -161,6 +147,60 @@ New from M7 (L4 VERIFY, both rounds), non-blocking except where noted:
   reasonable for the single-row inserts this milestone performs, but is a
   tunable worth revisiting once real load/latency data exists rather than
   the current best-guess default.
+
+Resolved (HIGH PRIORITY item raised by M7's L4 VERIFY, fixed in a dedicated
+post-M7 L2 DEBUG loop on 2026-08-30, now closed):
+- ~~The M6-scope Redis enqueue call had the exact same defect class M7 just
+  fixed~~ -- fixed: `backend/webhook_receiver/router.py`'s `async def
+  receive_webhook` called `queue.enqueue(event)` as a plain, unawaited,
+  synchronous call; `RedisJobQueue.enqueue` (`backend/job_queue/
+  redis_arq.py`) blocks the calling thread via `backend.reliability.
+  timeout.await_future`'s `future.result(timeout=policy.seconds)`, and that
+  call ran on uvicorn's single event-loop thread -- so one webhook whose
+  Redis call was merely slow (not down) would serialise every other
+  concurrent, unrelated webhook request behind it, exactly as the pre-fix
+  events write did (missed by M6's own L4 VERIFY, which tested the
+  circuit breaker/retry/timeout primitives thoroughly but never asked
+  whether the call that uses them blocked the event loop). Fix: the
+  router now does `await enqueue_async(queue, event)`
+  (`backend/job_queue/interface.py`'s new `enqueue_async`), a free
+  function that runs the existing, unchanged, still-synchronous
+  `queue.enqueue` on a worker thread via `asyncio.to_thread` (asyncio's
+  own default executor -- a bounded thread pool, not one thread per call),
+  mirroring M7's own `emit_decision_async` fix for the identical defect
+  class on the events-write path. `JobQueue.enqueue` itself, `RedisJobQueue`
+  internals, and every M2/M3/M6 guarantee (exactly-once idempotency per
+  `delivery_id` via Redis's atomic `SET NX EX`, `QueueUnavailableError` ->
+  503, the retry/circuit-breaker/timeout composition) are unchanged --
+  proven, not just re-asserted: `tests/unit/test_reliability.py`'s existing
+  503/idempotency/wiring tests and `tests/integration/test_events_spine.py`'s
+  decision-event tests all still pass unmodified; a new manual check fired
+  20 genuinely concurrent requests sharing one `delivery_id` and confirmed
+  exactly 1 `accepted` + 19 `duplicate` (idempotency under real, not
+  event-loop-serialized, concurrency). A new regression test,
+  `tests/integration/test_queue_roundtrip.py::
+  TestConcurrentWebhookEnqueuesAreNotSerializedBySlowRedis`, models Redis's
+  own `DEBUG SLEEP` (blocks the whole, single-threaded Redis server for a
+  fixed duration) the way M7's own `TestConcurrentWebhookWritesAreNot
+  SerializedByALockedEventsTable` modeled a Postgres table lock, and fails
+  against the old blocking call (proven: temporarily reverted, ran, caught
+  the N-times-serialized failure, restored, reran, passed -- both outputs
+  captured in this session's final report). `docker-compose.yml`'s `redis`
+  service gained `command: ["redis-server", "--enable-debug-command",
+  "yes"]` so that test's `DEBUG SLEEP` is actually permitted (Redis 7
+  refuses `DEBUG` from a Docker-published TCP port by default, not just
+  from "local" in the sense it checks) -- local dev/test infrastructure
+  only, nothing in `backend/` itself ever issues a `DEBUG` command. A real
+  live-uvicorn latency experiment (short `RELIABILITY_TIMEOUT_SECONDS=1.0`/
+  `RETRY_MAX_ATTEMPTS=1` for a fast, deterministic demo; Redis put to sleep
+  for 8s via `DEBUG SLEEP`, independently verified still-unresponsive via a
+  timed-out probe PING immediately before firing) measured 4 concurrent
+  signed webhook POSTs: before the fix, latencies staggered to
+  `[1.10, 4.06, 4.06, 4.05]s` (overall batch 4.13s, ~4x one attempt's
+  timeout); after the fix, `[1.10, 1.03, 1.03, 1.02]s` (overall batch
+  1.10s, ~1x) -- all four gates (`ruff`, `mypy --strict`, `pytest` with
+  both Docker services up so integration tests actually ran, `lint-imports`)
+  re-passed after the fix.
 
 Resolved (raised by M7's first L4 VERIFY REJECT, fixed in the same L2 DEBUG
 pass, now closed):
