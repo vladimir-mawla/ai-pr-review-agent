@@ -313,3 +313,64 @@ milestones needing a paid/external credential (M8, M10, M11, M12, M13) are order
   `.genesis/explanations/2026-08-30-explanation-m6.html` for the full
   account, including why `backend/reliability/idempotency.py` was
   deliberately not built.
+
+- **2026-08-30 — M7 (Events Spine: Local Audit/Trace Log):** L1 BUILD
+  shipped the append-only `agent_events` table (`backend/database/migrations/
+  0001_agent_events.sql`), `backend.observability`'s `events`/`tracing`/
+  `audit`/`workflow_context` modules, and wired span/decision events into
+  the webhook ingress and the four orchestrator specialist nodes. A first,
+  independent L4 VERIFY session **REJECTED** this build for a real
+  reliability defect, not a nitpick: `EventRepository.insert_event` opened
+  a synchronous `psycopg.connect(..., connect_timeout=2)` and was called
+  directly from `async def receive_webhook` — never awaited, never
+  offloaded, and with no `statement_timeout` or circuit breaker at all. L4
+  VERIFY proved this empirically: with an admin session holding
+  `LOCK TABLE agent_events IN ACCESS EXCLUSIVE MODE; SELECT pg_sleep(6)`,
+  three concurrent, independent webhook POSTs against a live uvicorn each
+  took ~4.4s instead of the normal sub-10ms — a single stalled events write
+  serialised every other in-flight request on uvicorn's one event-loop
+  thread, violating `.genesis/DONE.html` section 2's "every outbound call
+  has a timeout / circuit-breaker" gate. An L2 DEBUG loop applied the
+  approved fix: `backend/observability/events.py` gained
+  `emit_decision_async`, which the webhook router now `await`s and which
+  runs the write via `asyncio.to_thread` instead of calling the blocking
+  function directly on the loop thread; `EventRepository` now sets
+  Postgres's own `statement_timeout` GUC (default 2000ms) on every
+  connection it opens, a real query-level bound that covers lock-wait time
+  the way `connect_timeout` never could; and `EventRepository.insert_event`
+  now runs through M6's own `CircuitBreaker` class (a separate instance,
+  independent knobs from the Redis path, composed the same way rather than
+  hand-rolled), so a persistently down/slow events store fails fast instead
+  of retrying at full connect-timeout cost on every request. The same L2
+  DEBUG pass also closed three non-blocking findings from the same L4
+  review: TRUNCATE silently bypassed the append-only trigger (PostgreSQL
+  never fires a row-level trigger for TRUNCATE) — closed with a new
+  statement-level `BEFORE TRUNCATE` trigger; the events failure policy's
+  exception swallow was broad enough to also hide a real `IntegrityError`
+  (e.g. a CHECK-constraint violation) — narrowed to re-raise it before the
+  broad except runs; and the PLAN.md demo command didn't work verbatim in a
+  clean shell (`.env` is read by pydantic-settings but never exported to
+  the shell) — fixed by inlining `set -a && source .env && set +a` and
+  correcting the demo SQL's `ORDER BY ts` to `ORDER BY ts ASC, id ASC` to
+  match `EventRepository.fetch_events_for_review`'s own tiebreak. A second,
+  independent L4 VERIFY session then re-ran everything against the fix,
+  reproduced the numbers itself rather than trusting the fix session's
+  report (~2.03s per request, ~2.09s total wall time for three genuinely
+  concurrent requests — not stacked to ~6s+), and separately proved the
+  event loop never stalls even with the executor saturated: 40 events
+  emitted in 3 FIFO batches against a deliberately tiny thread pool while a
+  concurrent heartbeat coroutine ticked 61/61 times with no gaps, and
+  **APPROVEd** M7. Demo command `docker compose up -d postgres && python
+  scripts/run_fixture_review.py --review-id demo-1 && set -a && source
+  .env && set +a && psql "$DATABASE_URL" -c "SELECT event_type, agent, ts
+  FROM agent_events WHERE review_id='demo-1' ORDER BY ts ASC, id ASC"`
+  exits 0; the full suite (`pytest -v`) exits 0 with 160 tests passing
+  overall, both the project's own Redis (6380) and Postgres (5433) up so
+  every DB-dependent test genuinely executed, none skipped. This
+  rejection-then-fix cycle — a real, load-bearing production bug caught by
+  an independent verifier's own empirical repro, not a style nitpick — is
+  recorded here rather than smoothed over; see `checkpoints/CURRENT.md` and
+  `.genesis/explanations/2026-08-30-explanation-m7.html` for the full
+  account, including the newly-found fact that `backend/webhook_receiver/
+  router.py`'s Redis enqueue call has the exact same blocking-the-event-loop
+  defect class in M6-scope code that already passed its own L4 VERIFY.

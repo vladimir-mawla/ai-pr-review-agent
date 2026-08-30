@@ -1,22 +1,15 @@
 # CURRENT
-- active_loop: none (between L2 DEBUG and L4 VERIFY)
-- target: M7
-- iteration: 1
-- last_gate: L4 VERIFY REJECTED M7's original L1 BUILD (separate session, real
-  reliability bug) -- this L2 DEBUG session applied the fix described in
-  "M7 L2 DEBUG fix (post-L4-REJECT)" below.
-- last_action: L2 DEBUG session fixed the blocking-events-write defect L4
-  VERIFY caught, plus the three non-blocking findings from the same review
-  (TRUNCATE bypassing the append-only trigger, an overly broad exception
-  swallow, and a demo command that doesn't work verbatim in a clean shell).
-  See "M7 L2 DEBUG fix (post-L4-REJECT)" below for the full account.
-- next_action: re-run L4 VERIFY on M7 (separate session)
+- active_loop: none (between milestones)
+- target: M8
+- iteration: 0
+- last_gate: L4 VERIFY APPROVE on M7 (after REJECT and fix)
+- next_action: run G0 existence pre-flight on M8
 - model: claude-sonnet-5
 - tokens_used: 0
 - tokens_budget: 50000
 - skills_loaded: []
 
-## M7 L2 DEBUG fix (post-L4-REJECT)
+## M7 history (kept for context; superseded by the two lines above)
 
 **The REJECT.** An independent L4 VERIFY session rejected M7's L1 BUILD for a
 real reliability defect, not a nitpick: `EventRepository.insert_event`
@@ -117,6 +110,20 @@ skipped -- `lint-imports --config .importlinter`) plus PLAN.md's (fixed) M7
 demo command were re-run after the fix; see this session's final report for
 the full pasted output and exit codes.
 
+**Outcome:** A second, independent L4 VERIFY session re-ran all four gates
+plus PLAN.md's exact (fixed) M7 demo command against the fixed code,
+reproduced the concurrency numbers itself rather than trusting this
+session's report (~2.03s per request, ~2.09s total wall time for three
+genuinely concurrent webhook requests -- not stacked/serialized),
+independently proved the event loop never stalls even with its executor
+saturated (40 event emissions completed in 3 FIFO batches against a
+deliberately tiny thread pool while a concurrent heartbeat coroutine ticked
+61/61 times with no gaps), and **APPROVEd** M7 with no blocking defects.
+The full suite passed with 160 tests. M7 is now DONE; see
+`.genesis/PLAN.md`'s Progress entry and
+`.genesis/explanations/2026-08-30-explanation-m7.html` for the full account
+of the REJECT-then-fix cycle.
+
 ## M5 history (kept for context; superseded by the two lines above)
 - last_gate (superseded): L4 VERIFY REJECTED M5 (separate session, real safety bug) -- this L2 DEBUG session applied the approved fix; a second, independent L4 VERIFY session then re-ran everything against the fix and APPROVEd M5.
 - last_action: L4 VERIFY REJECTED M5's original L1 BUILD for a real safety bug: `backend.agents.contracts.dedupe_findings` keyed on `(file_path, line_start)` and kept the highest-CONFIDENCE finding with severity playing no role at all, while `backend.hitl.queue.has_critical_finding` only ever inspects the POST-dedupe list. Verified repro: a SECURITY/CRITICAL finding (confidence 0.751) and a DOCS/INFO finding (confidence 0.752) colliding on the same file+line caused dedupe to keep the INFO finding and drop the CRITICAL one; `route_review` then saw no CRITICAL finding and returned POSTED, auto-posting a review whose real CRITICAL finding had been silently discarded -- violating the project's invariant that a CRITICAL finding always requires human review. This L2 DEBUG session applied the user-approved fix: `_is_better` in `backend/agents/contracts.py` now orders SEVERITY FIRST (via a new explicit `SEVERITY_RANK` map added to `backend/models/enums.py` -- deliberately not relying on `Severity`'s enum declaration order or member name, per the user's instruction), and only falls back to confidence, then the pre-existing `AGENT_PRECEDENCE`/category/rationale tie-breaks, within the same severity. `backend.models.findings.Finding.__lt__` was also refactored to use the same `SEVERITY_RANK` map instead of its own locally-duplicated severity-order dict, removing a second place the ranking could have drifted from the fix. Every docstring/comment claiming dedupe "keeps highest confidence" was rewritten (module docstring and `_is_better`'s docstring in `backend/agents/contracts.py`, `aggregate_node`'s docstring in `backend/orchestrator/nodes.py`, `tests/unit/test_aggregator.py`'s module docstring, `.genesis/DONE.html` section 2's M5 gate, `.genesis/PLAN.md`'s M5 outcome/success-criteria) to state the real severity-first rule. Added a true end-to-end regression test (`tests/unit/test_aggregator.py::TestDedupeAndRoutingInteraction::test_end_to_end_critical_survives_dedupe_and_forces_hitl`) that builds the exact reported CRITICAL/0.751-vs-INFO/0.752 collision, runs it through `dedupe_findings` then `route_review`, and asserts `QUEUED_FOR_HITL` with the CRITICAL finding surviving dedupe -- proven to FAIL against the old confidence-only ordering (temporarily reverted, ran, captured the failure, restored the fix, reran, captured the pass; both outputs pasted in this session's final report) so the test is proven to actually catch the bug it exists to catch, not just pass vacuously. Also closed the test-design gap that let the original bug through: added `TestSeverityBeforeConfidenceDedupe` (parametrized over every severity pair where the higher-severity finding has lower confidence, plus a permutation-based property test asserting a CRITICAL finding is never dropped across every ordering of a 5-finding collision) and `TestDedupeAndRoutingInteraction` (dedupe's actual output piped into `route_review`, both orderings, plus a contrast case confirming non-CRITICAL severity wins still follow the ordinary confidence-threshold rule rather than an accidental blanket "severity wins therefore always HITL"). Did NOT change: `route_review`'s empty-findings-list behavior (still correctly routes to HITL at confidence 0.000, per the user's explicit decision that this is a deliberate conservative choice, not a defect -- a clarifying comment was considered but `route_review`'s existing threshold-comparison logic already handles it via the ordinary `overall_confidence < threshold` path with no special-casing, so no code change was needed there); and did NOT widen the dedup key to include `line_end` (also an explicit user decision -- see Deferred, below). All four gates plus PLAN.md's exact M5 demo command were re-run after the fix; see this session's full report for pasted output and exit codes.
@@ -124,6 +131,63 @@ the full pasted output and exit codes.
 A second, independent L4 VERIFY session then re-ran all four gates plus PLAN.md's M5 demo command against the fixed code, re-verified the CRITICAL-survives-dedupe guarantee through the real compiled graph (not just the unit-level regression test), and APPROVEd M5. M5 is now DONE; see `.genesis/PLAN.md`'s Progress entry and `.genesis/explanations/2026-08-30-explanation-m5.html` for the full account of the REJECT-then-fix cycle.
 
 ## Deferred
+
+New from M7 (L4 VERIFY, both rounds), non-blocking except where noted:
+- **HIGH PRIORITY, NEWLY FOUND -- the M6-scope Redis enqueue call has the
+  exact same defect class M7 just fixed:** `backend/webhook_receiver/
+  router.py`'s `queue.enqueue(event)` is still a plain synchronous call
+  made directly from inside `async def receive_webhook`; `RedisJobQueue.
+  enqueue` (`backend/job_queue/redis_arq.py`) blocks the calling thread via
+  `asyncio.run_coroutine_threadsafe(...).result(timeout=...)`. This is the
+  same class of bug M7's L2 DEBUG loop just fixed for the events path (a
+  synchronous, blocking call made directly from a coroutine on uvicorn's
+  single event-loop thread) -- except this instance lives in M6-scope code
+  that already passed its own independent L4 VERIFY. A slow-but-not-fully-
+  down Redis (elevated latency, not unreachable) would serialise every
+  concurrent webhook request the same way the pre-fix events write did.
+  Not fixed in M7 -- `backend/job_queue/redis_arq.py` and the router's
+  enqueue call site are outside M7's freeze boundary. Needs its own
+  dedicated fix loop (most likely `asyncio.to_thread`, mirroring M7's own
+  `emit_decision_async` pattern).
+- The events circuit breaker opening means events can be dropped for up to
+  `reset_timeout_seconds` (30s default) under a sustained events-store
+  outage. Every drop is logged, and this is a judged, deliberate tradeoff
+  (a bounded gap in the audit trail vs. an unbounded request stall) -- but
+  an audit log that can silently drop entries has an integrity concern
+  distinct from plain availability. Wants a `/health` surface so an open
+  events breaker is visible operationally, not just discoverable by
+  grepping logs after the fact.
+- `statement_timeout=2000ms` (`EventRepository`'s default) is judged
+  reasonable for the single-row inserts this milestone performs, but is a
+  tunable worth revisiting once real load/latency data exists rather than
+  the current best-guess default.
+
+Resolved (raised by M7's first L4 VERIFY REJECT, fixed in the same L2 DEBUG
+pass, now closed):
+- ~~TRUNCATE bypassed the append-only trigger~~ -- fixed: PostgreSQL never
+  fires a row-level (`FOR EACH ROW`) trigger for TRUNCATE, so the
+  pre-existing `agent_events_no_update`/`agent_events_no_delete` pair did
+  nothing to stop a superuser `TRUNCATE agent_events;` from silently
+  wiping every row. `backend/database/migrations/0001_agent_events.sql`
+  gained a statement-level (`FOR EACH STATEMENT`) `agent_events_no_truncate`
+  `BEFORE TRUNCATE` trigger; proven by a real `TRUNCATE agent_events;` as
+  the "postgres" superuser now raising `agent_events is append-only:
+  TRUNCATE is not permitted`, row count unchanged.
+- ~~Over-broad exception swallow in the events failure policy~~ -- fixed:
+  `backend/observability/events.py`'s `_emit` used to catch bare
+  `(psycopg.Error, OSError)`, which also silently swallowed
+  `psycopg.errors.IntegrityError` (e.g. a CHECK-constraint violation, our
+  own bug, not an availability failure). `IntegrityError` is now re-raised
+  before the broad except runs; proven by a test suite that fails against
+  the old broad except and passes against the fix.
+- ~~The M7 demo command didn't work verbatim in a clean shell~~ -- fixed:
+  `.env` is read by pydantic-settings but never exported to the shell, so
+  a bare `psql "$DATABASE_URL"` after only `python scripts/
+  run_fixture_review.py` saw an empty string. `.genesis/PLAN.md`'s M7 demo
+  command now inlines `set -a && source .env && set +a` before the `psql`
+  step, and its `ORDER BY ts` was corrected to `ORDER BY ts ASC, id ASC`
+  to match `EventRepository.fetch_events_for_review`'s own tiebreak; both
+  fixes verified in a clean shell via `env -i`.
 
 New from M7 (L1 BUILD), non-blocking:
 - Four files outside M7's literal freeze-boundary list were touched:
@@ -228,7 +292,7 @@ Resolved (previously deferred from M2, now closed):
 - ~~The demo command needs an activated venv and a hand-created `.env` and neither is documented (no README exists)~~ -- fixed: README.md now documents venv creation/activation, `pip install -e ".[dev]"`, and copying `.env.example` to `.env`
 - ~~`InMemoryJobQueue` and its `_seen_delivery_ids` grow unboundedly with no eviction~~ -- fixed: M3's `RedisJobQueue` stores the idempotency key with an expiring TTL (`Settings.idempotency_ttl_seconds`, default one week) instead of an ever-growing in-process set; proven by a test that reads the TTL back from Redis directly.
 
-## M7 Build Summary (L1 BUILD complete; L4 VERIFY not yet run)
+## M7 Build Summary (L4 VERIFY APPROVED, after an earlier REJECT + L2 DEBUG fix)
 
 ### G0 Pre-Flight Verdict
 UNBUILT. `backend/observability/__init__.py` and `backend/database/__init__.py`
@@ -344,6 +408,24 @@ than trusting this session's report, check DONE.html's "Every security and
 reliability module has a live call site in the request path, provable by
 grep" gate against `backend/observability`'s two wired call sites, and rule
 on the freeze-boundary exceptions above before marking M7 DONE.
+
+**Outcome:** a first independent L4 VERIFY session did exactly this and
+REJECTED the build -- not for the append-only/wiring gates quoted above
+(both held up), but for a real reliability defect squarely inside
+DONE.html section 2's "every outbound call has a timeout / circuit-breaker"
+gate: `EventRepository.insert_event` was a synchronous, un-offloaded call
+made directly from inside `async def receive_webhook`, and a stalled
+events write measurably serialised concurrent webhook requests (~4.4s each
+under a locked events table, reproduced against a live uvicorn, not just
+theorized). An L2 DEBUG session applied the approved fix described at the
+top of this checkpoint (offload via `asyncio.to_thread`, a real
+`statement_timeout`, and M6's own `CircuitBreaker` class reused for the
+events path), plus closed the TRUNCATE gap and narrowed the exception
+swallow the same review raised. A second, independent L4 VERIFY session
+re-ran everything against the fix, reproduced the concurrency numbers
+itself (~2.03s/request, ~2.09s total wall time for three genuinely
+concurrent requests), independently proved the event loop stays
+responsive even with its executor saturated, and APPROVEd M7. M7 is DONE.
 
 ## M6 Build Summary (L4 VERIFY APPROVED)
 
