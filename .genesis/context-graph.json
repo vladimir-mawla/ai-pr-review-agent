@@ -1,7 +1,7 @@
 {
   "$comment": "nodes=modules, edges=[cause,effect] where cause is imported-by effect. ADD invariants by hand.",
   "project": ".",
-  "generated": "2026-08-30T07:27:54.374Z",
+  "generated": "2026-08-30T08:44:11.292Z",
   "nodes": [
     "__future__",
     "__init__",
@@ -12,6 +12,7 @@
     "asyncio",
     "base",
     "base_agent",
+    "circuit_breaker",
     "collections",
     "conftest",
     "connections",
@@ -26,12 +27,14 @@
     "fastapi",
     "findings",
     "functools",
+    "futures",
     "graph",
     "hashlib",
     "hmac",
     "httpx",
     "in_memory",
     "interface",
+    "itertools",
     "json",
     "langgraph_engine",
     "logging",
@@ -47,10 +50,12 @@
     "pydantic_settings",
     "pytest",
     "queue",
+    "random",
     "re",
     "redis",
     "redis_arq",
     "responses",
+    "retry",
     "review",
     "router",
     "runnables",
@@ -65,10 +70,12 @@
     "test_models",
     "test_orchestrator_fanout",
     "test_queue_roundtrip",
+    "test_reliability",
     "test_webhook_validator",
     "testclient",
     "threading",
     "time",
+    "timeout",
     "types",
     "typing",
     "uuid",
@@ -85,6 +92,10 @@
     [
       "__future__",
       "base_agent"
+    ],
+    [
+      "__future__",
+      "circuit_breaker"
     ],
     [
       "__future__",
@@ -128,6 +139,10 @@
     ],
     [
       "__future__",
+      "retry"
+    ],
+    [
+      "__future__",
       "router"
     ],
     [
@@ -160,7 +175,15 @@
     ],
     [
       "__future__",
+      "test_reliability"
+    ],
+    [
+      "__future__",
       "test_webhook_validator"
+    ],
+    [
+      "__future__",
+      "timeout"
     ],
     [
       "__future__",
@@ -176,11 +199,31 @@
     ],
     [
       "abc",
+      "circuit_breaker"
+    ],
+    [
+      "abc",
+      "redis_arq"
+    ],
+    [
+      "abc",
+      "retry"
+    ],
+    [
+      "abc",
       "test_queue_roundtrip"
     ],
     [
       "abc",
+      "test_reliability"
+    ],
+    [
+      "abc",
       "test_webhook_validator"
+    ],
+    [
+      "abc",
+      "timeout"
     ],
     [
       "argparse",
@@ -209,6 +252,18 @@
     [
       "base",
       "graph"
+    ],
+    [
+      "circuit_breaker",
+      "__init__"
+    ],
+    [
+      "circuit_breaker",
+      "redis_arq"
+    ],
+    [
+      "circuit_breaker",
+      "test_reliability"
     ],
     [
       "collections",
@@ -244,7 +299,19 @@
     ],
     [
       "dataclasses",
+      "circuit_breaker"
+    ],
+    [
+      "dataclasses",
       "interface"
+    ],
+    [
+      "dataclasses",
+      "retry"
+    ],
+    [
+      "dataclasses",
+      "timeout"
     ],
     [
       "datetime",
@@ -312,6 +379,10 @@
     ],
     [
       "enum",
+      "circuit_breaker"
+    ],
+    [
+      "enum",
       "enums"
     ],
     [
@@ -320,11 +391,19 @@
     ],
     [
       "enums",
+      "contracts"
+    ],
+    [
+      "enums",
       "findings"
     ],
     [
       "enums",
       "review"
+    ],
+    [
+      "enums",
+      "test_aggregator"
     ],
     [
       "fastapi",
@@ -347,12 +426,20 @@
       "settings"
     ],
     [
+      "futures",
+      "timeout"
+    ],
+    [
       "graph",
       "langgraph_engine"
     ],
     [
       "hashlib",
       "send_signed_webhook"
+    ],
+    [
+      "hashlib",
+      "test_reliability"
     ],
     [
       "hashlib",
@@ -365,6 +452,10 @@
     [
       "hmac",
       "send_signed_webhook"
+    ],
+    [
+      "hmac",
+      "test_reliability"
     ],
     [
       "hmac",
@@ -411,12 +502,24 @@
       "test_queue_roundtrip"
     ],
     [
+      "interface",
+      "test_reliability"
+    ],
+    [
+      "itertools",
+      "test_aggregator"
+    ],
+    [
       "json",
       "router"
     ],
     [
       "json",
       "test_models"
+    ],
+    [
+      "json",
+      "test_reliability"
     ],
     [
       "json",
@@ -429,6 +532,10 @@
     [
       "logging",
       "arq_worker"
+    ],
+    [
+      "main",
+      "test_reliability"
     ],
     [
       "main",
@@ -489,6 +596,10 @@
     [
       "models",
       "test_queue_roundtrip"
+    ],
+    [
+      "models",
+      "test_reliability"
     ],
     [
       "nodes",
@@ -576,6 +687,10 @@
     ],
     [
       "pytest",
+      "test_reliability"
+    ],
+    [
+      "pytest",
       "test_webhook_validator"
     ],
     [
@@ -584,7 +699,15 @@
     ],
     [
       "queue",
+      "test_aggregator"
+    ],
+    [
+      "queue",
       "test_hitl_gate"
+    ],
+    [
+      "random",
+      "retry"
     ],
     [
       "redis_arq",
@@ -595,6 +718,10 @@
       "test_queue_roundtrip"
     ],
     [
+      "redis_arq",
+      "test_reliability"
+    ],
+    [
       "redis",
       "redis_arq"
     ],
@@ -603,8 +730,24 @@
       "test_queue_roundtrip"
     ],
     [
+      "redis",
+      "test_reliability"
+    ],
+    [
       "responses",
       "router"
+    ],
+    [
+      "retry",
+      "__init__"
+    ],
+    [
+      "retry",
+      "redis_arq"
+    ],
+    [
+      "retry",
+      "test_reliability"
     ],
     [
       "re",
@@ -652,6 +795,10 @@
     ],
     [
       "settings",
+      "test_reliability"
+    ],
+    [
+      "settings",
       "test_webhook_validator"
     ],
     [
@@ -684,7 +831,15 @@
     ],
     [
       "testclient",
+      "test_reliability"
+    ],
+    [
+      "testclient",
       "test_webhook_validator"
+    ],
+    [
+      "threading",
+      "circuit_breaker"
     ],
     [
       "threading",
@@ -695,12 +850,44 @@
       "redis_arq"
     ],
     [
+      "threading",
+      "test_reliability"
+    ],
+    [
+      "threading",
+      "timeout"
+    ],
+    [
+      "time",
+      "circuit_breaker"
+    ],
+    [
       "time",
       "nodes"
     ],
     [
+      "timeout",
+      "__init__"
+    ],
+    [
+      "timeout",
+      "redis_arq"
+    ],
+    [
+      "timeout",
+      "test_reliability"
+    ],
+    [
+      "time",
+      "retry"
+    ],
+    [
       "time",
       "test_orchestrator_fanout"
+    ],
+    [
+      "time",
+      "test_reliability"
     ],
     [
       "types",
@@ -709,6 +896,10 @@
     [
       "typing",
       "arq_worker"
+    ],
+    [
+      "typing",
+      "circuit_breaker"
     ],
     [
       "typing",
@@ -757,6 +948,10 @@
     [
       "uuid",
       "test_queue_roundtrip"
+    ],
+    [
+      "uuid",
+      "test_reliability"
     ],
     [
       "validator",
