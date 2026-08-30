@@ -2,10 +2,10 @@
 - active_loop: none (between milestones)
 - target: M3
 - iteration: 0
-- last_gate: L4 VERIFY APPROVE on M2
-- last_action: Cleared two of M2's deferred findings ahead of M3. Added README.md (setup, architecture, honest M1/M2-done / rest-not-built status) and LICENSE (MIT) -- the repo is public and previously had neither. Hardened `_is_hex` in backend/webhook_receiver/validator.py to a strict `[0-9a-fA-F]+` charset regex, replacing `int(value, 16)` (which silently accepted underscore digit separators and a leading sign), and added a regression test proving such input now raises MalformedSignatureError (400) rather than InvalidSignatureError (401). All four gates (ruff, mypy --strict, pytest, lint-imports) re-run and green; reviewed and pushed in a separate Sonnet session.
-- next_action: run G0 existence pre-flight on M3
-- model: claude-haiku-4-5
+- last_gate: L1 BUILD complete on M3 (all four gates + demo command green in-session; L4 VERIFY not yet run)
+- last_action: Built M3 -- RedisJobQueue (backend/job_queue/redis_arq.py) swapped in behind the unchanged JobQueue Protocol from M2, backed by an atomic Redis `SET NX EX` idempotency key with a configurable TTL (default 7 days, comfortably outliving GitHub's ~24h redelivery window) that fixes the M2-deferred unbounded-growth finding. Added the ARQ worker (backend/job_queue/arq_worker.py, a minimal stub handler), docker-compose.yml (redis:7-alpine, published on host port 6380 -- 6379 was occupied by an unrelated project's own container on this machine), and settings-driven backend selection (JOB_QUEUE_BACKEND) in backend/api/main.py. Added tests/integration/test_queue_roundtrip.py (9 tests: enqueue-then-consume via a real ARQ Worker in burst mode, idempotency, an actual TTL readback from Redis, and a JobQueue contract test parameterized over both implementations) -- all passed against a real dockerized Redis in-session. All four gates (ruff, mypy --strict backend/, pytest, lint-imports) green; PLAN.md's M3 demo command run verbatim, combined exit 0. Context graph refreshed (53 nodes/108 edges); graphizer wiped the 4 hand-written invariants again (as it did at M2) and they were restored from git history.
+- next_action: L4 VERIFY on M3 (separate session)
+- model: claude-sonnet-5
 - tokens_used: 0
 - tokens_budget: 50000
 - skills_loaded: []
@@ -16,14 +16,86 @@ Still open from M1:
 - `Review.overall_confidence` has no cross-field consistency check (not cross-checked against the mean of `findings[].confidence`)
 - `Finding`, `Review`, `WebhookEvent` are not frozen and do not set `validate_assignment`, so instances are mutable post-construction
 
-New from M2 (all non-blocking, raised by L4 VERIFY), still open:
-- `InMemoryJobQueue` and its `_seen_delivery_ids` grow unboundedly with no eviction -- must be addressed in M3's real Redis/ARQ queue
+Still open from M2:
 - No max request body size is configured, so a large POST is fully buffered and hashed -- address before M11 internet exposure
 - `backend/core/settings.py` placement is an accepted ADR-002 taxonomy nit, not a layering violation
+
+New from M3, still open:
+- `RedisJobQueue.enqueue()` bridges into ARQ's async client via a dedicated background thread + `asyncio.run_coroutine_threadsafe`, which works but means every enqueue call blocks the calling (request) thread on a cross-thread round trip; acceptable at M3's scale, worth revisiting if webhook volume ever makes that latency matter.
+- The docker-compose Redis is published on host port 6380, not Redis's usual 6379, because 6379 was already bound by an unrelated project's container on the build machine. `REDIS_URL`/`docker-compose.yml` are internally consistent with each other, but anyone reusing 6379 elsewhere should update both.
 
 Resolved (previously deferred from M2, now closed):
 - ~~`_is_hex` uses `int(value, 16)` which accepts underscore separators and a leading sign~~ -- fixed: replaced with a strict `[0-9a-fA-F]+` charset regex; regression test added (`test_underscore_in_digest_is_rejected_as_malformed_not_invalid`)
 - ~~The demo command needs an activated venv and a hand-created `.env` and neither is documented (no README exists)~~ -- fixed: README.md now documents venv creation/activation, `pip install -e ".[dev]"`, and copying `.env.example` to `.env`
+- ~~`InMemoryJobQueue` and its `_seen_delivery_ids` grow unboundedly with no eviction~~ -- fixed: M3's `RedisJobQueue` stores the idempotency key with an expiring TTL (`Settings.idempotency_ttl_seconds`, default one week) instead of an ever-growing in-process set; proven by a test that reads the TTL back from Redis directly.
+
+## M3 Build Summary (L1 BUILD complete, L4 VERIFY pending)
+
+### Outcome Achieved
+- A validated webhook enqueues a job to Redis via ARQ
+  (`backend/job_queue/redis_arq.py`), and a separate worker process
+  (`arq backend.job_queue.arq_worker.WorkerSettings`) dequeues and records
+  it -- the async hand-off M3 exists to prove.
+- `backend/webhook_receiver/router.py` required zero changes: both
+  `InMemoryJobQueue` and `RedisJobQueue` satisfy the same `JobQueue`
+  Protocol from M2, confirmed by a parameterized contract test.
+- Idempotency is an atomic `SET key value NX EX ttl` (not a
+  check-then-act `EXISTS`+`SET`), with a configurable TTL
+  (`IDEMPOTENCY_TTL_SECONDS`, default one week) that fixes the
+  M2-deferred unbounded-growth finding.
+- `docker-compose.yml` runs Redis on host port 6380 (not 6379 -- occupied
+  by an unrelated project's container on this machine).
+
+### Gate Results (this session, full output in the L1 BUILD transcript)
+- `ruff check .`: All checks passed, exit 0
+- `mypy --strict backend/`: Success: no issues found in 33 source files, exit 0
+- `pytest -v`: 57 passed (48 carried over from M1/M2, including the
+  post-M2 `_is_hex` regression test, + 9 new integration tests), exit 0.
+  All 9 new tests ran for real against a real dockerized Redis, not
+  skipped.
+- `lint-imports --config .importlinter`: 2 contracts kept, 0 broken, exit 0
+- PLAN.md's M3 demo command run verbatim (`docker compose up -d redis &&
+  arq backend.job_queue.arq_worker.WorkerSettings & pytest
+  tests/integration/test_queue_roundtrip.py -v`): combined exit 0 (all 9
+  tests passed); separately confirmed via `ps aux` that the backgrounded
+  ARQ worker process actually started and held live connections to Redis.
+- Cleaned up after: worker process killed, `docker compose down` run,
+  confirmed no stray listeners on :6380/:8000 and the unrelated
+  `ampliphi-redis-1`/`ampliphi-postgres-1` containers left untouched.
+
+### Files Written
+- `docker-compose.yml`: single `redis` service, pinned `redis:7-alpine`, healthcheck
+- `backend/job_queue/redis_arq.py`: `RedisJobQueue` (TTL'd idempotency + ARQ hand-off)
+- `backend/job_queue/arq_worker.py`: `WorkerSettings` + stub `process_webhook_event` handler
+- `backend/core/settings.py`: added `redis_url`, `idempotency_ttl_seconds`, `job_queue_backend`
+- `backend/api/main.py`: `_default_job_queue()` selects the implementation via settings
+- `.env.example`: documents `JOB_QUEUE_BACKEND`, `REDIS_URL`, `IDEMPOTENCY_TTL_SECONDS`
+- `pyproject.toml`: `redis`, `arq` runtime deps; pytest-asyncio auto mode + `redis` marker
+- `tests/integration/test_queue_roundtrip.py`: 9 tests against real Redis
+
+### Architecture notes for the verifier
+- `RedisJobQueue.enqueue()` stays synchronous (the Protocol's contract)
+  by bridging into ARQ's async client via a dedicated background thread +
+  `asyncio.run_coroutine_threadsafe`, rather than nesting an event loop
+  inside a request already running on uvicorn's. Confirm this is an
+  acceptable pattern, or that a future milestone should revisit it if
+  request-path latency becomes a concern.
+- Host port 6380 (not 6379) for Redis is a deliberate, documented
+  workaround for a real port conflict discovered on the build machine
+  (an unrelated project's own container), not an arbitrary choice --
+  see `docker-compose.yml`'s comment.
+
+### Deferred / not built at M3 (explicitly out of scope, do not treat as gaps)
+- No LangGraph orchestrator, no real agents (M4+)
+- The ARQ worker's job handler is a stub (logs + records a marker key);
+  no review workflow logic
+
+### Next Phase (M3 -> L4 VERIFY)
+A separate agent/model session should run L4 VERIFY against this build:
+re-run all four gates plus the demo command independently, check the DoD
+gates in DONE.html section 2 relevant to M3, and confirm the
+port-6380 deviation and the background-thread event-loop bridge in
+`RedisJobQueue` are both acceptable before marking M3 DONE.
 
 ## M2 Build Summary (L4 VERIFY APPROVED)
 
