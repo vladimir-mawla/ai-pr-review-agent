@@ -41,6 +41,18 @@ tests, not for any production purpose:
      that the node itself catches and isolates, so the other three
      specialists' findings still reach the final state instead of the whole
      run being lost to one agent's bug.
+
+M7 addition: every specialist node's stub work now runs inside
+``backend.observability.traced_span``, which emits a ``span.start`` event
+before ``_run_stub`` begins and a ``span.end`` event (with measured
+``latency_ms`` and an "ok"/"error" outcome) after it finishes or raises —
+this is the events spine's live call site for per-specialist tracing.
+``aggregate_node`` additionally emits one ``decision`` event recording the
+final ``status``/``overall_confidence`` — the events spine's live call site
+for the aggregator's routing decision. Both freeze-boundary exceptions
+(this file is not in M7's literal freeze-boundary list) are disclosed in
+this milestone's build report, following M5/M6's own precedent for
+explicitly-instructed out-of-boundary changes.
 """
 
 from __future__ import annotations
@@ -58,6 +70,7 @@ from backend.agents.contracts import dedupe_findings
 from backend.core.settings import get_settings
 from backend.hitl.queue import route_review
 from backend.models import AgentType, Finding, Review, Severity, compute_overall_confidence
+from backend.observability import emit_decision, get_event_repository, traced_span
 from backend.orchestrator.state import GraphState
 
 # Simulated per-node work duration. Large enough that overlapping windows are
@@ -239,46 +252,50 @@ _CANNED_FINDINGS: dict[AgentType, Finding] = {
 
 
 def security_node(state: GraphState, config: RunnableConfig) -> dict[str, Any]:
-    """Specialist stub: security review. See module docstring for M4 scope."""
-    try:
-        finding = _run_stub("security", AgentType.SECURITY, config)
-    except SimulatedNodeCrashError:
-        raise
-    except AgentExecutionError as exc:
-        return {"findings": [], "node_errors": {"security": str(exc)}}
+    """Specialist stub: security review. See module docstring for M4 scope + M7 tracing."""
+    with traced_span(get_event_repository(), state["review_id"], "security"):
+        try:
+            finding = _run_stub("security", AgentType.SECURITY, config)
+        except SimulatedNodeCrashError:
+            raise
+        except AgentExecutionError as exc:
+            return {"findings": [], "node_errors": {"security": str(exc)}}
     return {"findings": [finding], "node_errors": {}}
 
 
 def quality_node(state: GraphState, config: RunnableConfig) -> dict[str, Any]:
-    """Specialist stub: code quality review. See module docstring for M4 scope."""
-    try:
-        finding = _run_stub("quality", AgentType.QUALITY, config)
-    except SimulatedNodeCrashError:
-        raise
-    except AgentExecutionError as exc:
-        return {"findings": [], "node_errors": {"quality": str(exc)}}
+    """Specialist stub: code quality review. See module docstring for M4 scope + M7 tracing."""
+    with traced_span(get_event_repository(), state["review_id"], "quality"):
+        try:
+            finding = _run_stub("quality", AgentType.QUALITY, config)
+        except SimulatedNodeCrashError:
+            raise
+        except AgentExecutionError as exc:
+            return {"findings": [], "node_errors": {"quality": str(exc)}}
     return {"findings": [finding], "node_errors": {}}
 
 
 def tests_node(state: GraphState, config: RunnableConfig) -> dict[str, Any]:
-    """Specialist stub: test-coverage review. See module docstring for M4 scope."""
-    try:
-        finding = _run_stub("tests", AgentType.TESTS, config)
-    except SimulatedNodeCrashError:
-        raise
-    except AgentExecutionError as exc:
-        return {"findings": [], "node_errors": {"tests": str(exc)}}
+    """Specialist stub: test-coverage review. See module docstring for M4 scope + M7 tracing."""
+    with traced_span(get_event_repository(), state["review_id"], "tests"):
+        try:
+            finding = _run_stub("tests", AgentType.TESTS, config)
+        except SimulatedNodeCrashError:
+            raise
+        except AgentExecutionError as exc:
+            return {"findings": [], "node_errors": {"tests": str(exc)}}
     return {"findings": [finding], "node_errors": {}}
 
 
 def docs_node(state: GraphState, config: RunnableConfig) -> dict[str, Any]:
-    """Specialist stub: documentation review. See module docstring for M4 scope."""
-    try:
-        finding = _run_stub("docs", AgentType.DOCS, config)
-    except SimulatedNodeCrashError:
-        raise
-    except AgentExecutionError as exc:
-        return {"findings": [], "node_errors": {"docs": str(exc)}}
+    """Specialist stub: documentation review. See module docstring for M4 scope + M7 tracing."""
+    with traced_span(get_event_repository(), state["review_id"], "docs"):
+        try:
+            finding = _run_stub("docs", AgentType.DOCS, config)
+        except SimulatedNodeCrashError:
+            raise
+        except AgentExecutionError as exc:
+            return {"findings": [], "node_errors": {"docs": str(exc)}}
     return {"findings": [finding], "node_errors": {}}
 
 
@@ -333,5 +350,17 @@ def aggregate_node(state: GraphState, config: RunnableConfig) -> dict[str, Any]:
         # that as optional, so it must be passed explicitly here — the one
         # call site in backend/ that actually constructs a Review.
         error_message=None,
+    )
+    # M7: the events spine's live call site for the aggregator's routing
+    # decision -- see module docstring. A failure to write this event (the
+    # events Postgres unreachable) is caught and logged inside
+    # emit_decision itself; it never raises here and never prevents the
+    # Review above from being returned.
+    emit_decision(
+        get_event_repository(),
+        state["review_id"],
+        agent="aggregator",
+        outcome=status.value,
+        confidence=overall_confidence,
     )
     return {"review": review, "routing_reason": reason}
