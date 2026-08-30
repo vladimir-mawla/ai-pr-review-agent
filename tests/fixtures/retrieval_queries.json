@@ -1,0 +1,109 @@
+{
+  "_comment": [
+    "M9's literal PLAN.md success criterion: 'recall@5 on a 10-query fixture",
+    "set is 100% (every known-relevant chunk is retrieved)'. This is that",
+    "named, version-controlled fixture set -- run by",
+    "tests/integration/test_hybrid_retrieval.py::TestRecallOnRealSeededCorpus",
+    "against the REAL corpus `python scripts/seed_code_chunks.py --repo .`",
+    "produces from this repo's own source (373 chunks as of this writing),",
+    "not a disposable hand-built corpus.",
+    "",
+    "Each entry's target is identified by (expected_path, expected_symbol),",
+    "not a row id -- ids are reassigned every time the corpus is",
+    "TRUNCATE-and-reloaded, but a top-level def/class's own declaration line",
+    "always appears verbatim at the start of its own AST-chunked segment",
+    "(see scripts/seed_code_chunks.py's chunking strategy), so path + symbol",
+    "name is a stable identity across re-seeds.",
+    "",
+    "The 10 queries were chosen for a genuine MIX of expected mechanism,",
+    "reasoned from the retriever's and DeterministicFixtureEmbedder's actual",
+    "(fully deterministic, inspectable) mechanics -- BEFORE ever being run",
+    "against the live seeded corpus -- not selected after the fact because",
+    "they were already known to pass. See each entry's 'category' and",
+    "'rationale'. The actual, honest recall result (which may differ from",
+    "the a-priori expectation encoded in 'category') is reported in the",
+    "session record / final report, not silently reconciled here."
+  ],
+  "queries": [
+    {
+      "id": 1,
+      "query": "reciprocal_rank_fusion",
+      "expected_path": "backend/memory/context_retriever.py",
+      "expected_symbol": "reciprocal_rank_fusion",
+      "category": "exact-identifier",
+      "rationale": "Literal function name, unique token in the corpus. Also used directly as PLAN.md's clause-1 top-3 assertion (a known function-name query must land in the top-3 fused results)."
+    },
+    {
+      "id": 2,
+      "query": "verify a webhook signature",
+      "expected_path": "backend/webhook_receiver/validator.py",
+      "expected_symbol": "verify_signature",
+      "category": "natural-language",
+      "rationale": "Multi-word natural-language description, not the underscore-joined identifier. verify_signature's own docstring literally reads 'Verify a GitHub webhook HMAC-SHA256 signature over the raw request body' -- overlapping vocabulary for both FTS (stemmed lexemes) and the fixture embedder (literal lowercased tokens), expected ambiguous/both-favour."
+    },
+    {
+      "id": 3,
+      "query": "CircuitBreaker",
+      "expected_path": "backend/reliability/circuit_breaker.py",
+      "expected_symbol": "CircuitBreaker",
+      "category": "exact-identifier",
+      "rationale": "Exact class name. CircuitBreaker is a long class (many methods) -- a real test of whether a rare identifier's single occurrence in a large chunk still dominates enough for vector cosine similarity to surface it, versus FTS's ts_rank_cd which does not dilute the same way."
+    },
+    {
+      "id": 4,
+      "query": "authenticate the request",
+      "expected_path": "backend/webhook_receiver/parser.py",
+      "expected_symbol": "parse_pull_request_payload",
+      "category": "vector-synonym-canonicalization",
+      "rationale": "Deliberately the riskiest query in the set. parse_pull_request_payload's body contains the literal token 'login' exactly once (repository[\"owner\"][\"login\"]), which DeterministicFixtureEmbedder canonicalizes to 'authenticate' -- the same synonym mechanism TestVectorSearchFindsWhatKeywordMisses demonstrates on a small hand-built corpus. Against the REAL corpus this is a genuine stress test, not a guaranteed win: backend/memory/context_retriever.py's and backend/memory/embedder.py's own module docstrings discuss 'login'/'authenticate'/'signin'/'auth' repeatedly as a worked design example, and are strong decoys that could plausibly outrank this chunk's single incidental 'login' token. Included specifically to see whether the milestone's own synonym design survives real corpus noise, not cherry-picked to pass."
+    },
+    {
+      "id": 5,
+      "query": "dedupe_findings",
+      "expected_path": "backend/agents/contracts.py",
+      "expected_symbol": "dedupe_findings",
+      "category": "exact-identifier",
+      "rationale": "Literal function name, unique token in the corpus."
+    },
+    {
+      "id": 6,
+      "query": "daily spending cap for LLM calls",
+      "expected_path": "backend/economics/budget.py",
+      "expected_symbol": "BudgetGuard",
+      "category": "natural-language",
+      "rationale": "Natural-language description overlapping BudgetGuard's own docstring vocabulary ('spend', 'cap', 'llm call'). Ambiguous by design: BudgetExceededError is a separate top-level chunk in the same file that also shares this vocabulary, so this also tests whether hybrid_search can distinguish the class actually implementing the behaviour from a sibling exception class describing it."
+    },
+    {
+      "id": 7,
+      "query": "route_review",
+      "expected_path": "backend/hitl/queue.py",
+      "expected_symbol": "route_review",
+      "category": "exact-identifier",
+      "rationale": "Literal function name, unique token in the corpus."
+    },
+    {
+      "id": 8,
+      "query": "computing the dollar cost of tokens",
+      "expected_path": "backend/economics/pricing.py",
+      "expected_symbol": "compute_cost_usd",
+      "category": "natural-language",
+      "rationale": "Natural-language paraphrase (not the underscore identifier) of compute_cost_usd's own docstring ('Compute one call's USD cost from its token counts'). Tests whether shared vocabulary ('cost', 'token', 'compute'/'computing') carries the match without the literal identifier ever appearing in the query."
+    },
+    {
+      "id": 9,
+      "query": "apply_migrations",
+      "expected_path": "backend/memory/tiger_client.py",
+      "expected_symbol": "apply_migrations",
+      "category": "exact-identifier-ambiguous",
+      "rationale": "Deliberately ambiguous at the repo level: backend/database/postgres.py ALSO defines a top-level function named apply_migrations (M7's Postgres-schema equivalent). Both are genuinely relevant to the literal query 'apply_migrations'. This entry names backend/memory/tiger_client.py's copy (M9's own migration entrypoint, called by scripts/seed_code_chunks.py) as the expected target; recall only requires THIS specific chunk to appear in the top 5, not that the other one is excluded."
+    },
+    {
+      "id": 10,
+      "query": "parse_pull_request_payload",
+      "expected_path": "backend/webhook_receiver/parser.py",
+      "expected_symbol": "parse_pull_request_payload",
+      "category": "exact-identifier",
+      "rationale": "The exact-identifier counterpart to query 4 (same target chunk, natural-language query). Included as a controlled contrast: query 4 tests whether a natural-language + synonym-canonicalization route finds this chunk, this one tests the much easier literal-identifier route to the SAME chunk."
+    }
+  ]
+}
