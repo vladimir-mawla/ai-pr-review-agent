@@ -22,6 +22,15 @@ dependencies = [
     "langchain-core>=1.6,<2",
     "psycopg[binary]>=3.1,<4",
     "anthropic>=1.0,<2",
+    # M9: pgvector's Python adapter (registers the `vector` type with
+    # psycopg so a plain list[float] round-trips to/from Postgres's VECTOR
+    # column type) and the OpenAI SDK for the real text-embedding-3-large
+    # embedder. Neither is a runtime requirement for tests/the demo path --
+    # both unit and integration tests use DeterministicFixtureEmbedder, and
+    # `openai` is only actually invoked if OPENAI_API_KEY is set AND
+    # EMBEDDER_BACKEND=openai (see backend/memory/embedder.py).
+    "pgvector>=0.3,<1",
+    "openai>=1.0,<2",
 ]
 
 [project.optional-dependencies]

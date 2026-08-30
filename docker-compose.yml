@@ -4,7 +4,8 @@
 # (backend/job_queue/redis_arq.py) and the ARQ worker
 # (backend/job_queue/arq_worker.py). M7 adds a local Postgres instance
 # backing the events spine (backend/database/, backend/observability/).
-# pgvector is still M9's addition, out of scope here.
+# M9 adds a separate pgvector-enabled Postgres instance backing the
+# hybrid-retrieval memory layer (backend/memory/, migrations/scripts/).
 #
 # NOTE ON THE HOST PORT: Redis's default 6379 was occupied on the build
 # machine by an unrelated project's own long-running container
@@ -106,6 +107,83 @@ services:
       - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d pr_review_agent"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  pgvector:
+    # M9 scope: the hybrid-retrieval memory layer's storage (backend/memory/,
+    # migrations/scripts/dev-pgvector-init.sql). Backs the `code_chunks`
+    # table -- vector + full-text search over a small seeded set of code
+    # chunks, merged by reciprocal rank fusion (backend/memory/
+    # context_retriever.py). A SEPARATE Postgres instance from M7's
+    # `postgres` service above, on purpose: M7's instance is the events
+    # spine's append-only audit log (a completely different schema/
+    # workload/lifecycle), and this milestone's freeze boundary describes
+    # "the pgvector service" as its own addition to docker-compose.yml, not
+    # an extra extension bolted onto the M7 instance -- keeping them
+    # separate also means `docker compose down && up` on one never has to
+    # reason about the other's schema.
+    #
+    # NOTE ON THE HOST PORT: by the time this milestone runs, this
+    # project's OWN Redis (6380) and Postgres (5433) services (M3/M7,
+    # above) are themselves expected to be up via `docker compose up -d`,
+    # in addition to the pre-existing, do-not-touch `ampliphi-redis-1`
+    # (6379) and `ampliphi-postgres-1` (5432) containers from an unrelated
+    # project. That already accounts for 5432, 5433, 6379, and 6380.
+    # Verified with `lsof -i :5434` (and, for completeness, re-verified
+    # 5432/5433/6379/6380 too) before choosing 5434 -- see this milestone's
+    # build report for the exact command output. This project's pgvector
+    # is therefore published on host port 5434, mapped to the container's
+    # normal 5432. PGVECTOR_URL in .env.example and Settings' default both
+    # point at 5434 to match. If your machine's layout differs, change the
+    # "5434:5432" mapping and PGVECTOR_URL together -- nothing else depends
+    # on the specific host port.
+    #
+    # IMAGE CHOICE: `pgvector/pgvector:pg16` -- the official pgvector image
+    # built on top of `postgres:16`, matching this project's existing
+    # `postgres:16-alpine` major-version pin for the M7 service (that image
+    # has no pgvector-enabled Alpine variant, so this one is Debian-based
+    # rather than Alpine -- an accepted, minor footprint difference, not a
+    # design choice anyone need reverse). Pinned to the `pg16` major-version
+    # tag (not `latest`), the same granularity of pinning this project
+    # already uses for `redis:7-alpine`/`postgres:16-alpine` above.
+    #
+    # ANN INDEX CHOICE (see migrations/scripts/dev-pgvector-init.sql for the
+    # actual DDL): HNSW, not IVFFlat. DiskANN -- the spec's pinned ANN index
+    # for the eventual Tiger Cloud deployment (M12) -- is a Timescale/
+    # pgvectorscale-only extension, unavailable on plain pgvector; this
+    # milestone explicitly stays local/pre-Tiger-Cloud (see M12's own
+    # "Tiger Cloud Migration" scope), so it uses one of pgvector's own two
+    # ANN index types instead. HNSW over IVFFlat because IVFFlat's
+    # `lists` parameter must be chosen relative to the table's row count
+    # *at index-build time* (its accuracy degrades badly if the table is
+    # near-empty when the index is built, which is exactly this milestone's
+    # situation -- `docker compose up -d pgvector` always starts from an
+    # empty database, per the NOTE ON RECREATE below), whereas HNSW builds
+    # and refines its graph incrementally as rows are inserted and needs no
+    # such a-priori row-count tuning. The trade-off (documented, not
+    # hidden): HNSW index builds/inserts are more CPU/memory-expensive per
+    # row than IVFFlat's, which matters at large scale -- but this
+    # milestone's corpus is a few hundred locally-seeded code chunks, where
+    # that cost is negligible and HNSW's recall at small/cold-start scale is
+    # simply better.
+    #
+    # NOTE ON RECREATE: like the redis/postgres services above, this has no
+    # volume, on purpose -- `docker compose down && up` starts pgvector
+    # empty every time, so `code_chunks` (and the `vector` extension/
+    # indexes the migration creates) are recreated from scratch on every
+    # fresh boot. `scripts/seed_code_chunks.py` re-applies the migration
+    # and re-seeds on every run for exactly this reason (see that script).
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: pr_review_memory
+    ports:
+      - "5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pr_review_memory"]
       interval: 2s
       timeout: 2s
       retries: 15
