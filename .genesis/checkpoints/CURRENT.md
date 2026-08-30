@@ -52,10 +52,13 @@ Resolved (previously deferred from M2, now closed):
 ### Outcome Achieved
 - `backend.agents.contracts.dedupe_findings` merges the four specialists'
   findings, collapsing exact `(file_path, line_start)` duplicates and
-  keeping the highest-confidence one, with a fully deterministic tie-break
-  (confidence -> `AGENT_PRECEDENCE` -> category -> rationale) that does not
-  depend on the input list's order -- proven by running the same two
-  findings through in both orders and asserting identical output.
+  keeping the higher-severity finding, with confidence used only to break a
+  tie within the same severity (a CRITICAL finding must never lose a dedup
+  collision to a lower-severity one, regardless of confidence) -- and a
+  fully deterministic tie-break below that (confidence -> `AGENT_PRECEDENCE`
+  -> category -> rationale) that does not depend on the input list's order --
+  proven by running the same two findings through in both orders and
+  asserting identical output.
 - `backend.models.review.compute_overall_confidence` is the single formula
   for `Review.overall_confidence` (mean of surviving findings' confidence,
   ROUND_HALF_UP to 3 decimal places, 0.000 for an empty list), and `Review`
@@ -138,10 +141,12 @@ Resolved (previously deferred from M2, now closed):
 ### Next Phase (M5 -> L4 VERIFY)
 A separate agent/model session should run L4 VERIFY against this build:
 re-run all four gates plus the demo command independently, check DONE.html's
-M5-relevant gate ("Findings dedupe by file and line, keeping highest
-confidence; aggregator threshold in code matches the threshold in its
-user-facing message"), rule on the three freeze-boundary exceptions above,
-and confirm the M1 gap closure's chosen approach (a rejecting
+M5-relevant gate ("Findings dedupe by file and line, keeping the
+higher-severity finding first and using confidence only to break a tie
+within the same severity -- a CRITICAL finding must never lose to a
+lower-severity one; aggregator threshold in code matches the threshold in
+its user-facing message"), rule on the three freeze-boundary exceptions
+above, and confirm the M1 gap closure's chosen approach (a rejecting
 `model_validator`, not a silent recompute) is acceptable before marking M5
 DONE.
 
