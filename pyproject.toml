@@ -93,6 +93,12 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["T20"]
 "scripts/**" = ["T20"]
+# backend/agents/security_agent.py doubles as PLAN.md's M8 CLI demo entry
+# point (`python -m backend.agents.security_agent --diff ...`), which must
+# print its findings to stdout -- the same CLI-entry-point exception
+# scripts/** already gets, scoped to just this one file rather than all of
+# backend/agents/.
+"backend/agents/security_agent.py" = ["T20"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["backend"]

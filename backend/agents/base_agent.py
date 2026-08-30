@@ -56,12 +56,21 @@ class BaseAgent(ABC):
     agent_type: AgentType
 
     @abstractmethod
-    def analyze(self, diff: str) -> list[Finding]:
+    def analyze(self, diff: str, *, review_id: str | None = None) -> list[Finding]:
         """Analyze a unified diff and return this specialist's findings.
 
-        Real implementations (M8+) will call an LLM and validate its output
+        Real implementations (M8+) call an LLM and validate its output
         against the ``Finding`` schema before returning; this method's
         contract does not change based on how a concrete subclass produces
         its findings.
+
+        ``review_id`` (M8 addition -- keyword-only, defaulted, so this is a
+        backward-compatible extension of the contract M5 originally wrote):
+        an optional correlation id a real, LLM-backed implementation passes
+        through to its LLM client so a resulting ``llm.call`` event
+        (``backend.observability.emit_llm_call``) can be attributed to the
+        review it belongs to. ``None`` for a caller with no review to
+        correlate against (e.g. an ad hoc CLI invocation) -- implementations
+        must treat that as "don't emit a correlated event", not as an error.
         """
         raise NotImplementedError
