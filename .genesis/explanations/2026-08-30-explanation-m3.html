@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>M3 Explained — Queue + Worker (Dockerized Redis/ARQ)</title>
+<style>
+  :root {
+    --bg: #f7f7f5;
+    --bg-card: #ffffff;
+    --ink: #1b1f23;
+    --mut: #5b6472;
+    --line: #e2e4e8;
+    --accent: #2f6feb;
+    --accent-ink: #ffffff;
+    --ok: #1a7f37;
+    --warn: #9a6700;
+    --bad: #cf222e;
+    --code-bg: #f0f1f3;
+    --pill-bg: #eef2ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1117;
+      --bg-card: #161b22;
+      --ink: #e6edf3;
+      --mut: #9aa4b2;
+      --line: #2d333b;
+      --accent: #6ea8fe;
+      --accent-ink: #0d1117;
+      --ok: #3fb950;
+      --warn: #d29922;
+      --bad: #f85149;
+      --code-bg: #1c2128;
+      --pill-bg: #1c2440;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1117;
+    --bg-card: #161b22;
+    --ink: #e6edf3;
+    --mut: #9aa4b2;
+    --line: #2d333b;
+    --accent: #6ea8fe;
+    --accent-ink: #0d1117;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --bad: #f85149;
+    --code-bg: #1c2128;
+    --pill-bg: #1c2440;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    font-size: 16px;
+  }
+  .page {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 40px 20px 100px;
+  }
+  header.hero {
+    margin-bottom: 32px;
+  }
+  header.hero .kicker {
+    color: var(--accent);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-size: 12.5px;
+    margin: 0 0 10px;
+  }
+  h1 {
+    font-size: clamp(26px, 4vw, 36px);
+    margin: 0 0 12px;
+    line-height: 1.2;
+  }
+  .lede {
+    color: var(--mut);
+    font-size: 17px;
+    max-width: 70ch;
+  }
+  nav.toc {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin: 28px 0 40px;
+  }
+  nav.toc h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--mut);
+    margin: 0 0 10px;
+  }
+  nav.toc ol {
+    margin: 0;
+    padding-left: 20px;
+    columns: 2;
+    column-gap: 24px;
+  }
+  nav.toc li { margin: 4px 0; break-inside: avoid; }
+  nav.toc a { color: var(--ink); text-decoration: none; border-bottom: 1px dashed var(--line); }
+  nav.toc a:hover { border-bottom-color: var(--accent); color: var(--accent); }
+
+  section { margin: 56px 0; }
+  section > h2 {
+    font-size: 22px;
+    margin: 0 0 16px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--line);
+  }
+  section > h2 .num {
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+    margin-right: 10px;
+  }
+  h3 { font-size: 17px; margin: 26px 0 10px; }
+  p { margin: 12px 0; }
+  a { color: var(--accent); }
+
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin: 16px 0;
+  }
+  .callout {
+    border-left: 4px solid var(--accent);
+    background: var(--pill-bg);
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin: 18px 0;
+  }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.ok { border-left-color: var(--ok); }
+  .callout .label {
+    font-weight: 700;
+    font-size: 12.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--mut);
+    margin-bottom: 6px;
+  }
+
+  code {
+    background: var(--code-bg);
+    padding: 1px 6px;
+    border-radius: 5px;
+    font-size: 0.9em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    white-space: pre;
+    font-size: 13.5px;
+    line-height: 1.55;
+  }
+  pre code { background: none; padding: 0; border-radius: 0; }
+  .diffline-add { color: var(--ok); }
+  .diffline-del { color: var(--bad); }
+
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14.5px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--mut); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.03em; }
+
+  .pill {
+    display: inline-block;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 2px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    color: var(--mut);
+    white-space: nowrap;
+  }
+  .pill.ok { color: var(--ok); border-color: var(--ok); }
+  .pill.bad { color: var(--bad); border-color: var(--bad); }
+  .pill.warn { color: var(--warn); border-color: var(--warn); }
+
+  .flow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin: 18px 0;
+  }
+  .flow .node {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 13.5px;
+    min-width: 120px;
+    text-align: center;
+  }
+  .flow .node.core { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .flow .node.bad { border-color: var(--bad); color: var(--bad); font-weight: 600; }
+  .flow .arrow {
+    color: var(--mut);
+    font-size: 18px;
+  }
+  .flow.vertical { flex-direction: column; align-items: stretch; }
+  .flow.vertical .node { text-align: left; }
+  .flow.vertical .arrow { text-align: center; }
+
+  .badwrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 18px 0;
+  }
+  @media (max-width: 640px) {
+    .badwrap { flex-direction: column; align-items: stretch; }
+  }
+  .badwrap .arrow2 { font-size: 22px; color: var(--mut); }
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 16px 0;
+  }
+  @media (max-width: 640px) {
+    .compare { grid-template-columns: 1fr; }
+  }
+  .compare .col {
+    border-radius: 12px;
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+  }
+  .compare .col.before { background: color-mix(in srgb, var(--bad) 6%, var(--bg-card)); }
+  .compare .col.after { background: color-mix(in srgb, var(--ok) 6%, var(--bg-card)); }
+  .compare h4 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .compare.before-after .before h4 { color: var(--bad); }
+  .compare.before-after .after h4 { color: var(--ok); }
+
+  .module-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px;
+    margin: 18px 0;
+  }
+  .module-card {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px 18px;
+  }
+  .module-card h4 {
+    margin: 0 0 6px;
+    font-size: 15px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: var(--accent);
+  }
+  .module-card p { margin: 6px 0 0; font-size: 14px; color: var(--mut); }
+
+  ol.gaps li, ul.plain li { margin: 8px 0; }
+
+  details.quiz {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 18px;
+    margin: 16px 0;
+  }
+  details.quiz summary {
+    cursor: pointer;
+    font-weight: 600;
+    list-style: none;
+  }
+  details.quiz summary::-webkit-details-marker { display: none; }
+  details.quiz summary::before {
+    content: "▸ ";
+    color: var(--accent);
+  }
+  details.quiz[open] summary::before {
+    content: "▾ ";
+  }
+  details.quiz .q { font-weight: 600; margin-bottom: 4px; }
+  details.quiz .answer {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--line);
+  }
+  details.quiz .answer .verdict {
+    font-weight: 700;
+    color: var(--ok);
+  }
+
+  footer {
+    margin-top: 60px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    color: var(--mut);
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <p class="kicker">Genesis L4 · Explain Diff · Milestone M3</p>
+    <h1>Queue + Worker (Dockerized Redis/ARQ)</h1>
+    <p class="lede">
+      Why swapping <code>InMemoryJobQueue</code> for a real Redis-backed queue needed
+      exactly zero changes to the webhook router, why the idempotency check has to be
+      one atomic Redis command instead of two, why the idempotency key outlives GitHub's
+      own retry window by nearly 7&times;, and how a synchronous method calls an
+      async-only client without ever nesting an event loop inside uvicorn's. Covers
+      commits <code>3e24fb4</code>&nbsp;&hellip;&nbsp;<code>74ba8f0</code> on
+      <code>main</code> — 7 commits, the whole M3 slice from the docker-compose/dependency
+      groundwork through the M3 checkpoint commit. 10 files changed, 834 insertions(+),
+      14 deletions(-).
+    </p>
+  </header>
+
+  <nav class="toc">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#background">Background</a></li>
+      <li><a href="#intuition">The intuition: a swap, not a rewrite</a></li>
+      <li><a href="#ack-fast">Why enqueue-and-return-200 matters</a></li>
+      <li><a href="#atomic-key">The atomic idempotency key, and the race it avoids</a></li>
+      <li><a href="#ttl">Why the TTL exists, and why 7 days</a></li>
+      <li><a href="#bridge">The sync/async bridge</a></li>
+      <li><a href="#limits">Known limits, stated honestly</a></li>
+      <li><a href="#quiz">Quiz</a></li>
+    </ol>
+  </nav>
+
+  <section id="background">
+    <h2><span class="num">1</span>Background</h2>
+    <p>
+      M2 built the webhook route: verify the HMAC signature, check the delivery id
+      against an idempotency store, then call <code>queue.enqueue(event)</code> and
+      return 200. But M2's queue, <code>InMemoryJobQueue</code>, was explicitly a
+      stand-in — a Python <code>set</code> of seen delivery ids and a
+      <code>list</code> of accepted events, both living only in the current process's
+      memory. Nothing dequeues from it. Nothing else can see it. It exists purely so
+      the router has something real to call.
+    </p>
+    <p>
+      M3's job is to replace that stand-in with the real thing: a durable queue
+      (Redis) and a real ARQ worker process that actually dequeues and does something
+      with each job — the async hand-off the whole system design depends on, since
+      GitHub's webhook can't wait around for four LLM agents to finish reviewing a
+      pull request before it gets an HTTP response.
+    </p>
+  </section>
+
+  <section id="intuition">
+    <h2><span class="num">2</span>The intuition: a swap, not a rewrite</h2>
+    <p>
+      M2 didn't just build <code>InMemoryJobQueue</code>; it built
+      <code>backend/job_queue/interface.py</code> first — a <code>Protocol</code> named
+      <code>JobQueue</code> with exactly two methods, <code>enqueue()</code> and
+      <code>size()</code> — and coded <code>backend/webhook_receiver/router.py</code>
+      against that Protocol, never against the concrete <code>InMemoryJobQueue</code>
+      class. That is the single decision that makes M3 additive instead of invasive:
+      M3's job becomes "write a new class satisfying the same two methods," not
+      "rewrite the request path."
+    </p>
+    <div class="callout ok">
+      <div class="label">Verified, not just claimed</div>
+      The M3 diff (<code>git diff --stat 3e24fb4^..74ba8f0</code>) touches ten files —
+      <code>redis_arq.py</code>, <code>arq_worker.py</code>, <code>docker-compose.yml</code>,
+      <code>settings.py</code>, <code>main.py</code>, <code>.env.example</code>,
+      <code>pyproject.toml</code>, the new test file, and two genesis bookkeeping
+      files — and <code>backend/webhook_receiver/router.py</code> is not among them.
+      <code>tests/integration/test_queue_roundtrip.py</code> makes this a tested
+      claim rather than an assertion in a docstring: its
+      <code>TestJobQueueContract</code> class runs the exact same three tests
+      (first enqueue succeeds, a repeat is a no-op, <code>size()</code> reflects
+      distinct jobs) against <em>both</em> <code>InMemoryJobQueue</code> and
+      <code>RedisJobQueue</code> via a single parameterized fixture — proving both
+      implementations satisfy one contract, which is exactly what lets the router stay
+      untouched.
+    </div>
+    <p>
+      Only one line in <code>backend/api/main.py</code> actually decides which
+      implementation a real (non-test) app gets, and it reads a setting rather than
+      hardcoding a choice:
+    </p>
+    <pre><code>def _default_job_queue(settings: Settings) -> JobQueue:
+    """Build the JobQueue a real (non-test) app uses, per settings.job_queue_backend."""
+    if settings.job_queue_backend == "redis":
+        return RedisJobQueue(settings)
+    return InMemoryJobQueue()</code></pre>
+    <p>
+      <code>JOB_QUEUE_BACKEND=in_memory</code> is still the default in
+      <code>.env.example</code>, so existing webhook tests and a Docker-free local run
+      are unaffected; setting it to <code>redis</code> (and running
+      <code>docker compose up -d redis</code>) is what turns on the real queue this
+      milestone built.
+    </p>
+  </section>
+
+  <section id="ack-fast">
+    <h2><span class="num">3</span>Why enqueue-and-return-200 matters</h2>
+    <p>
+      GitHub enforces a short response timeout on webhook deliveries. If the endpoint
+      doesn't acknowledge quickly, GitHub marks the delivery failed and retries it —
+      repeatedly, on its own schedule, with the same <code>X-GitHub-Delivery</code> id.
+      A handler that tried to run the review pipeline synchronously before returning
+      200 would routinely time out, and a slow-but-eventually-successful handler would
+      still get retried because the acknowledgment never arrived in time — causing
+      duplicate work stacked on top of the timeout.
+    </p>
+    <div class="flow vertical">
+      <div class="node">GitHub POSTs a webhook, starts its response-timeout clock</div>
+      <div class="arrow">↓</div>
+      <div class="node core">Router verifies signature, checks idempotency, calls <code>queue.enqueue(event)</code> — a bounded Redis round trip, not the review itself</div>
+      <div class="arrow">↓ typically well under a second</div>
+      <div class="node">Router returns 200. GitHub is satisfied; the delivery is done from its point of view</div>
+      <div class="arrow">↓ asynchronously, on its own schedule</div>
+      <div class="node">The ARQ worker (a separate OS process) dequeues the job and does the actual (eventually: four-agent) work, with no HTTP client waiting on it</div>
+    </div>
+    <p>
+      This is why M3 exists as its own milestone rather than being folded into M4's
+      orchestrator: the queue is the boundary between "must respond fast" and "can take
+      as long as it needs." <code>RedisJobQueue.enqueue()</code> does two bounded Redis
+      operations (the idempotency <code>SET</code> and handing the job to ARQ) and
+      returns — heavy work stays entirely on the worker's side of that boundary.
+    </p>
+  </section>
+
+  <section id="atomic-key">
+    <h2><span class="num">4</span>The atomic idempotency key, and the race it avoids</h2>
+    <p>
+      <code>RedisJobQueue.enqueue()</code> checks and claims a delivery id in a single
+      Redis command:
+    </p>
+    <pre><code>key = f"{_IDEMPOTENCY_KEY_PREFIX}{event.delivery_id}"
+was_newly_set = self._redis_sync.set(
+    key, _IDEMPOTENCY_VALUE, nx=True, ex=self._ttl_seconds
+)
+if not was_newly_set:
+    return EnqueueResult(enqueued=False, delivery_id=event.delivery_id)</code></pre>
+    <p>
+      <code>SET key value NX EX ttl</code> means "set this key, with this expiry, but
+      only if it doesn't already exist" — and Redis executes the whole thing as one
+      indivisible operation. The alternative — call <code>EXISTS key</code>, and if it
+      comes back false, call <code>SET key value EX ttl</code> — looks equivalent for a
+      single caller, but it is a classic check-then-act race the moment two callers can
+      run concurrently, which a webhook endpoint under real traffic absolutely can
+      (GitHub's own retries, or two nearly-simultaneous legitimate deliveries racing a
+      slow network).
+    </p>
+    <p>Concretely, with two threads/requests handling the same retried delivery:</p>
+    <div class="flow vertical">
+      <div class="node">Request A: <code>EXISTS key</code> → false (not seen yet)</div>
+      <div class="arrow">↓ before A gets to SET, the scheduler switches to B</div>
+      <div class="node">Request B: <code>EXISTS key</code> → also false — A hasn't written anything yet</div>
+      <div class="arrow">↓ both now believe they are first</div>
+      <div class="node bad">A calls SET, then B calls SET — both proceed to enqueue_job, and the delivery is processed twice</div>
+    </div>
+    <p>
+      The gap between <code>EXISTS</code> returning and the corresponding
+      <code>SET</code> running is exactly where two callers can both observe "not
+      present." <code>SET ... NX EX ...</code> collapses that gap to zero: Redis is
+      single-threaded for command execution, so of any number of concurrent
+      <code>SET ... NX</code> calls for the same key, exactly one can ever return "I
+      set it" — there is no window in which two callers both get the affirmative
+      answer. <code>redis_arq.py</code>'s own docstring calls this out as the reason
+      the method is written this way, not as an incidental implementation detail.
+    </p>
+  </section>
+
+  <section id="ttl">
+    <h2><span class="num">5</span>Why the TTL exists, and why 7 days</h2>
+    <p>
+      M2's <code>InMemoryJobQueue</code> kept every delivery id it had ever seen in a
+      <code>set</code>, forever — flagged at M2's own L4 VERIFY as an unbounded-growth
+      finding: a long-running process accumulates one string per delivery with no
+      eviction. <code>RedisJobQueue</code> fixes this by construction: every idempotency
+      key it writes carries an expiry (the <code>ex=</code> argument above), so Redis
+      itself reclaims the memory once the key is no longer plausibly useful — no
+      separate cleanup job, no unbounded structure.
+    </p>
+    <p>
+      The default, <code>_DEFAULT_IDEMPOTENCY_TTL_SECONDS = 7 * 24 * 60 * 60</code> (one
+      week), is sized against a specific external fact: GitHub retries a failed webhook
+      delivery for roughly 24 hours before giving up. The TTL has to comfortably
+      outlive that window, or a legitimate late retry could arrive after its
+      idempotency key has already expired and get treated as a brand-new delivery —
+      silently defeating the entire mechanism this milestone exists to build. Seven
+      days is not "24 hours plus a little" — it's roughly 7&times; GitHub's own retry
+      window, a wide margin over clock skew, a delayed retry queue on GitHub's side, or
+      simply an unusually late redelivery, while still bounding memory growth to
+      "a week's worth of delivery ids," not "forever."
+    </p>
+    <table>
+      <thead><tr><th>Quantity</th><th>Value</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>GitHub's redelivery window</td><td>~24 hours</td><td>Documented GitHub behavior; the floor the TTL must clear</td></tr>
+        <tr><td><code>IDEMPOTENCY_TTL_SECONDS</code> default</td><td>604800s (7 days)</td><td>~7&times; the 24h floor — safety margin, not arbitrariness</td></tr>
+      </tbody>
+    </table>
+    <p>
+      <code>tests/integration/test_queue_roundtrip.py</code>'s
+      <code>TestIdempotencyTtl</code> doesn't just trust that <code>ex=</code> was
+      passed correctly — it constructs a queue with a short 30-second TTL, enqueues one
+      event, then reads the TTL back from Redis directly via <code>TTL key</code>
+      (exposed as <code>RedisJobQueue.ttl_for()</code>) and asserts it's positive and
+      <code>&le; 30</code>, ruling out both "no expiry was actually set" and "the wrong
+      value was passed."
+    </p>
+  </section>
+
+  <section id="bridge">
+    <h2><span class="num">6</span>The sync/async bridge</h2>
+    <p>
+      <code>JobQueue.enqueue()</code> is a synchronous method — a deliberate M2 design
+      choice, since <code>router.py</code> calls it as a plain, non-awaited call from
+      inside an <code>async def</code> route, and M3 is not allowed to change that
+      router. But ARQ's client, <code>arq.connections.ArqRedis</code>, is async-only:
+      there is no synchronous <code>enqueue_job</code>. Something has to bridge the two.
+    </p>
+    <div class="compare before-after">
+      <div class="col before">
+        <h4>The tempting-but-hazardous option</h4>
+        <p>
+          Call <code>asyncio.run()</code> (or a fresh
+          <code>loop.run_until_complete()</code>) directly inside
+          <code>enqueue()</code>. This works in a plain script, but
+          <code>enqueue()</code> is invoked from inside a route handler that is
+          itself already running on uvicorn's event loop, on uvicorn's thread. Trying
+          to start (or drive) a second event loop on a thread that already has one
+          running is the well-known "this event loop is already running" class of
+          failure — sometimes an outright exception, sometimes silent corruption of
+          scheduling, depending on exactly how it's invoked.
+        </p>
+      </div>
+      <div class="col after">
+        <h4>What <code>RedisJobQueue</code> actually does</h4>
+        <p>
+          At construction, it starts a dedicated background thread running its own
+          private event loop forever (<code>asyncio.new_event_loop()</code> +
+          <code>loop.run_forever()</code>). <code>enqueue()</code> then hands work to
+          that loop from the caller's thread via
+          <code>asyncio.run_coroutine_threadsafe(coro, self._loop)</code> and blocks on
+          <code>future.result(timeout=...)</code> — a real thread-to-thread handoff,
+          never a second loop competing for the same thread.
+        </p>
+      </div>
+    </div>
+    <pre><code>self._loop = asyncio.new_event_loop()
+self._loop_thread = threading.Thread(
+    target=self._run_loop, name="redis-job-queue-loop", daemon=True
+)
+self._loop_thread.start()
+...
+future = asyncio.run_coroutine_threadsafe(
+    self._arq_pool.enqueue_job(ARQ_JOB_FUNCTION_NAME, event.model_dump(mode="json")),
+    self._loop,
+)
+future.result(timeout=_ENQUEUE_TIMEOUT_SECONDS)</code></pre>
+    <p>
+      Two consequences follow directly from this design. First,
+      <code>enqueue()</code> genuinely blocks the calling (request) thread while it
+      waits for <code>future.result()</code> — it's not free concurrency, just safe
+      concurrency; recorded in <code>checkpoints/CURRENT.md</code> as worth revisiting
+      only if request-path latency ever becomes a problem at real traffic volume.
+      Second, because the job actually goes through ARQ's real wire format (its queue
+      zset, msgpack-encoded payload) rather than some hand-rolled shortcut, the ARQ
+      worker in <code>arq_worker.py</code> needs no special-casing to consume it — it's
+      a completely ordinary ARQ job as far as the worker is concerned.
+    </p>
+  </section>
+
+  <section id="limits">
+    <h2><span class="num">7</span>Known limits, stated honestly</h2>
+    <p>
+      L4 VERIFY approved M3 — the demo command passes, all four gates are green, and
+      the milestone did what its plan entry committed to. It also flagged real,
+      non-blocking limitations:
+    </p>
+    <ol class="gaps">
+      <li>
+        <strong>Nothing calls <code>RedisJobQueue.close()</code> at shutdown.</strong>
+        <code>close()</code> exists and correctly releases the ARQ pool, stops the
+        background loop, and joins its thread — but no FastAPI lifespan hook actually
+        calls it, so the background thread is simply abandoned when the process exits.
+        Harmless in practice (it's a daemon thread; the process is exiting anyway
+        regardless), but untidy — a lifespan hook should call it for a clean shutdown.
+      </li>
+      <li>
+        <strong>A Redis-down <code>enqueue()</code> surfaces as an unhandled 500, not a
+        graceful 503.</strong> Neither the synchronous <code>SET</code> nor the
+        cross-thread ARQ hand-off currently catches a connection failure and translates
+        it into a deliberate "service unavailable, retry later" response — acceptable
+        for M3's local-dev scope, worth revisiting before this endpoint carries real
+        traffic.
+      </li>
+      <li>
+        <strong>Idempotency state is lost whenever the Redis container is
+        recreated.</strong> <code>docker-compose.yml</code>'s <code>redis</code>
+        service has no volume, so <code>docker compose down &amp;&amp; up</code>
+        always starts it empty — confirmed empirically (DBSIZE drops to 0). An empty
+        queue after a clean restart is exactly M3's own success criterion ("no
+        orphaned jobs"), but the corollary is that replay protection resets too: a
+        delivery this process already saw looks brand new again after a recreate.
+        Now documented in <code>docker-compose.yml</code>'s comment and
+        <code>README.md</code>, not fixed — adding a volume is a design decision
+        nobody has asked for yet.
+      </li>
+    </ol>
+    <div class="callout ok">
+      <div class="label">Why these aren't blockers</div>
+      None of the three contradicts what M3's plan entry or <code>DONE.html</code>'s
+      DoD gates asked for: a validated webhook enqueues to Redis, a separate worker
+      dequeues and logs it, and a clean restart leaves no orphaned jobs. The demo
+      command and all 9 new integration tests prove exactly that. Recording the gaps
+      keeps them visible for whichever later milestone needs to close them, instead of
+      quietly forgetting them or scope-creeping M3 to cover work — lifespan wiring,
+      graceful degradation, persistence — that was never this milestone's job.
+    </div>
+  </section>
+
+  <section id="quiz">
+    <h2><span class="num">8</span>Quiz</h2>
+    <p>Three questions. Click each one to reveal the answer.</p>
+
+    <details class="quiz">
+      <summary class="q">1. Why did swapping in a real Redis/ARQ queue require zero changes to <code>backend/webhook_receiver/router.py</code>?</summary>
+      <div class="answer">
+        <p class="verdict">Because M2 coded the router against the <code>JobQueue</code> Protocol, not the concrete <code>InMemoryJobQueue</code> class, so any implementation satisfying the same two methods (<code>enqueue</code>, <code>size</code>) is a drop-in replacement.</p>
+        <p>
+          <code>RedisJobQueue</code> implements the exact same Protocol
+          <code>InMemoryJobQueue</code> does. The only thing that changes is one
+          function in <code>backend/api/main.py</code>, <code>_default_job_queue()</code>,
+          which picks the concrete class based on <code>settings.job_queue_backend</code>.
+          <code>tests/integration/test_queue_roundtrip.py</code>'s
+          <code>TestJobQueueContract</code> proves this by running the identical three
+          contract tests against both implementations via one parameterized fixture.
+        </p>
+      </div>
+    </details>
+
+    <details class="quiz">
+      <summary class="q">2. Why is the idempotency check one atomic <code>SET key value NX EX ttl</code> instead of an <code>EXISTS</code> check followed by a separate <code>SET</code>?</summary>
+      <div class="answer">
+        <p class="verdict">Because two concurrent callers for the same delivery id could both observe "not present" from EXISTS before either one writes, and both would then proceed to enqueue — a classic check-then-act race. A single atomic SET...NX guarantees only one caller ever gets the affirmative "I set it" result.</p>
+        <p>
+          Redis executes <code>SET ... NX EX ...</code> as one indivisible command, so
+          there's no window between "check" and "act" for a second caller to slip
+          through. With a separate <code>EXISTS</code> then <code>SET</code>, a retried
+          GitHub delivery arriving as two near-simultaneous requests could both read
+          "key doesn't exist" before either writes it, resulting in the same delivery
+          being enqueued twice — exactly the bug idempotency exists to prevent.
+        </p>
+      </div>
+    </details>
+
+    <details class="quiz">
+      <summary class="q">3. <code>JobQueue.enqueue()</code> is a synchronous method, but ARQ's client is async-only. Why doesn't <code>RedisJobQueue</code> just call <code>asyncio.run()</code> inside <code>enqueue()</code> to bridge the two?</summary>
+      <div class="answer">
+        <p class="verdict"><code>enqueue()</code> is called from inside an async route handler that is already running on uvicorn's own event loop and thread; starting or driving a second event loop on that same thread is the well-known "event loop already running" hazard. Instead, <code>RedisJobQueue</code> runs ARQ's async client on a dedicated background thread with its own private loop, and bridges to it via <code>asyncio.run_coroutine_threadsafe</code>.</p>
+        <p>
+          The background-thread approach means the caller's thread never tries to
+          nest a loop inside one that's already executing — it just blocks on
+          <code>future.result(timeout=...)</code> waiting for a real cross-thread
+          handoff to finish. The trade-off, recorded as an open item in
+          <code>checkpoints/CURRENT.md</code>, is that every <code>enqueue()</code>
+          call genuinely blocks the calling thread on that round trip — acceptable at
+          M3's scale, worth revisiting only if request volume ever makes that latency
+          matter.
+        </p>
+      </div>
+    </details>
+  </section>
+
+  <footer>
+    Generated by the <code>explain-diff-html</code> skill during L4 VERIFY housekeeping for
+    milestone M3 of the <code>pr-review-agent</code> genesis-kit project. Diff range:
+    <code>3e24fb4</code> (build: add docker-compose Redis service and arq/redis
+    dependencies) through <code>74ba8f0</code> (the M3 checkpoint commit, HEAD at time
+    of writing) — 7 commits, 10 files changed, 834 insertions(+), 14 deletions(-).
+    Self-contained: no external stylesheets, fonts, scripts, or images.
+  </footer>
+
+</div>
+</body>
+</html>
