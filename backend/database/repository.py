@@ -58,6 +58,8 @@ rather than being free to block a worker thread indefinitely.
 
 from __future__ import annotations
 
+from datetime import datetime
+from decimal import Decimal
 from math import ceil
 
 import psycopg
@@ -78,6 +80,21 @@ _SELECT_BY_REVIEW_SQL = """
     FROM agent_events
     WHERE review_id = %s
     ORDER BY ts ASC, id ASC
+"""
+
+# M8: BudgetGuard's one read query. Deliberately NOT scoped to a single
+# review_id (unlike _SELECT_BY_REVIEW_SQL above) -- a daily USD cap is a
+# process-wide/organization-wide budget across every review that ran today,
+# not a per-review one. `COALESCE(..., 0)` turns "no llm.call rows yet
+# today" into a real 0 instead of SQL NULL, so callers never have to
+# special-case "no spend recorded yet" as a separate branch from "$0.00
+# spent". `ts >= %s` (not `ts::date = %s`) so the caller controls exactly
+# what "today" means (BudgetGuard passes UTC midnight) without this query
+# needing its own timezone opinion.
+_SUM_LLM_COST_SINCE_SQL = """
+    SELECT COALESCE(SUM(cost_usd), 0)
+    FROM agent_events
+    WHERE event_type = %s AND ts >= %s
 """
 
 # Name every EventRepository instance's circuit breaker is registered
@@ -222,3 +239,34 @@ class EventRepository:
             )
             for row in rows
         ]
+
+    def sum_llm_cost_since(self, since: datetime) -> Decimal:
+        """Total ``cost_usd`` of every ``llm.call`` event at/after ``since``.
+
+        M8: the one query ``backend.economics.budget.BudgetGuard`` needs to
+        derive real spend from the events spine, rather than tracking an
+        in-memory running total that would reset on every process restart
+        (and disagree with any other process, e.g. a worker and the API
+        server, spending against the same budget). This is the first real
+        consumer of ``agent_events`` beyond the trace-viewer's per-review
+        read above -- see that method's docstring and M7's own Deferred
+        notes for why the events spine exists at all.
+
+        A plain ``SELECT ... SUM(...)`` -- still no ``UPDATE``/``DELETE``
+        anywhere in this file, preserving the ``events-table-append-only``
+        invariant's grep-provability (see this module's docstring). Not
+        routed through ``insert_event``'s circuit breaker (this is a read,
+        not the write path that milestone's fix was scoped to) but still
+        sets the same ``statement_timeout`` so a stray slow aggregate query
+        cannot hang forever either.
+        """
+        with psycopg.connect(
+            self._dsn,
+            connect_timeout=self._connect_timeout_seconds,
+            autocommit=True,
+            options=self._connect_options,
+        ) as conn:
+            row = conn.execute(_SUM_LLM_COST_SINCE_SQL, (EventType.LLM_CALL.value, since)).fetchone()
+        if row is None or row[0] is None:
+            return Decimal("0")
+        return Decimal(row[0])
