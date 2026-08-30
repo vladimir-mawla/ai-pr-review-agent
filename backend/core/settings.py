@@ -16,9 +16,22 @@ signatures) and a documented, typed surface instead of scattered
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# GitHub retries a failed webhook delivery for roughly 24 hours before
+# giving up (per GitHub's documented redelivery window). The idempotency
+# TTL must comfortably outlive that so a legitimate late retry is still
+# recognized as a duplicate rather than being treated as new once the key
+# has expired. One week gives a wide safety margin over 24h for clock
+# skew, a slow/delayed retry queue on GitHub's side, or a delivery that
+# arrives unusually late, while still bounding Redis memory growth (this
+# is exactly the fix for the M2-deferred "InMemoryJobQueue grows
+# unboundedly" finding: every key now expires, it just doesn't expire
+# before it can plausibly still matter).
+_DEFAULT_IDEMPOTENCY_TTL_SECONDS = 7 * 24 * 60 * 60
 
 
 class Settings(BaseSettings):
@@ -31,6 +44,20 @@ class Settings(BaseSettings):
             deployment silently accepts a well-known secret instead of
             failing to start. See ``.env.example`` for the documented
             environment variable name and local-dev instructions.
+        job_queue_backend: Which ``JobQueue`` implementation
+            ``backend.api.main.create_app`` wires up by default when the
+            caller doesn't pass one in explicitly. ``"in_memory"`` (the
+            default) keeps local unit/webhook tests fast and
+            Redis-independent; ``"redis"`` is what the M3 docker-compose
+            demo and real deployments use.
+        redis_url: Connection string for the Redis instance backing
+            ``RedisJobQueue`` and the ARQ worker. Defaults to the port this
+            project's ``docker-compose.yml`` publishes locally (6380, not
+            Redis's usual 6379 — see that file's comment for why).
+        idempotency_ttl_seconds: How long a ``X-GitHub-Delivery`` id is
+            remembered in Redis before it expires and its key is
+            reclaimed. See module-level comment above for why the default
+            is one week.
     """
 
     github_webhook_secret: str = Field(
@@ -39,6 +66,34 @@ class Settings(BaseSettings):
             "Shared secret used to verify GitHub webhook HMAC-SHA256 "
             "signatures. Set via the GITHUB_WEBHOOK_SECRET environment "
             "variable or a local .env file; never commit a real value."
+        ),
+    )
+
+    job_queue_backend: Literal["in_memory", "redis"] = Field(
+        default="in_memory",
+        description=(
+            "Which JobQueue implementation create_app() wires up by "
+            "default. 'in_memory' for tests/local dev without Docker, "
+            "'redis' to use the real Redis/ARQ queue."
+        ),
+    )
+
+    redis_url: str = Field(
+        default="redis://localhost:6380/0",
+        description=(
+            "Redis connection string for RedisJobQueue and the ARQ worker. "
+            "Defaults to the host port this project's docker-compose.yml "
+            "publishes (6380)."
+        ),
+    )
+
+    idempotency_ttl_seconds: int = Field(
+        default=_DEFAULT_IDEMPOTENCY_TTL_SECONDS,
+        gt=0,
+        description=(
+            "Seconds a delivery-id idempotency key survives in Redis "
+            "before expiring. Must comfortably outlive GitHub's ~24h "
+            "webhook redelivery window. Default is one week."
         ),
     )
 
