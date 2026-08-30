@@ -1,7 +1,7 @@
 {
   "$comment": "nodes=modules, edges=[cause,effect] where cause is imported-by effect. ADD invariants by hand.",
   "project": ".",
-  "generated": "2026-08-30T14:48:33.982Z",
+  "generated": "2026-08-30T22:45:26.241Z",
   "nodes": [
     "__future__",
     "__init__",
@@ -10,6 +10,7 @@
     "argparse",
     "arq",
     "arq_worker",
+    "ast",
     "asyncio",
     "audit",
     "base",
@@ -20,11 +21,13 @@
     "conftest",
     "connections",
     "constants",
+    "context_retriever",
     "contextlib",
     "contracts",
     "dataclasses",
     "datetime",
     "decimal",
+    "embedder",
     "enum",
     "enums",
     "events",
@@ -36,6 +39,7 @@
     "hashlib",
     "hmac",
     "httpx",
+    "httpx2",
     "in_memory",
     "interface",
     "itertools",
@@ -49,11 +53,13 @@
     "models",
     "nodes",
     "observability",
+    "openai",
     "operator",
     "orchestrator",
     "os",
     "parser",
     "pathlib",
+    "pgvector",
     "postgres",
     "pricing",
     "psycopg",
@@ -75,6 +81,7 @@
     "run_fixture_review",
     "runnables",
     "security_agent",
+    "seed_code_chunks",
     "send_signed_webhook",
     "settings",
     "sqlite",
@@ -84,9 +91,11 @@
     "test_aggregator",
     "test_budget_guard",
     "test_budget_guard_events",
+    "test_embedder",
     "test_events_failure_policy",
     "test_events_spine",
     "test_hitl_gate",
+    "test_hybrid_retrieval",
     "test_llm_client",
     "test_models",
     "test_orchestrator_fanout",
@@ -94,9 +103,11 @@
     "test_reliability",
     "test_security_agent_live",
     "test_security_agent_schema",
+    "test_security_node_infrastructure_failures",
     "test_webhook_validator",
     "testclient",
     "threading",
+    "tiger_client",
     "time",
     "timeout",
     "tracing",
@@ -133,7 +144,15 @@
     ],
     [
       "__future__",
+      "context_retriever"
+    ],
+    [
+      "__future__",
       "contracts"
+    ],
+    [
+      "__future__",
+      "embedder"
     ],
     [
       "__future__",
@@ -221,6 +240,10 @@
     ],
     [
       "__future__",
+      "seed_code_chunks"
+    ],
+    [
+      "__future__",
       "send_signed_webhook"
     ],
     [
@@ -245,6 +268,10 @@
     ],
     [
       "__future__",
+      "test_embedder"
+    ],
+    [
+      "__future__",
       "test_events_failure_policy"
     ],
     [
@@ -254,6 +281,10 @@
     [
       "__future__",
       "test_hitl_gate"
+    ],
+    [
+      "__future__",
+      "test_hybrid_retrieval"
     ],
     [
       "__future__",
@@ -281,7 +312,15 @@
     ],
     [
       "__future__",
+      "test_security_node_infrastructure_failures"
+    ],
+    [
+      "__future__",
       "test_webhook_validator"
+    ],
+    [
+      "__future__",
+      "tiger_client"
     ],
     [
       "__future__",
@@ -317,6 +356,10 @@
     ],
     [
       "abc",
+      "context_retriever"
+    ],
+    [
+      "abc",
       "redis_arq"
     ],
     [
@@ -341,6 +384,10 @@
     ],
     [
       "abc",
+      "test_security_node_infrastructure_failures"
+    ],
+    [
+      "abc",
       "test_webhook_validator"
     ],
     [
@@ -356,12 +403,24 @@
       "llm_client"
     ],
     [
+      "anthropic",
+      "test_llm_client"
+    ],
+    [
+      "anthropic",
+      "test_orchestrator_fanout"
+    ],
+    [
       "argparse",
       "run_fixture_review"
     ],
     [
       "argparse",
       "security_agent"
+    ],
+    [
+      "argparse",
+      "seed_code_chunks"
     ],
     [
       "argparse",
@@ -374,6 +433,14 @@
     [
       "arq",
       "redis_arq"
+    ],
+    [
+      "ast",
+      "seed_code_chunks"
+    ],
+    [
+      "asyncio",
+      "embedder"
     ],
     [
       "asyncio",
@@ -390,6 +457,10 @@
     [
       "asyncio",
       "redis_arq"
+    ],
+    [
+      "asyncio",
+      "test_embedder"
     ],
     [
       "asyncio",
@@ -432,12 +503,20 @@
       "test_orchestrator_fanout"
     ],
     [
+      "base_agent",
+      "test_security_node_infrastructure_failures"
+    ],
+    [
       "base",
       "graph"
     ],
     [
       "budget",
       "llm_client"
+    ],
+    [
+      "budget",
+      "nodes"
     ],
     [
       "budget",
@@ -452,8 +531,20 @@
       "test_llm_client"
     ],
     [
+      "budget",
+      "test_orchestrator_fanout"
+    ],
+    [
+      "budget",
+      "test_security_node_infrastructure_failures"
+    ],
+    [
       "circuit_breaker",
       "__init__"
+    ],
+    [
+      "circuit_breaker",
+      "embedder"
     ],
     [
       "circuit_breaker",
@@ -500,6 +591,14 @@
       "redis_arq"
     ],
     [
+      "context_retriever",
+      "seed_code_chunks"
+    ],
+    [
+      "context_retriever",
+      "test_hybrid_retrieval"
+    ],
+    [
       "contextlib",
       "redis_arq"
     ],
@@ -521,6 +620,10 @@
     ],
     [
       "dataclasses",
+      "context_retriever"
+    ],
+    [
+      "dataclasses",
       "interface"
     ],
     [
@@ -538,6 +641,10 @@
     [
       "dataclasses",
       "test_budget_guard"
+    ],
+    [
+      "dataclasses",
+      "test_embedder"
     ],
     [
       "dataclasses",
@@ -614,6 +721,10 @@
     [
       "datetime",
       "test_models"
+    ],
+    [
+      "datetime",
+      "test_orchestrator_fanout"
     ],
     [
       "decimal",
@@ -704,6 +815,26 @@
       "test_security_agent_schema"
     ],
     [
+      "decimal",
+      "test_security_node_infrastructure_failures"
+    ],
+    [
+      "embedder",
+      "context_retriever"
+    ],
+    [
+      "embedder",
+      "seed_code_chunks"
+    ],
+    [
+      "embedder",
+      "test_embedder"
+    ],
+    [
+      "embedder",
+      "test_hybrid_retrieval"
+    ],
+    [
       "enum",
       "circuit_breaker"
     ],
@@ -781,6 +912,10 @@
     ],
     [
       "hashlib",
+      "embedder"
+    ],
+    [
+      "hashlib",
       "send_signed_webhook"
     ],
     [
@@ -826,6 +961,14 @@
     [
       "hmac",
       "validator"
+    ],
+    [
+      "httpx2",
+      "test_llm_client"
+    ],
+    [
+      "httpx2",
+      "test_orchestrator_fanout"
     ],
     [
       "httpx",
@@ -933,6 +1076,10 @@
     ],
     [
       "llm_client",
+      "nodes"
+    ],
+    [
+      "llm_client",
       "security_agent"
     ],
     [
@@ -946,6 +1093,10 @@
     [
       "llm_client",
       "test_security_agent_schema"
+    ],
+    [
+      "llm_client",
+      "test_security_node_infrastructure_failures"
     ],
     [
       "logging",
@@ -978,6 +1129,10 @@
     [
       "main",
       "test_webhook_validator"
+    ],
+    [
+      "math",
+      "embedder"
     ],
     [
       "math",
@@ -1096,6 +1251,10 @@
       "test_security_agent_schema"
     ],
     [
+      "models",
+      "test_security_node_infrastructure_failures"
+    ],
+    [
       "nodes",
       "graph"
     ],
@@ -1116,12 +1275,20 @@
       "router"
     ],
     [
+      "openai",
+      "embedder"
+    ],
+    [
       "operator",
       "state"
     ],
     [
       "orchestrator",
       "test_orchestrator_fanout"
+    ],
+    [
+      "orchestrator",
+      "test_security_node_infrastructure_failures"
     ],
     [
       "os",
@@ -1145,6 +1312,10 @@
     ],
     [
       "pathlib",
+      "seed_code_chunks"
+    ],
+    [
+      "pathlib",
       "send_signed_webhook"
     ],
     [
@@ -1158,6 +1329,18 @@
     [
       "pathlib",
       "test_security_agent_live"
+    ],
+    [
+      "pathlib",
+      "tiger_client"
+    ],
+    [
+      "pgvector",
+      "context_retriever"
+    ],
+    [
+      "pgvector",
+      "test_hybrid_retrieval"
     ],
     [
       "postgres",
@@ -1202,6 +1385,14 @@
     [
       "psycopg",
       "test_events_spine"
+    ],
+    [
+      "psycopg",
+      "test_hybrid_retrieval"
+    ],
+    [
+      "psycopg",
+      "tiger_client"
     ],
     [
       "pydantic_settings",
@@ -1265,11 +1456,19 @@
     ],
     [
       "pytest",
+      "test_embedder"
+    ],
+    [
+      "pytest",
       "test_events_failure_policy"
     ],
     [
       "pytest",
       "test_events_spine"
+    ],
+    [
+      "pytest",
+      "test_hybrid_retrieval"
     ],
     [
       "pytest",
@@ -1297,6 +1496,10 @@
     ],
     [
       "pytest",
+      "test_security_node_infrastructure_failures"
+    ],
+    [
+      "pytest",
       "test_webhook_validator"
     ],
     [
@@ -1310,6 +1513,18 @@
     [
       "queue",
       "test_hitl_gate"
+    ],
+    [
+      "queue",
+      "test_orchestrator_fanout"
+    ],
+    [
+      "queue",
+      "test_security_node_infrastructure_failures"
+    ],
+    [
+      "random",
+      "embedder"
     ],
     [
       "random",
@@ -1338,6 +1553,10 @@
     [
       "redis",
       "test_reliability"
+    ],
+    [
+      "re",
+      "embedder"
     ],
     [
       "registry",
@@ -1421,6 +1640,10 @@
     ],
     [
       "retry",
+      "embedder"
+    ],
+    [
+      "retry",
       "llm_client"
     ],
     [
@@ -1473,6 +1696,14 @@
     ],
     [
       "settings",
+      "context_retriever"
+    ],
+    [
+      "settings",
+      "embedder"
+    ],
+    [
+      "settings",
       "llm_client"
     ],
     [
@@ -1497,11 +1728,23 @@
     ],
     [
       "settings",
+      "seed_code_chunks"
+    ],
+    [
+      "settings",
       "test_budget_guard_events"
     ],
     [
       "settings",
+      "test_embedder"
+    ],
+    [
+      "settings",
       "test_events_spine"
+    ],
+    [
+      "settings",
+      "test_hybrid_retrieval"
     ],
     [
       "settings",
@@ -1560,12 +1803,20 @@
       "test_orchestrator_fanout"
     ],
     [
+      "state",
+      "test_security_node_infrastructure_failures"
+    ],
+    [
       "sys",
       "run_fixture_review"
     ],
     [
       "sys",
       "security_agent"
+    ],
+    [
+      "sys",
+      "seed_code_chunks"
     ],
     [
       "sys",
@@ -1612,6 +1863,18 @@
       "timeout"
     ],
     [
+      "tiger_client",
+      "context_retriever"
+    ],
+    [
+      "tiger_client",
+      "seed_code_chunks"
+    ],
+    [
+      "tiger_client",
+      "test_hybrid_retrieval"
+    ],
+    [
       "time",
       "circuit_breaker"
     ],
@@ -1626,6 +1889,10 @@
     [
       "timeout",
       "__init__"
+    ],
+    [
+      "timeout",
+      "embedder"
     ],
     [
       "timeout",
@@ -1646,6 +1913,10 @@
     [
       "time",
       "security_agent"
+    ],
+    [
+      "time",
+      "test_embedder"
     ],
     [
       "time",
@@ -1697,6 +1968,10 @@
     ],
     [
       "typing",
+      "embedder"
+    ],
+    [
+      "typing",
       "interface"
     ],
     [
@@ -1737,7 +2012,15 @@
     ],
     [
       "typing",
+      "test_embedder"
+    ],
+    [
+      "typing",
       "test_llm_client"
+    ],
+    [
+      "typing",
+      "test_security_node_infrastructure_failures"
     ],
     [
       "typing",
