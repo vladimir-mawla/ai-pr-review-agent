@@ -58,6 +58,20 @@ _DEFAULT_RELIABILITY_TIMEOUT_SECONDS = 10.0
 _DEFAULT_CIRCUIT_BREAKER_FAILURE_THRESHOLD = 5
 _DEFAULT_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS = 30.0
 
+# M7 events spine. Host port 5433 (not Postgres's usual 5432) for the same
+# reason Redis uses 6380 instead of 6379 -- see docker-compose.yml's
+# postgres service comment. Two separate connection strings, two separate
+# roles (both created by backend/database/migrations/0001_agent_events.sql):
+# `database_url` is the restricted `agent_events_writer` role (SELECT+INSERT
+# only, UPDATE/DELETE explicitly revoked) that application code actually
+# writes through; `database_admin_url` is the "postgres" superuser, used
+# ONLY to apply migrations (backend.database.postgres.apply_migrations),
+# never by any request-path code.
+_DEFAULT_DATABASE_URL = (
+    "postgresql://agent_events_writer:agent_events_writer@localhost:5433/pr_review_agent"
+)
+_DEFAULT_DATABASE_ADMIN_URL = "postgresql://postgres:postgres@localhost:5433/pr_review_agent"
+
 
 class Settings(BaseSettings):
     """Runtime configuration for the pr-review-agent backend.
@@ -106,6 +120,16 @@ class Settings(BaseSettings):
         circuit_breaker_reset_timeout_seconds: M6 reliability layer. How
             long the breaker stays OPEN before allowing a single HALF_OPEN
             probe through.
+        database_url: M7 events spine. Connection string application code
+            (``backend.observability``) actually writes events through --
+            the restricted ``agent_events_writer`` role, never the admin
+            superuser. Defaults to the host port this project's
+            ``docker-compose.yml`` publishes locally (5433).
+        database_admin_url: M7 events spine. Connection string used ONLY to
+            apply migrations (``backend.database.postgres.apply_migrations``)
+            -- the "postgres" superuser, since creating the restricted role/
+            table/trigger requires privileges ``agent_events_writer`` is
+            deliberately never granted. Never used by request-path code.
     """
 
     github_webhook_secret: str = Field(
@@ -208,6 +232,23 @@ class Settings(BaseSettings):
             "How long (seconds) RedisJobQueue's circuit breaker stays "
             "OPEN before allowing a single HALF_OPEN probe through. "
             "Default 30.0."
+        ),
+    )
+
+    database_url: str = Field(
+        default=_DEFAULT_DATABASE_URL,
+        description=(
+            "Postgres connection string the application writes events "
+            "through (the restricted agent_events_writer role). Defaults "
+            "to the host port docker-compose.yml publishes (5433)."
+        ),
+    )
+
+    database_admin_url: str = Field(
+        default=_DEFAULT_DATABASE_ADMIN_URL,
+        description=(
+            "Postgres connection string used only to apply migrations "
+            "(the postgres superuser). Never used by request-path code."
         ),
     )
 
