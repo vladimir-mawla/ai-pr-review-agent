@@ -1,7 +1,7 @@
 {
   "$comment": "nodes=modules, edges=[cause,effect] where cause is imported-by effect. ADD invariants by hand.",
   "project": ".",
-  "generated": "2026-08-30T08:44:11.292Z",
+  "generated": "2026-08-30T10:05:36.946Z",
   "nodes": [
     "__future__",
     "__init__",
@@ -10,6 +10,7 @@
     "arq",
     "arq_worker",
     "asyncio",
+    "audit",
     "base",
     "base_agent",
     "circuit_breaker",
@@ -24,6 +25,7 @@
     "decimal",
     "enum",
     "enums",
+    "events",
     "fastapi",
     "findings",
     "functools",
@@ -39,13 +41,17 @@
     "langgraph_engine",
     "logging",
     "main",
+    "math",
     "models",
     "nodes",
+    "observability",
     "operator",
     "orchestrator",
     "os",
     "parser",
     "pathlib",
+    "postgres",
+    "psycopg",
     "pydantic",
     "pydantic_settings",
     "pytest",
@@ -54,10 +60,12 @@
     "re",
     "redis",
     "redis_arq",
+    "repository",
     "responses",
     "retry",
     "review",
     "router",
+    "run_fixture_review",
     "runnables",
     "send_signed_webhook",
     "settings",
@@ -66,6 +74,7 @@
     "state",
     "sys",
     "test_aggregator",
+    "test_events_spine",
     "test_hitl_gate",
     "test_models",
     "test_orchestrator_fanout",
@@ -76,18 +85,24 @@
     "threading",
     "time",
     "timeout",
+    "tracing",
     "types",
     "typing",
     "uuid",
     "validator",
     "webhook",
     "worker",
+    "workflow_context",
     "workflow_engine"
   ],
   "edges": [
     [
       "__future__",
       "arq_worker"
+    ],
+    [
+      "__future__",
+      "audit"
     ],
     [
       "__future__",
@@ -100,6 +115,10 @@
     [
       "__future__",
       "contracts"
+    ],
+    [
+      "__future__",
+      "events"
     ],
     [
       "__future__",
@@ -123,11 +142,19 @@
     ],
     [
       "__future__",
+      "models"
+    ],
+    [
+      "__future__",
       "nodes"
     ],
     [
       "__future__",
       "parser"
+    ],
+    [
+      "__future__",
+      "postgres"
     ],
     [
       "__future__",
@@ -139,11 +166,19 @@
     ],
     [
       "__future__",
+      "repository"
+    ],
+    [
+      "__future__",
       "retry"
     ],
     [
       "__future__",
       "router"
+    ],
+    [
+      "__future__",
+      "run_fixture_review"
     ],
     [
       "__future__",
@@ -160,6 +195,10 @@
     [
       "__future__",
       "test_aggregator"
+    ],
+    [
+      "__future__",
+      "test_events_spine"
     ],
     [
       "__future__",
@@ -187,7 +226,15 @@
     ],
     [
       "__future__",
+      "tracing"
+    ],
+    [
+      "__future__",
       "validator"
+    ],
+    [
+      "__future__",
+      "workflow_context"
     ],
     [
       "__future__",
@@ -211,6 +258,10 @@
     ],
     [
       "abc",
+      "test_events_spine"
+    ],
+    [
+      "abc",
       "test_queue_roundtrip"
     ],
     [
@@ -224,6 +275,14 @@
     [
       "abc",
       "timeout"
+    ],
+    [
+      "abc",
+      "tracing"
+    ],
+    [
+      "argparse",
+      "run_fixture_review"
     ],
     [
       "argparse",
@@ -240,6 +299,14 @@
     [
       "asyncio",
       "redis_arq"
+    ],
+    [
+      "audit",
+      "__init__"
+    ],
+    [
+      "audit",
+      "test_events_spine"
     ],
     [
       "base_agent",
@@ -290,6 +357,10 @@
       "redis_arq"
     ],
     [
+      "contextlib",
+      "tracing"
+    ],
+    [
       "contracts",
       "nodes"
     ],
@@ -315,6 +386,14 @@
     ],
     [
       "datetime",
+      "events"
+    ],
+    [
+      "datetime",
+      "models"
+    ],
+    [
+      "datetime",
       "nodes"
     ],
     [
@@ -335,6 +414,10 @@
     ],
     [
       "datetime",
+      "test_events_spine"
+    ],
+    [
+      "datetime",
       "test_hitl_gate"
     ],
     [
@@ -343,7 +426,15 @@
     ],
     [
       "decimal",
+      "events"
+    ],
+    [
+      "decimal",
       "findings"
+    ],
+    [
+      "decimal",
+      "models"
     ],
     [
       "decimal",
@@ -367,6 +458,10 @@
     ],
     [
       "decimal",
+      "test_events_spine"
+    ],
+    [
+      "decimal",
       "test_hitl_gate"
     ],
     [
@@ -384,6 +479,10 @@
     [
       "enum",
       "enums"
+    ],
+    [
+      "enum",
+      "models"
     ],
     [
       "enums",
@@ -406,6 +505,14 @@
       "test_aggregator"
     ],
     [
+      "events",
+      "__init__"
+    ],
+    [
+      "events",
+      "tracing"
+    ],
+    [
       "fastapi",
       "main"
     ],
@@ -426,6 +533,10 @@
       "settings"
     ],
     [
+      "functools",
+      "workflow_context"
+    ],
+    [
       "futures",
       "timeout"
     ],
@@ -436,6 +547,10 @@
     [
       "hashlib",
       "send_signed_webhook"
+    ],
+    [
+      "hashlib",
+      "test_events_spine"
     ],
     [
       "hashlib",
@@ -452,6 +567,10 @@
     [
       "hmac",
       "send_signed_webhook"
+    ],
+    [
+      "hmac",
+      "test_events_spine"
     ],
     [
       "hmac",
@@ -472,6 +591,10 @@
     [
       "in_memory",
       "main"
+    ],
+    [
+      "in_memory",
+      "test_events_spine"
     ],
     [
       "in_memory",
@@ -515,6 +638,10 @@
     ],
     [
       "json",
+      "test_events_spine"
+    ],
+    [
+      "json",
       "test_models"
     ],
     [
@@ -527,11 +654,27 @@
     ],
     [
       "langgraph_engine",
+      "run_fixture_review"
+    ],
+    [
+      "langgraph_engine",
+      "test_events_spine"
+    ],
+    [
+      "langgraph_engine",
       "test_orchestrator_fanout"
     ],
     [
       "logging",
       "arq_worker"
+    ],
+    [
+      "logging",
+      "events"
+    ],
+    [
+      "main",
+      "test_events_spine"
     ],
     [
       "main",
@@ -542,12 +685,28 @@
       "test_webhook_validator"
     ],
     [
+      "math",
+      "repository"
+    ],
+    [
+      "models",
+      "__init__"
+    ],
+    [
+      "models",
+      "audit"
+    ],
+    [
       "models",
       "base_agent"
     ],
     [
       "models",
       "contracts"
+    ],
+    [
+      "models",
+      "events"
     ],
     [
       "models",
@@ -575,11 +734,19 @@
     ],
     [
       "models",
+      "repository"
+    ],
+    [
+      "models",
       "state"
     ],
     [
       "models",
       "test_aggregator"
+    ],
+    [
+      "models",
+      "test_events_spine"
     ],
     [
       "models",
@@ -610,6 +777,14 @@
       "test_orchestrator_fanout"
     ],
     [
+      "observability",
+      "nodes"
+    ],
+    [
+      "observability",
+      "router"
+    ],
+    [
       "operator",
       "state"
     ],
@@ -631,11 +806,47 @@
     ],
     [
       "pathlib",
+      "postgres"
+    ],
+    [
+      "pathlib",
       "send_signed_webhook"
     ],
     [
       "pathlib",
+      "test_events_spine"
+    ],
+    [
+      "pathlib",
       "test_orchestrator_fanout"
+    ],
+    [
+      "postgres",
+      "__init__"
+    ],
+    [
+      "postgres",
+      "run_fixture_review"
+    ],
+    [
+      "postgres",
+      "test_events_spine"
+    ],
+    [
+      "psycopg",
+      "events"
+    ],
+    [
+      "psycopg",
+      "postgres"
+    ],
+    [
+      "psycopg",
+      "repository"
+    ],
+    [
+      "psycopg",
+      "test_events_spine"
     ],
     [
       "pydantic_settings",
@@ -644,6 +855,10 @@
     [
       "pydantic",
       "findings"
+    ],
+    [
+      "pydantic",
+      "models"
     ],
     [
       "pydantic",
@@ -663,6 +878,10 @@
     ],
     [
       "pydantic",
+      "test_events_spine"
+    ],
+    [
+      "pydantic",
       "test_models"
     ],
     [
@@ -672,6 +891,10 @@
     [
       "pytest",
       "test_aggregator"
+    ],
+    [
+      "pytest",
+      "test_events_spine"
     ],
     [
       "pytest",
@@ -734,8 +957,44 @@
       "test_reliability"
     ],
     [
+      "repository",
+      "__init__"
+    ],
+    [
+      "repository",
+      "audit"
+    ],
+    [
+      "repository",
+      "events"
+    ],
+    [
+      "repository",
+      "main"
+    ],
+    [
+      "repository",
+      "router"
+    ],
+    [
+      "repository",
+      "test_events_spine"
+    ],
+    [
+      "repository",
+      "tracing"
+    ],
+    [
+      "repository",
+      "workflow_context"
+    ],
+    [
       "responses",
       "router"
+    ],
+    [
+      "re",
+      "test_events_spine"
     ],
     [
       "retry",
@@ -791,6 +1050,14 @@
     ],
     [
       "settings",
+      "run_fixture_review"
+    ],
+    [
+      "settings",
+      "test_events_spine"
+    ],
+    [
+      "settings",
       "test_queue_roundtrip"
     ],
     [
@@ -800,6 +1067,10 @@
     [
       "settings",
       "test_webhook_validator"
+    ],
+    [
+      "settings",
+      "workflow_context"
     ],
     [
       "sqlite3",
@@ -823,11 +1094,27 @@
     ],
     [
       "state",
+      "run_fixture_review"
+    ],
+    [
+      "state",
+      "test_events_spine"
+    ],
+    [
+      "state",
       "test_orchestrator_fanout"
     ],
     [
       "sys",
+      "run_fixture_review"
+    ],
+    [
+      "sys",
       "send_signed_webhook"
+    ],
+    [
+      "testclient",
+      "test_events_spine"
     ],
     [
       "testclient",
@@ -890,6 +1177,14 @@
       "test_reliability"
     ],
     [
+      "time",
+      "tracing"
+    ],
+    [
+      "tracing",
+      "__init__"
+    ],
+    [
       "types",
       "graph"
     ],
@@ -943,6 +1238,10 @@
     ],
     [
       "uuid",
+      "test_events_spine"
+    ],
+    [
+      "uuid",
       "test_orchestrator_fanout"
     ],
     [
@@ -968,6 +1267,14 @@
     [
       "worker",
       "test_queue_roundtrip"
+    ],
+    [
+      "workflow_context",
+      "__init__"
+    ],
+    [
+      "workflow_context",
+      "test_events_spine"
     ]
   ],
   "invariants": {
