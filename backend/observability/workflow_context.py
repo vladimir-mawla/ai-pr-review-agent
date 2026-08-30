@@ -31,11 +31,20 @@ def run_id_for_delivery(delivery_id: str) -> str:
 
 @lru_cache
 def get_event_repository() -> EventRepository:
-    """Process-wide ``EventRepository``, built once from ``Settings.database_url``.
+    """Process-wide ``EventRepository``, built once from ``Settings``.
 
     Cached like ``backend.core.settings.get_settings`` for the same reason:
     the connection string does not change within a process's lifetime, and
     every call site (webhook router, orchestrator nodes) should share one
-    configuration rather than each reading ``Settings`` independently.
+    configuration rather than each reading ``Settings`` independently. Also
+    threads through the M7 L2 DEBUG fix's dedicated reliability knobs
+    (``events_statement_timeout_ms`` and its own circuit breaker
+    thresholds), mirroring ``backend.api.main._default_event_repository``.
     """
-    return EventRepository(get_settings().database_url)
+    settings = get_settings()
+    return EventRepository(
+        settings.database_url,
+        statement_timeout_ms=settings.events_statement_timeout_ms,
+        circuit_breaker_failure_threshold=settings.events_circuit_breaker_failure_threshold,
+        circuit_breaker_reset_timeout_seconds=settings.events_circuit_breaker_reset_timeout_seconds,
+    )

@@ -35,6 +35,25 @@ def _default_job_queue(settings: Settings) -> JobQueue:
     return InMemoryJobQueue()
 
 
+def _default_event_repository(settings: Settings) -> EventRepository:
+    """Build the EventRepository a real (non-test) app uses, from Settings.
+
+    Threads through the M7 L2 DEBUG fix's dedicated reliability knobs
+    (``events_statement_timeout_ms`` and its own circuit breaker
+    thresholds -- see ``backend.core.settings.Settings`` and
+    ``backend.database.repository.EventRepository``) rather than leaving
+    them at ``EventRepository``'s bare constructor defaults, so a real
+    deployment's behavior is actually controlled by ``.env`` /
+    environment configuration like every other tunable in this file.
+    """
+    return EventRepository(
+        settings.database_url,
+        statement_timeout_ms=settings.events_statement_timeout_ms,
+        circuit_breaker_failure_threshold=settings.events_circuit_breaker_failure_threshold,
+        circuit_breaker_reset_timeout_seconds=settings.events_circuit_breaker_reset_timeout_seconds,
+    )
+
+
 def create_app(
     settings: Settings | None = None,
     job_queue: JobQueue | None = None,
@@ -75,7 +94,7 @@ def create_app(
     app.state.event_repository = (
         event_repository
         if event_repository is not None
-        else EventRepository(resolved_settings.database_url)
+        else _default_event_repository(resolved_settings)
     )
     app.include_router(webhook_router)
     return app

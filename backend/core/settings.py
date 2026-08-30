@@ -72,6 +72,25 @@ _DEFAULT_DATABASE_URL = (
 )
 _DEFAULT_DATABASE_ADMIN_URL = "postgresql://postgres:postgres@localhost:5433/pr_review_agent"
 
+# M7 L2 DEBUG fix (post-L4-REJECT): reliability knobs for
+# EventRepository's own outbound Postgres calls -- deliberately separate
+# from the M6 knobs above, which guard RedisJobQueue's Redis calls (an
+# unrelated dependency; conflating the two would mean tuning one outbound
+# call's timeout/breaker also silently retunes the other's). The
+# pre-existing `connect_timeout` on EventRepository bounds only the TCP
+# handshake, never query execution or lock-wait time -- an independent L4
+# VERIFY session proved that gap empirically (a table-locked INSERT
+# stalled a live webhook request for seconds with no bound at all).
+# `events_statement_timeout_ms` sets Postgres's own `statement_timeout` GUC
+# on every connection `EventRepository` opens, so a stalled query --
+# including one still waiting to acquire a lock -- is cancelled by Postgres
+# itself after this many milliseconds. Same order of magnitude as
+# connect_timeout's own 2-second default, since both bound the same class
+# of "how long is one outbound call to this dependency allowed to take".
+_DEFAULT_EVENTS_STATEMENT_TIMEOUT_MS = 2000
+_DEFAULT_EVENTS_CIRCUIT_BREAKER_FAILURE_THRESHOLD = 5
+_DEFAULT_EVENTS_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS = 30.0
+
 
 class Settings(BaseSettings):
     """Runtime configuration for the pr-review-agent backend.
@@ -130,6 +149,18 @@ class Settings(BaseSettings):
             -- the "postgres" superuser, since creating the restricted role/
             table/trigger requires privileges ``agent_events_writer`` is
             deliberately never granted. Never used by request-path code.
+        events_statement_timeout_ms: M7 L2 DEBUG fix. Bound (milliseconds)
+            Postgres itself enforces (via the `statement_timeout` GUC) on
+            every ``EventRepository`` connection/query, including time
+            spent waiting on a lock -- what actually bounds a stalled
+            events write, since ``connect_timeout`` alone does not cover
+            query execution. Default 2000 (2s).
+        events_circuit_breaker_failure_threshold: M7 L2 DEBUG fix.
+            Consecutive failures required to trip ``EventRepository``'s own
+            circuit breaker to OPEN, independent of ``RedisJobQueue``'s.
+        events_circuit_breaker_reset_timeout_seconds: M7 L2 DEBUG fix. How
+            long ``EventRepository``'s breaker stays OPEN before allowing a
+            single HALF_OPEN probe through.
     """
 
     github_webhook_secret: str = Field(
@@ -249,6 +280,36 @@ class Settings(BaseSettings):
         description=(
             "Postgres connection string used only to apply migrations "
             "(the postgres superuser). Never used by request-path code."
+        ),
+    )
+
+    events_statement_timeout_ms: int = Field(
+        default=_DEFAULT_EVENTS_STATEMENT_TIMEOUT_MS,
+        gt=0,
+        description=(
+            "Postgres statement_timeout (ms) applied to every "
+            "EventRepository connection -- bounds query execution and "
+            "lock-wait time, which connect_timeout alone does not cover. "
+            "Default 2000 (2s)."
+        ),
+    )
+
+    events_circuit_breaker_failure_threshold: int = Field(
+        default=_DEFAULT_EVENTS_CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+        ge=1,
+        description=(
+            "Consecutive failures required to trip EventRepository's own "
+            "circuit breaker to OPEN. Default 5."
+        ),
+    )
+
+    events_circuit_breaker_reset_timeout_seconds: float = Field(
+        default=_DEFAULT_EVENTS_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS,
+        gt=0,
+        description=(
+            "How long (seconds) EventRepository's circuit breaker stays "
+            "OPEN before allowing a single HALF_OPEN probe through. "
+            "Default 30.0."
         ),
     )
 

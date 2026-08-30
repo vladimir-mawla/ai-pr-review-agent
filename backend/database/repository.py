@@ -13,14 +13,47 @@ UPDATE/DELETE statement) is the suspenders.
 Each call opens and closes its own short-lived connection rather than
 holding a long-lived pool. This deliberately mirrors
 ``backend.job_queue.redis_arq.RedisJobQueue``'s pattern of a plain
-synchronous client for its request-path call, but goes one step simpler:
-events are supplementary telemetry, not a request the caller is blocked
+synchronous client for its request-path call.
+
+REVISED (L2 DEBUG, post-L4-REJECT): this module previously reasoned that
+"events are supplementary telemetry, not a request the caller is blocked
 waiting on the *result* of, so there is no need for the retry/circuit-
-breaker/timeout composition that module wraps its Redis calls in. A short
-``connect_timeout`` bounds how long a single write can stall the caller when
-Postgres is unreachable; ``backend.observability.events`` is what decides
-what happens after that (see its module docstring for the log-and-continue
-failure policy).
+breaker/timeout composition [``RedisJobQueue``] wraps its Redis calls in."
+That reasoning was wrong, and an independent L4 VERIFY session proved it
+empirically: ``insert_event`` opens a *synchronous* ``psycopg.connect`` and
+was called directly from ``async def receive_webhook``
+(``backend.webhook_receiver.router``) with no offload -- so a slow/stalled
+write did not merely "stall the caller waiting for a result", it blocked
+the single uvicorn event-loop thread outright, serialising every other
+concurrent, unrelated webhook request behind it. With an admin session
+holding ``LOCK TABLE agent_events IN ACCESS EXCLUSIVE MODE``, three
+concurrent independent webhook POSTs each took ~4.4s instead of the normal
+sub-10ms. ``connect_timeout`` bounds only the TCP handshake, not query
+execution (including time spent waiting on a lock) -- it did nothing to
+bound that stall.
+
+Two changes fix this, both reusing ``backend/reliability/`` rather than
+hand-rolling equivalents (mirroring ``RedisJobQueue``'s own composition):
+
+1. A real query-level bound: every connection this class opens now also
+   sets Postgres's own ``statement_timeout`` GUC (via libpq's ``options``
+   connection parameter), so a query that is executing *or waiting on a
+   lock* for longer than ``statement_timeout_ms`` is cancelled by Postgres
+   itself -- not merely "the client gave up an unspecified time later".
+2. A ``CircuitBreaker`` (``backend.reliability.circuit_breaker``) wraps
+   ``insert_event``'s actual connect-and-write, so once the events store
+   has failed ``circuit_breaker_failure_threshold`` consecutive times, every
+   call after that fails fast (``CircuitOpenError``) without even attempting
+   a connection, for ``circuit_breaker_reset_timeout_seconds`` -- a
+   persistently down/slow events store stops being retried, at full cost,
+   on every single request.
+
+Neither change moves the blocking call off the event-loop thread by
+itself -- that is ``backend.observability.events.emit_decision_async``'s
+job (offloading via ``asyncio.to_thread`` from the one async call site,
+``backend.webhook_receiver.router``). This module's job is only to make
+sure that once offloaded, one attempt is cheaply and genuinely bounded
+rather than being free to block a worker thread indefinitely.
 """
 
 from __future__ import annotations
@@ -30,6 +63,7 @@ from math import ceil
 import psycopg
 
 from backend.database.models import AgentEvent, EventType
+from backend.reliability.circuit_breaker import CircuitBreaker, CircuitBreakerConfig, register
 
 _INSERT_SQL = """
     INSERT INTO agent_events
@@ -46,11 +80,27 @@ _SELECT_BY_REVIEW_SQL = """
     ORDER BY ts ASC, id ASC
 """
 
+# Name every EventRepository instance's circuit breaker is registered
+# under. Mirrors RedisJobQueue's pattern (backend/job_queue/redis_arq.py):
+# each instance gets its OWN CircuitBreaker object (so independent
+# instances, e.g. one per test, never leak OPEN/HALF_OPEN state into each
+# other), while `register()` still makes the most-recently-constructed
+# instance's breaker discoverable by this name for a future /health route.
+_CIRCUIT_BREAKER_NAME = "events_db"
+
 
 class EventRepository:
     """Thin wrapper around one Postgres connection string, INSERT/SELECT only."""
 
-    def __init__(self, dsn: str, *, connect_timeout_seconds: float = 2.0) -> None:
+    def __init__(
+        self,
+        dsn: str,
+        *,
+        connect_timeout_seconds: float = 2.0,
+        statement_timeout_ms: int = 2000,
+        circuit_breaker_failure_threshold: int = 5,
+        circuit_breaker_reset_timeout_seconds: float = 30.0,
+    ) -> None:
         self._dsn = dsn
         # libpq's `connect_timeout` parameter is defined as a whole number of
         # seconds (psycopg's own type stub pins it to `str | int | None`, not
@@ -58,9 +108,34 @@ class EventRepository:
         # truncate, so a caller-supplied sub-second bound like `1.0` never
         # silently becomes a 0-second (effectively infinite/undefined) one.
         self._connect_timeout_seconds = max(1, ceil(connect_timeout_seconds))
+        if statement_timeout_ms <= 0:
+            raise ValueError(f"statement_timeout_ms must be positive, got {statement_timeout_ms}")
+        # Bounds query *execution*, including time spent waiting to acquire
+        # a lock -- exactly what connect_timeout does NOT cover, and exactly
+        # what L4 VERIFY's ACCESS-EXCLUSIVE-lock experiment exploited. Set
+        # via libpq's `options` connection parameter (`-c statement_timeout=
+        # <ms>`) so it applies to every statement on the connection from the
+        # moment it's established, including the very first one.
+        self._statement_timeout_ms = statement_timeout_ms
+        self._connect_options = f"-c statement_timeout={statement_timeout_ms}"
+        # Own breaker per instance -- see _CIRCUIT_BREAKER_NAME's comment.
+        self._breaker = register(
+            CircuitBreaker(
+                CircuitBreakerConfig(
+                    failure_threshold=circuit_breaker_failure_threshold,
+                    reset_timeout_seconds=circuit_breaker_reset_timeout_seconds,
+                ),
+                name=_CIRCUIT_BREAKER_NAME,
+            )
+        )
 
     def insert_event(self, event: AgentEvent) -> None:
-        """Append one row. Raises ``psycopg.Error``/``OSError`` on failure.
+        """Append one row, through the circuit breaker.
+
+        Raises ``psycopg.Error``/``OSError`` (a genuine attempt against
+        Postgres failed or timed out) or
+        ``backend.reliability.circuit_breaker.CircuitOpenError`` (the
+        breaker is open -- no connection was even attempted) on failure.
 
         Deliberately does not catch anything itself -- ``backend.
         observability.events`` is the layer that decides whether a failure
@@ -68,9 +143,26 @@ class EventRepository:
         allowed to propagate (e.g. a future batch/backfill script that
         *should* fail loudly). Keeping this method fail-loud keeps that
         decision in exactly one place instead of duplicating it here too.
+
+        Also deliberately does not offload itself to a background thread --
+        this method is exactly as blocking/synchronous as it looks. The one
+        call site that must not block an event loop
+        (``backend.webhook_receiver.router``, via
+        ``backend.observability.events.emit_decision_async``) is
+        responsible for calling this through ``asyncio.to_thread``; the
+        orchestrator's call site (``backend.orchestrator.nodes``) already
+        runs on a plain worker thread (LangGraph's own thread pool for a
+        sync graph), not an asyncio event loop, so it calls this directly.
         """
+        self._breaker.call(self._insert_event_once, event)
+
+    def _insert_event_once(self, event: AgentEvent) -> None:
+        """The actual connect-and-write, wrapped by ``insert_event`` in the breaker."""
         with psycopg.connect(
-            self._dsn, connect_timeout=self._connect_timeout_seconds, autocommit=True
+            self._dsn,
+            connect_timeout=self._connect_timeout_seconds,
+            autocommit=True,
+            options=self._connect_options,
         ) as conn:
             conn.execute(
                 _INSERT_SQL,
@@ -98,9 +190,19 @@ class EventRepository:
         exact-timestamp tie deterministically by insertion order, since two
         events can share the same millisecond-resolution timestamp on a
         fast local run.
+
+        Not routed through ``insert_event``'s circuit breaker or offloaded
+        anywhere -- this is a read used by tests, the audit/trace-viewer
+        query, and (not yet) a health route, never by the webhook request
+        path this milestone's fix is scoped to. It still sets the same
+        ``statement_timeout`` so a stray slow read cannot hang forever
+        either.
         """
         with psycopg.connect(
-            self._dsn, connect_timeout=self._connect_timeout_seconds, autocommit=True
+            self._dsn,
+            connect_timeout=self._connect_timeout_seconds,
+            autocommit=True,
+            options=self._connect_options,
         ) as conn:
             rows = conn.execute(_SELECT_BY_REVIEW_SQL, (review_id,)).fetchall()
         return [
