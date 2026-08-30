@@ -100,11 +100,11 @@ a paid/external credential (M8, M10–M13) come after, per the user-approved ord
 - **Credentials:** [NO CREDENTIALS] (stub nodes, no real LLM calls yet)
 
 ### M5 — Aggregator + Confidence-Weighted HITL Gate
-- **Outcome:** Pure-Python aggregation logic merges four agents' Finding lists, deduplicates same-(file,line) findings by keeping the highest confidence, computes overall confidence, and routes to "post" or "human_approval_queue" per the spec's L7 gate — all testable without any LLM.
+- **Outcome:** Pure-Python aggregation logic merges four agents' Finding lists, deduplicates same-(file,line) findings by keeping the higher-severity finding (confidence only breaks a tie within the same severity — a CRITICAL finding must never lose a collision to a lower-severity one), computes overall confidence, and routes to "post" or "human_approval_queue" per the spec's L7 gate — all testable without any LLM.
 - **Phase:** Phase 08 — Multi-Agent Systems (aggregator half) / Phase 19 — Human-in-the-Loop (gate logic)
 - **Files / freeze boundary:** `backend/agents/{base_agent,contracts}.py`, `backend/orchestrator/nodes.py` (aggregator node), `backend/hitl/queue.py`, `backend/core/settings.py` (adds `HITL_CONFIDENCE_THRESHOLD`), `.env.example` (documents it), `tests/unit/test_aggregator.py`, `tests/unit/test_hitl_gate.py`
 - **Demo command:** `pytest tests/unit/test_aggregator.py tests/unit/test_hitl_gate.py -v`
-- **Success criteria:** Given a fixture set of overlapping findings, dedup keeps only the higher-confidence one; a fixture containing one CRITICAL finding always routes to the HITL queue regardless of confidence; a fixture with confidence below the configured threshold (`HITL_CONFIDENCE_THRESHOLD` env var, default 0.75) routes to the HITL queue.
+- **Success criteria:** Given a fixture set of overlapping findings, dedup keeps the higher-severity finding first and only falls back to higher confidence to break a tie within the same severity (a lower-severity finding must never survive over a colliding CRITICAL one, regardless of confidence); a fixture containing one CRITICAL finding always routes to the HITL queue regardless of confidence; a fixture with confidence below the configured threshold (`HITL_CONFIDENCE_THRESHOLD` env var, default 0.75) routes to the HITL queue.
 - **Loops:** L1, L2, L4
 - **Skills:** canon + tdd + llmops-ai-agents
 - **Token budget:** 50000

@@ -62,7 +62,7 @@
     <div class="gate"><span class="box"></span><span class="label">Every security and reliability module has a live call site in the request path, provable by grep -- not merely a passing unit test <span class="note">(project gate)</span></span></div>
     <div class="gate"><span class="box"></span><span class="label">Every CI job references test files that exist; CI is green on a clean checkout <span class="note">(project gate)</span></span></div>
     <div class="gate"><span class="box"></span><span class="label">BudgetGuard hard-blocks the next LLM call once the daily cap is exceeded <span class="note">(project gate)</span></span></div>
-    <div class="gate"><span class="box"></span><span class="label">Findings dedupe by file and line, keeping highest confidence; aggregator threshold in code matches the threshold in its user-facing message <span class="note">(project gate)</span></span></div>
+    <div class="gate"><span class="box"></span><span class="label">Findings dedupe by file and line, keeping the higher-severity finding first and using confidence only to break a tie within the same severity (a CRITICAL finding must never lose to a lower-severity one); aggregator threshold in code matches the threshold in its user-facing message <span class="note">(project gate)</span></span></div>
     <p class="note">A milestone is DONE only when every box above is checked by the verifier. Pull each
        gate from the relevant <code>agentic-swe-master</code> phase gate.</p>
   </div>
