@@ -1,13 +1,19 @@
 {
   "$comment": "nodes=modules, edges=[cause,effect] where cause is imported-by effect. ADD invariants by hand.",
   "project": ".",
-  "generated": "2026-08-29T16:15:37.237Z",
+  "generated": "2026-08-30T00:05:12.919Z",
   "nodes": [
     "__future__",
     "__init__",
     "abc",
     "argparse",
+    "arq",
+    "arq_worker",
+    "asyncio",
     "conftest",
+    "connections",
+    "constants",
+    "contextlib",
     "dataclasses",
     "datetime",
     "decimal",
@@ -22,6 +28,7 @@
     "in_memory",
     "interface",
     "json",
+    "logging",
     "main",
     "models",
     "os",
@@ -30,6 +37,9 @@
     "pydantic",
     "pydantic_settings",
     "pytest",
+    "re",
+    "redis",
+    "redis_arq",
     "responses",
     "review",
     "router",
@@ -37,14 +47,21 @@
     "settings",
     "sys",
     "test_models",
+    "test_queue_roundtrip",
     "test_webhook_validator",
     "testclient",
+    "threading",
     "typing",
     "uuid",
     "validator",
-    "webhook"
+    "webhook",
+    "worker"
   ],
   "edges": [
+    [
+      "__future__",
+      "arq_worker"
+    ],
     [
       "__future__",
       "in_memory"
@@ -63,6 +80,10 @@
     ],
     [
       "__future__",
+      "redis_arq"
+    ],
+    [
+      "__future__",
       "router"
     ],
     [
@@ -75,6 +96,10 @@
     ],
     [
       "__future__",
+      "test_queue_roundtrip"
+    ],
+    [
+      "__future__",
       "test_webhook_validator"
     ],
     [
@@ -83,11 +108,47 @@
     ],
     [
       "abc",
+      "test_queue_roundtrip"
+    ],
+    [
+      "abc",
       "test_webhook_validator"
     ],
     [
       "argparse",
       "send_signed_webhook"
+    ],
+    [
+      "arq_worker",
+      "test_queue_roundtrip"
+    ],
+    [
+      "arq",
+      "redis_arq"
+    ],
+    [
+      "asyncio",
+      "redis_arq"
+    ],
+    [
+      "connections",
+      "arq_worker"
+    ],
+    [
+      "connections",
+      "redis_arq"
+    ],
+    [
+      "connections",
+      "test_queue_roundtrip"
+    ],
+    [
+      "constants",
+      "redis_arq"
+    ],
+    [
+      "contextlib",
+      "redis_arq"
     ],
     [
       "dataclasses",
@@ -191,6 +252,10 @@
     ],
     [
       "in_memory",
+      "test_queue_roundtrip"
+    ],
+    [
+      "in_memory",
       "test_webhook_validator"
     ],
     [
@@ -203,7 +268,15 @@
     ],
     [
       "interface",
+      "redis_arq"
+    ],
+    [
+      "interface",
       "router"
+    ],
+    [
+      "interface",
+      "test_queue_roundtrip"
     ],
     [
       "json",
@@ -216,6 +289,10 @@
     [
       "json",
       "test_webhook_validator"
+    ],
+    [
+      "logging",
+      "arq_worker"
     ],
     [
       "main",
@@ -235,7 +312,15 @@
     ],
     [
       "models",
+      "redis_arq"
+    ],
+    [
+      "models",
       "test_models"
+    ],
+    [
+      "models",
+      "test_queue_roundtrip"
     ],
     [
       "os",
@@ -283,11 +368,35 @@
     ],
     [
       "pytest",
+      "test_queue_roundtrip"
+    ],
+    [
+      "pytest",
       "test_webhook_validator"
+    ],
+    [
+      "redis_arq",
+      "main"
+    ],
+    [
+      "redis_arq",
+      "test_queue_roundtrip"
+    ],
+    [
+      "redis",
+      "redis_arq"
+    ],
+    [
+      "redis",
+      "test_queue_roundtrip"
     ],
     [
       "responses",
       "router"
+    ],
+    [
+      "re",
+      "validator"
     ],
     [
       "review",
@@ -299,11 +408,23 @@
     ],
     [
       "settings",
+      "arq_worker"
+    ],
+    [
+      "settings",
       "main"
     ],
     [
       "settings",
+      "redis_arq"
+    ],
+    [
+      "settings",
       "router"
+    ],
+    [
+      "settings",
+      "test_queue_roundtrip"
     ],
     [
       "settings",
@@ -318,6 +439,14 @@
       "test_webhook_validator"
     ],
     [
+      "threading",
+      "redis_arq"
+    ],
+    [
+      "typing",
+      "arq_worker"
+    ],
+    [
       "typing",
       "interface"
     ],
@@ -327,11 +456,23 @@
     ],
     [
       "typing",
+      "redis_arq"
+    ],
+    [
+      "typing",
       "router"
+    ],
+    [
+      "typing",
+      "settings"
     ],
     [
       "uuid",
       "send_signed_webhook"
+    ],
+    [
+      "uuid",
+      "test_queue_roundtrip"
     ],
     [
       "validator",
@@ -344,6 +485,10 @@
     [
       "webhook",
       "__init__"
+    ],
+    [
+      "worker",
+      "test_queue_roundtrip"
     ]
   ],
   "invariants": {
