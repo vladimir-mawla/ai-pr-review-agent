@@ -2,15 +2,102 @@
 - active_loop: none (between milestones)
 - target: M9
 - iteration: 0
-- last_gate: L4 VERIFY APPROVE on M8
-- next_action: finish the in-progress M9 build (hybrid retrieval / local
-  vector memory -- `backend/memory/{embedder,context_retriever,
-  tiger_client}.py`, `migrations/`, `scripts/seed_code_chunks.py` are
-  already uncommitted work-in-progress in the tree; `tests/integration/
-  test_hybrid_retrieval.py::TestVectorSearchFindsWhatKeywordMisses::
+- last_gate: L1 BUILD complete on M9 (this session; resumed from an
+  interrupted prior session's uncommitted work)
+- next_action: L4 VERIFY on M9 (separate session)
+- M9 STATUS: L1 BUILD DONE, awaiting L4 VERIFY. This session resumed an
+  M9 build (hybrid retrieval / local vector memory) that a prior session
+  left interrupted mid-way, with four modified files
+  (`.env.example`, `backend/core/settings.py`, `docker-compose.yml`,
+  `pyproject.toml`) and several new, uncommitted files
+  (`backend/memory/{embedder,context_retriever,tiger_client}.py`,
+  `migrations/scripts/dev-pgvector-init.sql`,
+  `scripts/seed_code_chunks.py`,
+  `tests/integration/test_hybrid_retrieval.py`,
+  `tests/unit/test_embedder.py`) and exactly one known-failing test.
+  This session read every file and diff, judged the design sound (RRF
+  fusion, HNSW+GIN indexes, a real M6-wrapped OpenAIEmbedder alongside a
+  deterministic no-network fixture embedder, AST-based chunking on
+  top-level def/class boundaries), root-caused and fixed the one failing
+  test, then ran all gates for real and committed the work granularly.
+
+  ROOT CAUSE OF THE FAILING TEST (not an embedder defect):
+  `TestVectorSearchFindsWhatKeywordMisses::
   test_synonym_chunk_found_by_vector_even_though_fulltext_matches_nothing`
-  is the one known-failing test in that WIP, left untouched per explicit
-  instruction not to touch M9 during M8 closeout)
+  asserted full-text search found nothing for query "authenticate user"
+  against a chunk whose body called `authenticate_session(user)`.
+  Postgres's default text-search parser splits on the underscore,
+  tokenizing `authenticate_session` into separate lexemes "authenticate"
+  (stemmed "authent") and "session" -- so `plainto_tsquery('english',
+  'authenticate user')` genuinely matched that row via full-text search,
+  directly contradicting the test's own stated premise. Confirmed
+  directly against the running database
+  (`to_tsvector('english', ...)` on the original content contained
+  'authent') before concluding this was test-data content, not the
+  fixture embedder's synonym-canonicalization design (which was already
+  sound and is exactly what a hash-based fixture embedder needs to
+  demonstrate a genuine "vector connects a term full-text search
+  structurally cannot" case). Fixed by renaming that one call to
+  `start_session(user)`, removing the accidental literal-keyword
+  collision while keeping the actual relationship under test intact
+  (`login` canonicalizes to `authenticate` in
+  `DeterministicFixtureEmbedder`, a connection Postgres's stemmer cannot
+  make). All 16 tests in `tests/integration/test_hybrid_retrieval.py`
+  pass after the fix; no assertion was loosened.
+
+  FIXTURE VS. REAL EMBEDDER: every test and PLAN.md's own M9 demo command
+  ran against `DeterministicFixtureEmbedder` -- there is no OpenAI
+  credential available for this build (`OPENAI_API_KEY` is blank in
+  `.env.example`/`.env`, `EMBEDDER_BACKEND=fixture` by default). The
+  fixture is a seeded hashing-trick bag-of-tokens projection with a small
+  hand-picked synonym table and a short-token filter -- it demonstrates
+  the SHAPE of "vector finds a lexically-distant relationship" and
+  "vector cannot represent a short/rare token" but never learns real
+  semantics from data. A real `EMBEDDER_BACKEND=openai` run would differ
+  in: (1) actual semantic clustering of arbitrary related terms, not only
+  the ~6 hand-picked synonyms in `_CANONICAL_TOKENS`; (2) real API
+  latency/cost/nondeterminism (retried via the M6-style
+  retry/breaker/timeout composition in `OpenAIEmbedder`, never exercised
+  against the live API in this session); (3) short tokens like "s3" would
+  likely still embed as something (BPE subword tokenization, not a hard
+  drop), so `TestKeywordSearchFindsWhatVectorMisses`'s specific "vector
+  ranks it dead last" assertion is a fixture-specific behavior, not
+  guaranteed to reproduce verbatim against a real model -- flagged in
+  Deferred below as something to re-validate once a key exists, not
+  claimed as proven against a real model here.
+
+  GATES (this session, all services up -- Redis 6380, Postgres 5433,
+  pgvector 5434): `ruff check .` clean; `mypy --strict backend/` clean on
+  60 source files; `pytest -v` 254 passed, 0 skipped, 0 failed (16 of
+  those in `tests/integration/test_hybrid_retrieval.py`, run for real
+  against the live pgvector container, not skipped); `lint-imports
+  --config .importlinter` 2 kept/0 broken. PLAN.md's exact M9 demo
+  command (`docker compose up -d pgvector && python
+  scripts/seed_code_chunks.py --repo . && pytest
+  tests/integration/test_hybrid_retrieval.py -v`) run verbatim: seeded
+  373 code chunks from this repo's own source
+  (`embedder_backend=fixture`), then 16 passed. Combined exit 0. Full
+  pasted output in this session's final report.
+
+  TIGER_CLIENT RULING: kept, not removed. `backend/memory/tiger_client.py`
+  is explicitly named in PLAN.md's own M9 freeze boundary
+  (`backend/memory/{tiger_client,embedder,context_retriever}.py`) and has
+  two real call sites (`backend.memory.context_retriever` and
+  `scripts/seed_code_chunks.py`), so it is neither unused nor M12 scope
+  creep -- it is this milestone's own connection/migration module, named
+  ahead of time to anticipate M12 replacing its internals (real
+  pgvectorscale/DiskANN) behind the same import path.
+
+  Context graph regenerated via the genesis-kit graphizer; all four
+  hand-written invariants backed up before the run and restored
+  byte-for-byte afterward (including `budget-guard-hard-blocks` in its
+  current, M8-reworded form, not an older version).
+
+  Committed granularly (9 commits): compose/deps, migration/schema,
+  tiger_client, settings/.env.example, embedder+unit tests,
+  context_retriever, seed script, integration tests (with the root-cause
+  fix), context graph. Pushed to origin/main.
+
 - M8 STATUS: DONE. PLAN.md's exact demo command
   (`ANTHROPIC_API_KEY=... python -m backend.agents.security_agent --diff
   tests/fixtures/sqli_diff.patch`, run via `.env`, no literal key on the
