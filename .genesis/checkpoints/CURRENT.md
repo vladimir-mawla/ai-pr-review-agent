@@ -2,8 +2,8 @@
 - active_loop: none (between milestones)
 - target: M6
 - iteration: 0
-- last_gate: L4 VERIFY APPROVE on M5 (after REJECT and fix)
-- next_action: run G0 existence pre-flight on M6
+- last_gate: L1 BUILD complete on M6 (this session) -- all four gates + PLAN.md's exact M6 demo command passed; awaiting L4 VERIFY
+- next_action: L4 VERIFY on M6 (separate session)
 - model: claude-sonnet-5
 - tokens_used: 0
 - tokens_budget: 50000
@@ -29,6 +29,12 @@ New from M5 (L1 BUILD), non-blocking:
 - `InMemoryHitlQueue` (`backend/hitl/queue.py`) is a real, tested class, but nothing in `backend.orchestrator.nodes.aggregate_node` actually calls `.enqueue()` on an instance of it -- the join node computes the correct `Review.status` (POSTED vs QUEUED_FOR_HITL) and `routing_reason`, but stops there. Wiring "a QUEUED_FOR_HITL review is actually pushed into a live queue something else can read" is left for a later milestone (M10's full local dry run, or wherever a durable/dashboard-visible queue is built), matching M5's explicit exclusion of GitHub posting (M11) and consistent with M4's own precedent of not wiring the orchestrator into the webhook/queue path.
 - The dedup tie-break's final fallback level (lexicographic `rationale` comparison, after confidence -> AGENT_PRECEDENCE -> category) is untested in isolation (only the category-level tie-break is exercised in `tests/unit/test_aggregator.py`) since triggering it requires two findings identical in every field except `rationale`, a case that cannot arise from M4/M5's one-finding-per-agent-per-run stubs. The logic is straightforward (one more lexicographic comparison in the same chain) but this specific level has no direct regression test.
 
+New from M6 (L1 BUILD), non-blocking:
+- Two files outside PLAN.md's literal M6 freeze-boundary list (`backend/reliability/{retry,circuit_breaker,idempotency,timeout}.py`, `tests/unit/test_reliability.py`) were touched: `backend/webhook_receiver/router.py` (the 503-not-500 fix, explicitly called for by this session's own build instructions to close a tracked M3-deferred item -- see the Resolved entry under M3, above) and `backend/job_queue/{redis_arq,interface}.py` (wiring the reliability layer into RedisJobQueue's real Redis calls, which is the actual point of this milestone -- a reliability layer with no live call site fails DONE.html's own "provable by grep" gate). `backend/core/settings.py` and `.env.example` were also touched, per this session's own explicit instruction to expose the new retry/timeout/breaker knobs there. Flagging all four for L4 VERIFY to confirm this reading is acceptable, same as M2/M4/M5's own documented freeze-boundary notes.
+- `idempotency.py` (named in PLAN.md's M6 freeze boundary) was deliberately not built as a standalone module: the project's real idempotency mechanism is the atomic Redis `SET NX EX` already implemented in `backend/job_queue/redis_arq.py` since M3, which is a queue-layer concern (guaranteeing exactly-once enqueue per `delivery_id`), not a generic cross-cutting reliability primitive the way retry/timeout/circuit-breaker are. Building a second, unused `backend/reliability/idempotency.py` purely to satisfy the literal freeze-boundary listing would itself have been the "nothing calls it" failure mode this milestone exists to forbid. Flagging for L4 VERIFY to confirm this reading, rather than silently dropping the file.
+- `CircuitBreaker`'s process-wide registry (`backend.reliability.circuit_breaker.register`/`all_breakers`) has no consumer yet -- no `/health` endpoint exists in this codebase as of M6. It was built because PLAN.md's own M6 text calls for "a way to inspect current state (a future /health endpoint will need it)" and because DONE.html's live-call-site gate is specifically about the retry/breaker/timeout *wrapping*, which is wired (see WIRING_PROOF in this session's final report) -- the registry itself is forward-looking infrastructure for a later milestone's `/health` route, the same category as M4's `WorkflowEngine` Protocol or M5's `InMemoryHitlQueue`. Flagging for L4 VERIFY, not treating as a gap in M6's own scope.
+- The M6 wiring/integration tests (`TestRedisJobQueueWiring`, `TestWebhookReturns503WhenQueueUnavailable` in `tests/unit/test_reliability.py`) simulate "Redis is down" by constructing `RedisJobQueue` against the real, reachable project Redis (so its eager ARQ pool-creation succeeds) and then reassigning its private `_redis_sync` attribute to a client pointed at an unreachable address, rather than stopping the shared `docker-compose.yml` Redis container mid-test-run. This was a deliberate choice (stopping shared infrastructure mid-session would break any other test in the same run that assumes Redis stays up, e.g. `tests/integration/test_queue_roundtrip.py`) but does mean these specific tests never exercise `RedisJobQueue.__init__`'s own construction-time failure path (its eager `create_pool(...).result(timeout=...)` call) against a genuinely-down Redis -- only the post-construction `enqueue()` path is proven. Flagging as a known test-design boundary, not a defect.
+
 Resolved (previously deferred from M1, now closed):
 - ~~`Review.overall_confidence` has no cross-field consistency check (not cross-checked against the mean of `findings[].confidence`)~~ -- fixed at M5: `compute_overall_confidence(findings)` is the one formula (mean, ROUND_HALF_UP to 3 decimal places, 0.000 for an empty list), and `Review` has a `model_validator(mode="after")` that raises `ValidationError` if `overall_confidence` disagrees with it. A validator (reject on mismatch) was chosen over silently recomputing the field, so a caller's bug surfaces loudly at construction time instead of being silently discarded.
 
@@ -41,8 +47,10 @@ Still open from M2:
 
 Still open from M3 (and M3's L4 VERIFY), all non-blocking:
 - No FastAPI lifespan hook calls `RedisJobQueue.close()`, so the background event-loop thread is simply abandoned on process shutdown. Harmless in practice (it's a daemon thread and the process is exiting anyway), but untidy -- a lifespan hook should call `close()` for a clean shutdown.
-- A Redis-down `enqueue()` call currently surfaces as an unhandled 500 rather than a graceful 503. Acceptable for M3's local-dev scope; revisit before this endpoint carries real traffic.
 - Idempotency state (and the queue) is lost whenever the Redis container is recreated (`docker compose down && up`, no volume) -- confirmed empirically (DBSIZE drops to 0). This satisfies M3's own success criterion (no orphaned jobs) but the idempotency-reset corollary is documented in `docker-compose.yml` and `README.md`.
+
+Resolved (previously deferred from M3, now closed):
+- ~~A Redis-down `enqueue()` call currently surfaces as an unhandled 500 rather than a graceful 503~~ -- fixed at M6: `RedisJobQueue.enqueue()` now raises a specific `QueueUnavailableError` (`backend/job_queue/interface.py`) once its retry budget is exhausted or its circuit breaker is open, and `backend.webhook_receiver.router` catches exactly that exception and answers 503. Proven, not just asserted: `tests/unit/test_reliability.py::TestWebhookReturns503WhenQueueUnavailable` drives the real FastAPI route through `TestClient` against a `RedisJobQueue` whose synchronous client is pointed at an unreachable address (constructed against the real, reachable project Redis first, then redirected -- simulating a live dependency going down rather than stopping the shared docker-compose Redis other tests depend on), and asserts a 503, not a 500.
 
 New from M4 (L1 BUILD + L4 VERIFY), still open:
 - LangGraph logs a deserialization warning on checkpoint resume: "Deserializing unregistered type backend.models.enums.AgentType / Severity / backend.models.findings.Finding from checkpoint. This will be blocked in a future version." Our custom Pydantic/enum types are not registered with LangGraph's (de)serializer, so a future LangGraph major could break checkpoint resume for them entirely unless `allowed_msgpack_modules` (or an equivalent registration mechanism) is configured. Observed and recorded by L4 VERIFY; noted in `backend/orchestrator/langgraph_engine.py` near the checkpointer setup. Not blocking today -- resume works -- but should be addressed before relying on a newer LangGraph release.
@@ -53,6 +61,90 @@ Resolved (previously deferred from M2, now closed):
 - ~~`_is_hex` uses `int(value, 16)` which accepts underscore separators and a leading sign~~ -- fixed: replaced with a strict `[0-9a-fA-F]+` charset regex; regression test added (`test_underscore_in_digest_is_rejected_as_malformed_not_invalid`)
 - ~~The demo command needs an activated venv and a hand-created `.env` and neither is documented (no README exists)~~ -- fixed: README.md now documents venv creation/activation, `pip install -e ".[dev]"`, and copying `.env.example` to `.env`
 - ~~`InMemoryJobQueue` and its `_seen_delivery_ids` grow unboundedly with no eviction~~ -- fixed: M3's `RedisJobQueue` stores the idempotency key with an expiring TTL (`Settings.idempotency_ttl_seconds`, default one week) instead of an ever-growing in-process set; proven by a test that reads the TTL back from Redis directly.
+
+## M6 Build Summary (L1 BUILD complete this session; awaiting L4 VERIFY)
+
+### G0 Pre-Flight Verdict
+UNBUILT. `backend/reliability/__init__.py` was a module docstring only --
+no `retry.py`/`circuit_breaker.py`/`timeout.py`/`idempotency.py` existed.
+`backend/job_queue/redis_arq.py` had two hardcoded `future.result(timeout=10)`-
+style magic numbers (`_POOL_CREATE_TIMEOUT_SECONDS`, `_ENQUEUE_TIMEOUT_SECONDS`)
+and no retry loop or circuit breaker anywhere. `tests/unit/test_reliability.py`
+did not exist.
+
+### Outcome Achieved
+- `backend.reliability.retry.call_with_retry`: bounded exponential backoff
+  with full jitter, an explicit `non_retryable_exceptions` set (default:
+  `TypeError`/`ValueError`/`KeyError`/`AttributeError` -- programmer
+  errors, never retried) so a malformed-argument bug cannot burn the whole
+  retry budget.
+- `backend.reliability.timeout.{await_future,run_with_timeout}`: a shared,
+  configurable bounded-wait wrapper for both an in-flight
+  `concurrent.futures.Future` and a plain synchronous callable (via a
+  shared background thread pool), replacing the old hardcoded
+  `future.result(timeout=10)`.
+- `backend.reliability.circuit_breaker.CircuitBreaker`: closed/open/half-open,
+  a single `threading.Lock` guarding every state read and mutation (the
+  wrapped call itself runs with the lock released), a process-wide registry
+  for a future `/health` endpoint.
+- All three are wired into `backend.job_queue.redis_arq.RedisJobQueue`'s two
+  real Redis operations (the idempotency `SET NX EX` and the cross-thread
+  ARQ enqueue) -- composed as retry(circuit-breaker(timeout(call))), so once
+  the breaker opens, the retry loop's own non-retryable-exception check
+  stops it from sleeping and trying again. See this session's full report
+  for the grep-verified live call sites.
+- `backend.job_queue.interface.QueueUnavailableError`: the shared exception
+  `RedisJobQueue` now raises when retries are exhausted or the breaker is
+  open; `backend.webhook_receiver.router` catches it and returns 503,
+  closing the M3-deferred "Redis-down enqueue returns 500 not 503" item.
+- Six new `Settings` fields (`retry_max_attempts`, `retry_base_delay_seconds`,
+  `retry_max_delay_seconds`, `reliability_timeout_seconds`,
+  `circuit_breaker_failure_threshold`, `circuit_breaker_reset_timeout_seconds`),
+  documented in `.env.example`.
+
+### Gate Results (this session, full output in the L1 BUILD transcript)
+- `ruff check .`: All checks passed, exit 0
+- `mypy --strict backend/`: Success: no issues found in 44 source files, exit 0
+- `pytest -v`: 137 passed (114 carried over from M1-M5 + 23 new in
+  `test_reliability.py`), exit 0. Redis (project's own, port 6380) was up
+  for this run -- the `redis`-parametrized/gated cases in both
+  `test_queue_roundtrip.py` and the new `test_reliability.py` genuinely
+  executed, not skipped.
+- `lint-imports --config .importlinter`: 2 contracts kept, 0 broken, exit 0
+- PLAN.md's M6 demo command run verbatim
+  (`pytest tests/unit/test_reliability.py -v --tb=short`): 23 passed, exit 0.
+- Cleaned up after: `docker compose down` run, confirmed no stray listeners
+  on :6380/:8000, `docker compose ps` empty, and the unrelated
+  `ampliphi-redis-1`/`ampliphi-postgres-1` containers left untouched and
+  running throughout.
+
+### Files Written
+- `backend/reliability/retry.py`, `circuit_breaker.py`, `timeout.py`, `__init__.py` (re-exports)
+- `backend/job_queue/redis_arq.py`: wired the reliability layer around both real Redis calls
+- `backend/job_queue/interface.py`: `QueueUnavailableError`
+- `backend/webhook_receiver/router.py`: catches `QueueUnavailableError` -> 503 (freeze-boundary exception, disclosed)
+- `backend/core/settings.py`, `.env.example`: six new reliability knobs
+- `tests/unit/test_reliability.py`: PLAN.md's named M6 demo test file, 23 tests
+- `.genesis/context-graph.json`: refreshed (73->80 nodes, 174->221 edges); hand-written invariants backed up and restored byte-for-byte
+
+### Architecture notes for the verifier
+- The freeze-boundary exceptions above (`router.py`, `redis_arq.py`/`interface.py`, `settings.py`/`.env.example`) need explicit sign-off, same as M2/M4/M5's own documented notes.
+- `idempotency.py` was deliberately not built as a standalone module -- see Deferred, above, for the reasoning.
+- The "Redis down" wiring tests simulate failure by redirecting `RedisJobQueue._redis_sync` post-construction rather than stopping the shared docker-compose Redis mid-session -- see Deferred, above.
+
+### Deferred / not built at M6 (explicitly out of scope, do not treat as gaps)
+- No real LLM agents (M8); no GitHub client (M11) -- this milestone's reliability layer wraps only the one real outbound I/O that exists today (Redis), per this session's own explicit scope instruction
+- No `/health` endpoint yet to surface `CircuitBreaker`'s registry (a later milestone's job)
+
+### Next Phase (M6 -> L4 VERIFY)
+A separate agent/model session should run L4 VERIFY against this build:
+re-run all four gates plus the demo command independently, check
+DONE.html's two M6-relevant gates ("Every outbound call has a
+timeout / circuit-breaker" and "Every security and reliability module has a
+live call site in the request path, provable by grep -- not merely a
+passing unit test") by re-deriving the grep evidence independently rather
+than trusting this session's report, and rule on the freeze-boundary
+exceptions above before marking M6 DONE.
 
 ## M5 Build Summary (L4 VERIFY APPROVED, after an earlier REJECT + L2 DEBUG fix)
 
