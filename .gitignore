@@ -23,6 +23,11 @@ dist/
 .env.*
 !.env.example
 
+# ---- Local runtime state ----
+# LangGraphWorkflowEngine's default checkpoint DB (backend/orchestrator/
+# langgraph_engine.py) -- local-only durable state, never a build artifact.
+var/
+
 # ---- OS / editor ----
 .DS_Store
 .idea/
