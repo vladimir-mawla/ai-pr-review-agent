@@ -80,7 +80,7 @@ a paid/external credential (M8, M10–M13) come after, per the user-approved ord
 ### M3 — Queue + Worker (Dockerized Redis/ARQ)
 - **Outcome:** A validated webhook enqueues a job to Redis via ARQ, and a separate worker process dequeues and logs it, proving the async hand-off the spec's ingress design depends on.
 - **Phase:** Phase 04 — Workflow Orchestration (infra half) / Phase 13 — Infrastructure (local dev slice)
-- **Files / freeze boundary:** `backend/job_queue/arq_worker.py`, `docker-compose.yml` (redis service), `tests/integration/test_queue_roundtrip.py`
+- **Files / freeze boundary:** `backend/job_queue/redis_arq.py` (the real `JobQueue` implementation — this milestone's central deliverable), `backend/job_queue/arq_worker.py`, `docker-compose.yml` (redis service), `backend/core/settings.py` (Redis URL, idempotency TTL, queue-backend selection), `backend/api/main.py` (wires the selected backend into `create_app()`), `.env.example` (documents the new env vars), `pyproject.toml` (`redis`, `arq` dependencies), `tests/integration/test_queue_roundtrip.py`
 - **Demo command:** `docker compose up -d redis && arq backend.job_queue.arq_worker.WorkerSettings & pytest tests/integration/test_queue_roundtrip.py -v`
 - **Success criteria:** A job enqueued by the test appears in the worker's processed log within 5 seconds; `docker compose down` and re-`up` leaves no orphaned jobs (queue is empty after a clean run).
 - **Loops:** L1, L4
@@ -91,7 +91,7 @@ a paid/external credential (M8, M10–M13) come after, per the user-approved ord
 ### M4 — Orchestrator Fan-Out (Stub Agents)
 - **Outcome:** A LangGraph graph fans out to four parallel stub agent nodes (each returning a canned `Finding`) via the Send API, checkpoints state to Redis, and resumes correctly after a simulated mid-run crash.
 - **Phase:** Phase 04 — Workflow Orchestration
-- **Files / freeze boundary:** `backend/orchestrator/{graph,nodes,state,langgraph_engine}.py`, `backend/core/workflow_engine.py` (the ADR-001 abstract interface), `tests/integration/test_orchestrator_fanout.py`
+- **Files / freeze boundary:** `backend/orchestrator/{graph,nodes,state,langgraph_engine}.py`, `backend/core/workflow_engine.py` (the ADR-001 abstract interface), `pyproject.toml` (adds the `langgraph` dependency this milestone introduces), `tests/integration/test_orchestrator_fanout.py`
 - **Demo command:** `pytest tests/integration/test_orchestrator_fanout.py -v -k "fanout or checkpoint_resume"`
 - **Success criteria:** All four stub nodes' outputs are present in the final state; killing the worker after 2 of 4 nodes complete and restarting resumes from the checkpoint rather than re-running completed nodes (asserted via a call counter).
 - **Loops:** L1, L2, L3, L4
@@ -102,7 +102,7 @@ a paid/external credential (M8, M10–M13) come after, per the user-approved ord
 ### M5 — Aggregator + Confidence-Weighted HITL Gate
 - **Outcome:** Pure-Python aggregation logic merges four agents' Finding lists, deduplicates same-(file,line) findings by keeping the highest confidence, computes overall confidence, and routes to "post" or "human_approval_queue" per the spec's L7 gate — all testable without any LLM.
 - **Phase:** Phase 08 — Multi-Agent Systems (aggregator half) / Phase 19 — Human-in-the-Loop (gate logic)
-- **Files / freeze boundary:** `backend/agents/{base_agent,contracts}.py`, `backend/orchestrator/nodes.py` (aggregator node), `backend/hitl/queue.py`, `tests/unit/test_aggregator.py`, `tests/unit/test_hitl_gate.py`
+- **Files / freeze boundary:** `backend/agents/{base_agent,contracts}.py`, `backend/orchestrator/nodes.py` (aggregator node), `backend/hitl/queue.py`, `backend/core/settings.py` (adds `HITL_CONFIDENCE_THRESHOLD`), `.env.example` (documents it), `tests/unit/test_aggregator.py`, `tests/unit/test_hitl_gate.py`
 - **Demo command:** `pytest tests/unit/test_aggregator.py tests/unit/test_hitl_gate.py -v`
 - **Success criteria:** Given a fixture set of overlapping findings, dedup keeps only the higher-confidence one; a fixture containing one CRITICAL finding always routes to the HITL queue regardless of confidence; a fixture with confidence below the configured threshold (`HITL_CONFIDENCE_THRESHOLD` env var, default 0.75) routes to the HITL queue.
 - **Loops:** L1, L2, L4
@@ -124,7 +124,7 @@ a paid/external credential (M8, M10–M13) come after, per the user-approved ord
 ### M7 — Events Spine (Local Audit/Trace Log)
 - **Outcome:** Every orchestrator span, decision, and (stub) LLM call emits one append-only row to a local events table, and a trace-viewer query reconstructs one review end-to-end from `review_id` alone.
 - **Phase:** Phase 10 — Observability
-- **Files / freeze boundary:** `backend/observability/{events,tracing,audit,workflow_context}.py`, `backend/database/{postgres,models,repository}.py` (local Postgres/SQLite dev schema mirroring `agent_events`), `tests/integration/test_events_spine.py`
+- **Files / freeze boundary:** `backend/observability/{events,tracing,audit,workflow_context}.py`, `backend/database/{postgres,models,repository}.py` (local Postgres/SQLite dev schema mirroring `agent_events`), `docker-compose.yml` (adds the postgres service the demo command depends on), `backend/core/settings.py` (adds `DATABASE_URL`), `.env.example` (documents it), `pyproject.toml` (adds a Postgres driver dependency), `tests/integration/test_events_spine.py`
 - **Demo command:** `docker compose up -d postgres && python scripts/run_fixture_review.py --review-id demo-1 && psql "$DATABASE_URL" -c "SELECT event_type, agent, ts FROM agent_events WHERE review_id='demo-1' ORDER BY ts"`
 - **Success criteria:** The query returns a non-empty, time-ordered sequence covering span.start through decision for the fixture run; no UPDATE/DELETE statement exists anywhere in the codebase against the events table (grep-verifiable, mirrors the append-only-events invariant).
 - **Loops:** L1, L2, L4
@@ -135,7 +135,7 @@ a paid/external credential (M8, M10–M13) come after, per the user-approved ord
 ### M8 — First Real Specialist Agent (LLM-Backed)
 - **Outcome:** The security agent makes a real call to the driver model (claude-haiku-4-5) against a fixture diff, and its raw output is parsed through the `Finding` Pydantic schema before anything downstream sees it — the first point real model behavior enters the system.
 - **Phase:** Phase 05 — LLM & Reasoning
-- **Files / freeze boundary:** `backend/agents/security_agent.py`, `backend/tools/{llm_client,model_router}.py`, `backend/prompts/{registry,templates/security.md}`, `backend/economics/budget.py` (BudgetGuard stub, daily cap read from `BUDGET_DAILY_CAP_USD` env var, default 20), `tests/integration/test_security_agent_live.py` (marked to skip without a key), `tests/unit/test_security_agent_schema.py` (mocked LLM response)
+- **Files / freeze boundary:** `backend/agents/security_agent.py`, `backend/tools/{llm_client,model_router}.py`, `backend/prompts/{registry,templates/security.md}`, `backend/economics/budget.py` (BudgetGuard stub, daily cap read from `BUDGET_DAILY_CAP_USD` env var, default 20), `backend/core/settings.py` (adds `ANTHROPIC_API_KEY` and `BUDGET_DAILY_CAP_USD`), `.env.example` (documents both), `pyproject.toml` (adds the `anthropic` SDK dependency), `tests/integration/test_security_agent_live.py` (marked to skip without a key), `tests/unit/test_security_agent_schema.py` (mocked LLM response)
 - **Demo command:** `ANTHROPIC_API_KEY=... python -m backend.agents.security_agent --diff tests/fixtures/sqli_diff.patch`
 - **Success criteria:** The command exits 0 and prints at least one `Finding` whose fields all validate against the schema; `pytest tests/unit/test_security_agent_schema.py -v` passes without any API key (mocked path); a forced BudgetGuard-over-cap fixture blocks the call before it reaches the LLM client.
 - **Loops:** L1, L3, L4
@@ -146,7 +146,7 @@ a paid/external credential (M8, M10–M13) come after, per the user-approved ord
 ### M9 — Hybrid Retrieval / Local Vector Memory
 - **Outcome:** A small seeded set of code chunks in a local Postgres+pgvector container is searchable by both ANN vector similarity and full-text search, merged by reciprocal rank fusion into a top-k list — the grounding layer from spec L4/3.5, running locally before any Tiger Cloud account exists. Embeddings use OpenAI text-embedding-3-large at 256 dims, per the spec's pinned config.
 - **Phase:** Phase 06 — Memory Architecture
-- **Files / freeze boundary:** `backend/memory/{tiger_client,embedder,context_retriever}.py`, `migrations/scripts/dev-pgvector-init.sql` (local analog of `2026-06-tiger-init.sql`), `tests/integration/test_hybrid_retrieval.py`
+- **Files / freeze boundary:** `backend/memory/{tiger_client,embedder,context_retriever}.py`, `migrations/scripts/dev-pgvector-init.sql` (local analog of `2026-06-tiger-init.sql`), `docker-compose.yml` (adds the pgvector service the demo command depends on), `backend/core/settings.py` (adds the local pgvector connection string and, if not using cached embeddings, `OPENAI_API_KEY`), `.env.example` (documents both), `pyproject.toml` (adds an embeddings client and a pgvector-capable Postgres driver), `tests/integration/test_hybrid_retrieval.py`
 - **Demo command:** `docker compose up -d pgvector && python scripts/seed_code_chunks.py --repo . && pytest tests/integration/test_hybrid_retrieval.py -v`
 - **Success criteria:** A query for a known function name returns it in the top-3 fused results via FTS even when the embedding model ranks it lower; recall@5 on a 10-query fixture set is 100% (every known-relevant chunk is retrieved).
 - **Loops:** L1, L3, L4
@@ -168,7 +168,7 @@ a paid/external credential (M8, M10–M13) come after, per the user-approved ord
 ### M11 — Real GitHub Integration
 - **Outcome:** A real GitHub App receives a webhook from an actual pull request, and the system posts a real structured review comment back to that PR — the mocked `github_client` from M10 is swapped for the real REST wrapper behind the same interface. A contract test pins the mocked client's behavior to the real API's observed shape, to catch mock-drift.
 - **Phase:** Phase 03 (real ingress) / Phase 08 (real posting) — closing the loop opened in M2/M10
-- **Files / freeze boundary:** `backend/integrations/{github_client,github_models}.py` (real implementation), `backend/security/rbac.py`, `.env.example` (documents required GitHub App vars), `tests/contract/test_github_client_contract.py`
+- **Files / freeze boundary:** `backend/integrations/{github_client,github_models}.py` (real implementation), `backend/security/rbac.py`, `.env.example` (documents required GitHub App vars), `pyproject.toml` (a real GitHub App needs RS256 JWT signing for app-level auth and a real outbound HTTP client — neither is a runtime dependency yet; `httpx` is currently dev-only, used just for `TestClient`), `tests/contract/test_github_client_contract.py`
 - **Demo command:** `ngrok http 8000 & python scripts/register_webhook.py --url "$NGROK_URL/webhook" && gh pr create --title "test" --body "test" && curl -s http://localhost:8000/health`
 - **Success criteria:** Opening a real PR against the configured test repo results in a real comment posted by the bot within 60 seconds, visible via `gh pr view --comments`; a second identical webhook delivery (GitHub's own retry) does not produce a second comment.
 - **Loops:** L1, L3, L4
@@ -179,7 +179,7 @@ a paid/external credential (M8, M10–M13) come after, per the user-approved ord
 ### M12 — Tiger Cloud Migration
 - **Outcome:** The local Postgres+pgvector and events tables from M7/M9 are replaced by a provisioned Tiger Cloud instance with the real hypertable, DiskANN index, and continuous aggregates from the spec's 2.3/4.3, per ADR-003's four-stage plan (Infra → Events → Memory → Dashboard, stages A–C here).
 - **Phase:** Phase 13 — Infrastructure / Phase 14 — Data Engineering / Phase 06 & 10 (re-verified against the real store)
-- **Files / freeze boundary:** `migrations/scripts/2026-06-tiger-init.sql`, `backend/database/postgres.py` (Tiger pool + `init_tiger_schema`), `backend/memory/tiger_client.py` (real pgvectorscale/DiskANN path replaces the local dev version)
+- **Files / freeze boundary:** `migrations/scripts/2026-06-tiger-init.sql`, `backend/database/postgres.py` (Tiger pool + `init_tiger_schema`), `backend/memory/tiger_client.py` (real pgvectorscale/DiskANN path replaces the local dev version), `backend/core/settings.py` (adds `TIGER_DATABASE_URL`, used directly by the demo command), `.env.example` (documents it)
 - **Demo command:** `psql "$TIGER_DATABASE_URL" -c "SELECT extname FROM pg_extension WHERE extname IN ('timescaledb','vector','vectorscale')" && pytest tests/integration/test_hybrid_retrieval.py tests/integration/test_events_spine.py --tiger-url "$TIGER_DATABASE_URL" -v`
 - **Success criteria:** All three extensions are listed; the same M9/M7 test suites pass unmodified against the real Tiger Cloud connection string; `agent_health_1m` and `pr_cost_hourly` continuous aggregates exist and return rows after the fixture run.
 - **Loops:** L1, L3, L4
@@ -190,7 +190,7 @@ a paid/external credential (M8, M10–M13) come after, per the user-approved ord
 ### M13 — Dashboard + Evaluation/CI Gate
 - **Outcome:** The Next.js 15 (Node 20) dashboard renders the HITL queue and per-agent cost/latency from the continuous aggregates, and a golden-dataset LLM-as-judge (claude-sonnet-5, judge only) regression gate runs in CI and blocks a merge that degrades review quality.
 - **Phase:** Phase 02 — Frontend / Phase 09 — Evaluation / Phase 18 — CI/CD for AI
-- **Files / freeze boundary:** `frontend/src/app/**`, `frontend/components/**`, `backend/evaluation/{golden_dataset,judge,regression_gate}.py`, `.github/workflows/eval-gate.yml`
+- **Files / freeze boundary:** `frontend/src/app/**`, `frontend/components/**`, `frontend/package.json` (+ the Next.js/TypeScript project config it implies — `tsconfig.json`, `next.config.*` — none of which exists yet), `backend/evaluation/{golden_dataset,judge,regression_gate}.py`, `.github/workflows/eval-gate.yml`
 - **Demo command:** `npm --prefix frontend run build && npm --prefix frontend run dev & pytest tests/eval/test_regression_gate.py -v`
 - **Success criteria:** The dashboard's economics page renders non-zero cost figures sourced from `pr_cost_hourly`; the regression gate fails CI when run against a deliberately-degraded fixture judge score, and passes against the baseline.
 - **Loops:** L1, L2, L3, L4
