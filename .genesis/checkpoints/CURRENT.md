@@ -1,15 +1,95 @@
 # CURRENT
 - active_loop: none (between milestones)
 - target: M8
-- iteration: 0
-- last_gate: L2 DEBUG fix (2026-08-30) for the HIGH PRIORITY webhook-enqueue
-  defect M7's L4 VERIFY found living in M6-scope code (see Resolved, below)
-- next_action: L4 VERIFY this fix (separate session), then G0 existence
-  pre-flight on M8
+- iteration: 1
+- last_gate: L1 BUILD (2026-08-30) -- all four gates green (`ruff check .`,
+  `mypy --strict backend/` on 57 source files, `pytest -v` 205 passed + 1
+  skipped, `lint-imports --config .importlinter` 2 kept/0 broken), both
+  Redis and Postgres up so every DB-dependent test genuinely ran, none
+  skipped except the one test that legitimately needs a live credential.
+  PLAN.md's M8 demo command (`ANTHROPIC_API_KEY=... python -m
+  backend.agents.security_agent --diff tests/fixtures/sqli_diff.patch`) is
+  **BLOCKED -- awaiting credential**: `ANTHROPIC_API_KEY` is not present in
+  `.env`, confirmed both by `grep` and by actually running the CLI, which
+  fails with a clear `LLMConfigurationError` (not a fabricated pass, not a
+  mocked run) at exactly the point a real call would be made -- see this
+  session's final report for the full traceback.
+- next_action: L4 VERIFY on M8 (separate session)
 - model: claude-sonnet-5
 - tokens_used: 0
 - tokens_budget: 50000
 - skills_loaded: []
+
+## M8 history (kept for context; superseded by the two lines above)
+
+**L1 BUILD.** First real, LLM-backed specialist agent plus the cost
+controls around it. `backend/tools/llm_client.py`'s `AnthropicLLMClient`
+wraps `anthropic.Anthropic().messages.create(...)` (model configurable via
+`Settings.anthropic_model`, default `claude-haiku-4-5` per this project's
+approved driver-model decision -- never Opus) in the exact retry ->
+circuit-breaker -> timeout composition `RedisJobQueue`/`EventRepository`
+already established, reused rather than hand-rolled. `backend.economics.
+budget.BudgetGuard.check_and_raise()` runs first inside `complete()`,
+before the underlying Anthropic client is even constructed, and reads real
+spend via a new `EventRepository.sum_llm_cost_since` query against
+`agent_events`'s real `cost_usd` column -- never an in-memory counter. On
+success, `emit_llm_call` gets its first live call site (M7 built it with no
+caller and disclosed that as M8's job). A tolerant parser
+(`backend.agents.response_parsing`) survives real-model drift (key drift,
+markdown fences, prose-then-JSON, a bare list); total parse failure returns
+one synthetic CRITICAL/confidence-0.000 `Finding` (forces
+`has_critical_finding`'s unconditional HITL routing) rather than crashing
+or silently dropping the specialist's contribution. `security_node`
+(`backend.orchestrator.nodes`) now delegates to a real, lazily-constructed
+`SecurityAgent` by default, with a test-only override hook mirroring this
+module's own pre-existing `arm_crash`/`arm_agent_error` pattern -- the
+other three specialists remain M4's canned stubs, per this milestone's
+explicit scope.
+
+**A real bug found and fixed during this same L1 BUILD session (not
+deferred to L4 VERIFY):** the parser could not distinguish a genuinely
+empty `findings: []` list (a clean diff -- valid) from "every item failed
+validation" (untrustworthy output -- should raise) -- both collapsed to an
+empty `findings` list, so a clean diff was being misrouted through the
+forced-HITL CRITICAL fallback path every time. Fixed by only raising
+`ResponseParseError` when the extracted items list was non-empty yet
+nothing in it survived validation; proven by two tests that previously
+failed against the bug (`test_empty_findings_list_is_valid_not_an_error`,
+`test_empty_findings_list_is_a_real_empty_list_not_a_fallback`), now
+passing.
+
+**A second real bug found and fixed, this one with a genuine
+data-hygiene consequence:** the integration test proving BudgetGuard reads
+real spend from `agent_events` originally pinned its fixture rows to a
+FAR-FUTURE day (2030-06-15) for test isolation. This was backwards --
+`sum_llm_cost_since` correctly has NO upper bound (a real production
+`llm.call` is never timestamped in the future), so a future-dated fixture
+row is still `>= today's real midnight` and silently polluted the *live*
+BudgetGuard's actual accounting: running the M8 demo CLI immediately
+afterward raised `BudgetExceededError: spent $2119.000446 of $20 cap` --
+the sum of every future-pinned fixture row this session's own test suite
+had written, not a real defect in production code. Fixed by re-pinning the
+fixture day to 2020-06-15 (safely in the past, unconditionally excluded
+from any real "since today's midnight" query for the life of this test
+suite) and, since the append-only table cannot be cleaned up any other way
+by application code, recycling `docker compose down && up` (no volume, so
+this wipes the polluted local dev Postgres) before the final gate re-run.
+Confirmed clean afterward: real "today" `llm.call` spend was $0.000123
+(from the gate run itself), and the demo CLI's failure changed from a
+spurious `BudgetExceededError` to the correct `LLMConfigurationError` for
+the actually-missing credential. Flagged for L4 VERIFY as a
+test-design-only finding (production code was never wrong) -- see
+`tests/integration/test_budget_guard_events.py`'s own ISOLATION note.
+
+**Live demo: BLOCKED -- awaiting credential**, not fabricated. See the
+header fields above and this session's final report for the full,
+real CLI traceback proving exactly where it stops (a clear
+`LLMConfigurationError` at the point a real Anthropic API call would be
+made, with the budget/parsing/wiring machinery upstream of it all
+verified working via the fixed test suite).
+
+All four gates plus the freeze-boundary disclosures are in this session's
+full report; see `## M8 Build Summary` below for the complete account.
 
 ## M7 history (kept for context; superseded by the two lines above)
 
@@ -133,6 +213,78 @@ of the REJECT-then-fix cycle.
 A second, independent L4 VERIFY session then re-ran all four gates plus PLAN.md's M5 demo command against the fixed code, re-verified the CRITICAL-survives-dedupe guarantee through the real compiled graph (not just the unit-level regression test), and APPROVEd M5. M5 is now DONE; see `.genesis/PLAN.md`'s Progress entry and `.genesis/explanations/2026-08-30-explanation-m5.html` for the full account of the REJECT-then-fix cycle.
 
 ## Deferred
+
+New from M8 (L1 BUILD), non-blocking except where noted:
+- **Live demo BLOCKED on credential, not a defect:** `ANTHROPIC_API_KEY` is
+  not present in `.env`. PLAN.md's exact M8 demo command cannot be run for
+  real; see the header's `last_gate` and `## M8 history` above for the
+  real, non-fabricated CLI traceback proving exactly where it stops
+  (`LLMConfigurationError`, at the point a real API call would be made).
+  L4 VERIFY should re-run the demo for real once the key is available;
+  until then this is the expected, honest state, not a build gap.
+- **`context-graph.json`'s `budget-guard-hard-blocks` invariant wording
+  mismatch, flagged for L4 VERIFY to rule on:** the invariant's literal
+  text describes `BudgetGuard.check()` being called "at the start of every
+  specialist agent node in backend/orchestrator/nodes.py ... before any
+  call into backend/tools/llm_client.py" -- i.e. duplicated at each
+  orchestrator node's own call site. What was actually built centralizes
+  the check instead: `BudgetGuard.check_and_raise()` (named `check_and_
+  raise`, not `check`) is called once, inside
+  `AnthropicLLMClient.complete()` itself, guarding every caller of the LLM
+  client uniformly (the orchestrator's `security_node`, PLAN.md's own CLI
+  demo entry point, and any future caller) rather than relying on each
+  call site to remember to check first. This is a deliberate, arguably
+  more robust design (one enforcement point, not N duplicated ones) but it
+  does not literally match the invariant's wording or the verification
+  method it describes ("no orchestrator node calls llm_client without a
+  preceding BudgetGuard.check() in the same function body"). Not resolved
+  unilaterally in this session -- `.genesis/context-graph.json`'s
+  hand-written invariants are meant to be ruled on, not silently rewritten
+  by the builder. Flagging for L4 VERIFY (or a follow-up decision) to
+  either accept this design and update the invariant's wording, or require
+  the literal per-node duplication instead.
+- **`complete_async` (`backend.tools.llm_client.AnthropicLLMClient`) has no
+  live call site yet** -- the one live call site this milestone built
+  (`security_node` -> `SecurityAgent.analyze` -> `complete`) runs on a
+  LangGraph worker thread, never an asyncio event loop, so the synchronous
+  `complete` is the correct method there. `complete_async` exists and is
+  directly tested (proving the `asyncio.to_thread` offload actually works,
+  not merely declared) for a future async caller -- the same
+  forward-looking-infrastructure category as M7's own `emit_tool_call`.
+- **A daily budget with no per-model or per-agent breakdown:** `BudgetGuard`
+  sums ALL `llm.call` cost across every model/agent/review for the day
+  against one global cap -- there is no way today to ask "how much did
+  QUALITY specifically spend" or "how much came from a different model" in
+  isolation. Acceptable for M8's single real specialist; worth revisiting
+  once M10 wires up the other three real agents and cost attribution
+  across specialists starts to matter operationally.
+- **No emitted event on a failed LLM call:** `AnthropicLLMClient.complete`
+  only calls `emit_llm_call` on success -- a call that exhausts retries or
+  hits an open circuit breaker records nothing in `agent_events` beyond
+  whatever the caller's own error handling logs elsewhere. A future
+  milestone building real alerting/dashboards off the events spine may
+  want a failure-shaped event too; not built here since no requirement
+  named it and `outcome`/token/cost fields don't have an obvious "this
+  failed" shape to reuse without a schema change.
+- **Freeze-boundary touches beyond PLAN.md's literal M8 file list,
+  disclosed here per M2/M5/M6/M7's own precedent:** `backend/agents/
+  base_agent.py` (`analyze` gained an optional, keyword-only `review_id` --
+  a backward-compatible extension of the exact forward-looking contract M5
+  wrote specifically for M8 to implement against), `backend/orchestrator/
+  {nodes,state}.py` (replacing the security stub and adding `GraphState`'s
+  optional `diff` field -- both explicitly called for by this session's own
+  build instructions: "Replace the security stub node in the orchestrator
+  ... The graph, fan-out, aggregator and HITL gate must all still work"),
+  and `tests/integration/test_orchestrator_fanout.py` (an autouse fixture
+  installing a stub-equivalent fake agent, needed so the pre-existing M4/M5
+  tests keep passing once `security_node`'s production default changed).
+  `backend/prompts/templates/security/v1.md` uses a directory-per-agent
+  layout (PLAN.md's literal freeze-boundary text named a single
+  `backend/prompts/templates/security.md` file) per this session's own
+  instruction to borrow "the reference implementation's two-level approach"
+  (a versioned file per agent, not one flat file per agent) -- flagging
+  since it is a structural, not merely additive, deviation from the
+  literal freeze-boundary listing.
 
 New from M7 (L4 VERIFY, both rounds), non-blocking except where noted:
 - The events circuit breaker opening means events can be dropped for up to
@@ -331,6 +483,150 @@ Resolved (previously deferred from M2, now closed):
 - ~~`_is_hex` uses `int(value, 16)` which accepts underscore separators and a leading sign~~ -- fixed: replaced with a strict `[0-9a-fA-F]+` charset regex; regression test added (`test_underscore_in_digest_is_rejected_as_malformed_not_invalid`)
 - ~~The demo command needs an activated venv and a hand-created `.env` and neither is documented (no README exists)~~ -- fixed: README.md now documents venv creation/activation, `pip install -e ".[dev]"`, and copying `.env.example` to `.env`
 - ~~`InMemoryJobQueue` and its `_seen_delivery_ids` grow unboundedly with no eviction~~ -- fixed: M3's `RedisJobQueue` stores the idempotency key with an expiring TTL (`Settings.idempotency_ttl_seconds`, default one week) instead of an ever-growing in-process set; proven by a test that reads the TTL back from Redis directly.
+
+## M8 Build Summary (L1 BUILD, awaiting L4 VERIFY)
+
+### G0 Pre-Flight Verdict
+UNBUILT. `backend/tools/__init__.py`, `backend/prompts/__init__.py`, and
+`backend/economics/__init__.py` were all module docstrings only -- no
+`llm_client.py`, `registry.py`/`templates/`, or `budget.py`/`pricing.py`
+existed. `backend/agents/security_agent.py` and `backend/agents/
+response_parsing.py` did not exist. `backend.observability.events.
+emit_llm_call` existed (M7) but had no live call site, exactly as M7's own
+report disclosed. `backend.orchestrator.nodes.security_node` was still
+M4's canned stub.
+
+### Outcome Achieved
+- `backend.tools.llm_client.AnthropicLLMClient`: wraps `anthropic.
+  Anthropic().messages.create(...)` (model from `Settings.anthropic_model`,
+  default `claude-haiku-4-5`) in retry -> circuit breaker -> timeout,
+  composed identically to `RedisJobQueue`/`EventRepository`'s own pattern.
+  `BudgetGuard.check_and_raise()` runs first, before the underlying
+  Anthropic client is even constructed -- proven, not just asserted:
+  `tests/unit/test_llm_client.py::TestBudgetGuardBlocksBeforeTheClient`
+  asserts the injected fake client's call count stays 0. On success,
+  computes real USD cost (`backend.economics.pricing.compute_cost_usd`)
+  and emits `emit_llm_call`'s first live call site. `complete_async`
+  offloads via `asyncio.to_thread`, proven by a heartbeat-coroutine test
+  that a slow call does not stall a concurrent task.
+- `backend.economics.budget.BudgetGuard`: hard-blocks (raises, never
+  warns) once today's real spend -- summed from `agent_events` via a new
+  `EventRepository.sum_llm_cost_since` query -- meets the configured daily
+  cap (default $20). Proven against a real Postgres, not just a fake
+  repository (`tests/integration/test_budget_guard_events.py`).
+- `backend.prompts.registry.load_prompt`: versioned file on disk
+  (`backend/prompts/templates/security/v1.md`) with an inline fallback,
+  per this session's own instruction to borrow the reference
+  implementation's two-level approach.
+- `backend.agents.response_parsing.parse_findings_from_llm_response`: a
+  tolerant parser surviving every named drift case (key drift, markdown
+  fences, prose-then-JSON, a bare list, stacked combinations), with a
+  correctness fix made during this same session (see `## M8 history`
+  above) so a genuinely empty findings list is never confused with a
+  total parse failure.
+- `backend.agents.security_agent.SecurityAgent`: the first non-stub
+  `BaseAgent`. On total parse failure, returns one synthetic CRITICAL/
+  confidence-0.000 `Finding` (forces `has_critical_finding`'s
+  unconditional HITL routing) rather than crashing or silently dropping
+  the specialist's contribution. Also PLAN.md's named CLI demo entry
+  point.
+- `backend.orchestrator.nodes.security_node`: delegates to a real, lazily-
+  constructed `SecurityAgent` by default, with a test-only override hook
+  mirroring this module's pre-existing `arm_crash`/`arm_agent_error`
+  pattern. `quality`/`tests`/`docs` are UNCHANGED canned stubs. Proven
+  through the real compiled graph, not just in isolation: `tests/
+  integration/test_orchestrator_fanout.py::
+  TestRealSecurityAgentSlotsIntoTheGraph` installs a real `SecurityAgent`
+  (fake LLM client, still no API key) and asserts its finding flows
+  through alongside the three stubs' canned ones -- the M5-lesson
+  composition test this session's own instructions called out by name.
+- Every pre-existing M4/M5 fan-out/crash-resume/aggregation test in
+  `test_orchestrator_fanout.py` keeps passing unchanged in *meaning* (not
+  merely in exit code) via an autouse fixture that installs an
+  M4-stub-equivalent fake security agent, reproducing the exact canned
+  `Finding`/timing the real stub used to return.
+
+### Gate Results (this session, full output in the L1 BUILD transcript)
+- `ruff check .`: All checks passed, exit 0
+- `mypy --strict backend/`: Success: no issues found in 57 source files, exit 0
+- `pytest -v`: 205 passed, 1 skipped (the live-LLM-call integration test,
+  correctly skipped for the missing `ANTHROPIC_API_KEY`), exit 0. Both
+  Redis (6380) and Postgres (5433) were up for this run -- every
+  DB-dependent test genuinely executed, including
+  `test_budget_guard_events.py`'s real-Postgres proof.
+- `lint-imports --config .importlinter`: 2 contracts kept, 0 broken, exit 0
+- Cleaned up after: `docker compose down` run, confirmed no stray listeners
+  on :5433/:6380/:8000, `docker compose ps` empty, and the unrelated
+  `ampliphi-redis-1`/`ampliphi-postgres-1` containers left untouched and
+  running throughout.
+
+### Demo Command: BLOCKED -- awaiting credential
+`ANTHROPIC_API_KEY` is not present in `.env` (`grep -q
+'^ANTHROPIC_API_KEY=' .env` fails). PLAN.md's exact demo command was
+actually attempted (with `.env` sourced into the shell), not merely
+skipped: it fails with a real, non-fabricated `LLMConfigurationError`
+("ANTHROPIC_API_KEY is not configured -- cannot make a real Anthropic API
+call"), raised from `AnthropicLLMClient._client()` at exactly the point a
+real call would be made -- i.e. every upstream step (CLI arg parsing, diff
+reading, prompt loading, BudgetGuard's real-Postgres-backed check, which
+passed since today's real spend was $0.000123) worked correctly, and the
+ONLY blocker is the missing credential. See `## M8 history` above for the
+full traceback and the test-isolation bug this exact repro surfaced and
+fixed (a since-corrected future-dated test fixture had been polluting this
+same real Postgres's daily spend figure).
+
+### Files Written
+- `backend/tools/llm_client.py`: `AnthropicLLMClient`, `LLMResponse`, `LLMClientProtocol`
+- `backend/prompts/registry.py`, `backend/prompts/templates/security/v1.md`
+- `backend/agents/response_parsing.py`: `parse_findings_from_llm_response`, `ResponseParseError`
+- `backend/agents/security_agent.py`: `SecurityAgent` + CLI demo entrypoint
+- `backend/agents/base_agent.py`: `analyze` gains optional `review_id` (freeze-boundary exception, disclosed)
+- `backend/economics/budget.py`, `backend/economics/pricing.py`: `BudgetGuard`, `compute_cost_usd`
+- `backend/database/repository.py`: `EventRepository.sum_llm_cost_since`
+- `backend/core/settings.py`, `.env.example`: `ANTHROPIC_API_KEY`/`ANTHROPIC_MODEL`/`BUDGET_DAILY_CAP_USD` + six `LLM_*` reliability knobs
+- `backend/orchestrator/{nodes,state}.py`: real `security_node` + `GraphState.diff` (freeze-boundary exception, disclosed)
+- `pyproject.toml`: `anthropic` runtime dependency; a `T20` per-file ruff ignore for `security_agent.py`'s CLI entrypoint
+- `tests/unit/test_llm_client.py`, `tests/unit/test_security_agent_schema.py`, `tests/unit/test_budget_guard.py`: new unit suites
+- `tests/integration/test_budget_guard_events.py`, `tests/integration/test_security_agent_live.py`: new integration suites (PLAN.md's named live-test file, plus the instructions' explicit real-Postgres BudgetGuard proof)
+- `tests/integration/test_orchestrator_fanout.py`: autouse stub-agent fixture + new `TestRealSecurityAgentSlotsIntoTheGraph` (freeze-boundary exception, disclosed)
+- `tests/fixtures/sqli_diff.patch`: PLAN.md's named M8 demo fixture
+- `.genesis/context-graph.json`: refreshed (91->106 nodes, 295->421 edges); hand-written invariants backed up and restored byte-for-byte
+
+### Architecture notes for the verifier
+- The freeze-boundary exceptions above (`base_agent.py`, `orchestrator/
+  {nodes,state}.py`, `test_orchestrator_fanout.py`, the
+  `templates/security/v1.md` directory-per-agent layout vs. PLAN.md's
+  literal single-file naming) need explicit sign-off, same as
+  M2/M5/M6/M7's own documented notes.
+- The `budget-guard-hard-blocks` context-graph invariant's wording mismatch
+  (see `## Deferred` above) needs an explicit ruling: accept the
+  centralized-in-the-LLM-client design and update the invariant's text, or
+  require literal per-orchestrator-node duplication instead.
+- The live demo is BLOCKED on credential, not broken -- everything upstream
+  of the actual Anthropic API call (CLI, prompt loading, parsing, budget
+  check against real Postgres) is proven working by the passing test suite
+  and by the demo command's own real, observed failure point.
+
+### Deferred / not built at M8 (explicitly out of scope, do not treat as gaps)
+- No real QUALITY/TESTS/DOCS agents (M10) -- those three specialists
+  remain M4's canned stubs, per this milestone's explicit scope
+- No GitHub client (M11); no retrieval/memory (M9) -- neither was touched
+- `complete_async` has no live call site yet -- see `## Deferred` above,
+  same category as M7's own `emit_tool_call`
+
+### Next Phase (M8 -> L4 VERIFY)
+A separate agent/model session should run L4 VERIFY against this build:
+re-run all four gates independently; check DONE.html's four M8-relevant
+gates ("All LLM/structured outputs validated against a schema",
+"BudgetGuard hard-blocks the next LLM call once the daily cap is
+exceeded", "Every outbound call has a timeout / circuit-breaker", "Every
+security and reliability module has a live call site in the request path,
+provable by grep") by re-deriving the grep/dynamic evidence independently
+rather than trusting this session's report; rule on the freeze-boundary
+exceptions and the `budget-guard-hard-blocks` invariant wording mismatch
+above; and, if `ANTHROPIC_API_KEY` has appeared in `.env` by then, run
+PLAN.md's exact live demo command for real rather than continuing to treat
+it as BLOCKED.
 
 ## M7 Build Summary (L4 VERIFY APPROVED, after an earlier REJECT + L2 DEBUG fix)
 
