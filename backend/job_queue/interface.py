@@ -12,6 +12,14 @@ implementation must guarantee that calling ``enqueue`` twice with the same
 ``WebhookEvent.delivery_id`` results in exactly one job, because that is what
 "a retried GitHub delivery is not processed twice" actually means at the
 point where work is handed off.
+
+``QueueUnavailableError`` (added at M6) is likewise part of this contract
+rather than an implementation-specific detail: any ``JobQueue`` may
+legitimately be temporarily unable to accept work (its backing store is
+down, or -- for ``RedisJobQueue`` specifically -- its circuit breaker has
+opened after repeated failures), and the router needs one exception type it
+can catch regardless of which concrete implementation raised it, to answer
+with a 503 rather than an unhandled 500.
 """
 
 from __future__ import annotations
@@ -36,6 +44,19 @@ class EnqueueResult:
 
     enqueued: bool
     delivery_id: str
+
+
+class QueueUnavailableError(Exception):
+    """Raised by ``enqueue`` when the queue cannot currently accept work.
+
+    Distinct from "this delivery was already seen" (that's the ordinary,
+    successful ``EnqueueResult(enqueued=False, ...)`` path) — this means the
+    call could not even determine that, because the backing dependency is
+    unreachable or (for ``RedisJobQueue``) its circuit breaker has opened.
+    The webhook route catches this and answers 503, not 500: an unavailable
+    dependency is an expected, recoverable condition (GitHub will retry the
+    delivery later), not a bug to surface as an unhandled server error.
+    """
 
 
 class JobQueue(Protocol):
