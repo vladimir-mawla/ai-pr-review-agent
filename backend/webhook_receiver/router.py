@@ -75,6 +75,38 @@ only this request's own coroutine waits, not the event loop that every
 other in-flight request also depends on. See that function's docstring for
 why the orchestrator's own call sites (``backend.orchestrator.nodes``)
 did not need the same change.
+
+L2 DEBUG fix (2026-08-30, HIGH PRIORITY item from M7's L4 VERIFY, fixed in
+M6-scope code): that same L4 VERIFY session also flagged that the
+Redis/ARQ enqueue below had the *identical* defect class, in code that
+predates M7 and had already passed its own independent M6 L4 VERIFY:
+``queue.enqueue(event)`` was a plain, unawaited, synchronous call made
+directly from this coroutine. ``RedisJobQueue.enqueue``
+(``backend/job_queue/redis_arq.py``) blocks the calling thread -- it goes
+through ``backend.reliability.timeout.await_future``, which calls a plain
+``future.result(timeout=policy.seconds)`` -- and that call was running on
+uvicorn's single event-loop thread, so one slow-but-not-down Redis call
+would serialise every other concurrent, unrelated webhook request behind
+it, exactly as the pre-fix events write did. This was missed by M6's own
+L4 VERIFY because that session thoroughly tested the circuit breaker,
+retry, and timeout primitives themselves but never asked whether the call
+that uses them blocked the event loop.
+
+The fix follows the identical, already-established pattern:
+``queue.enqueue(event)`` is now ``await backend.job_queue.interface.
+enqueue_async(queue, event)`` -- a free function (not a second
+``JobQueue`` Protocol method) that runs the existing, unchanged, still-
+synchronous ``queue.enqueue`` on a worker thread via ``asyncio.to_thread``
+(asyncio's own default executor -- a bounded thread pool). Every M2/M3/M6
+guarantee ``queue.enqueue`` already provides (exactly-once idempotency per
+``delivery_id``, ``QueueUnavailableError`` -> 503, the retry/circuit-
+breaker/timeout composition) is completely unchanged by this fix -- only
+which thread blocks while waiting for it has changed. See
+``backend.job_queue.interface``'s module docstring and
+``enqueue_async``'s own docstring for the full reasoning, including why a
+genuinely-async ``JobQueue.enqueue`` (awaiting ARQ's coroutine directly
+instead of bouncing through a thread) was considered and rejected as too
+large a change for this fix's scope.
 """
 
 from __future__ import annotations
@@ -89,7 +121,7 @@ from pydantic import ValidationError
 
 from backend.core.settings import Settings
 from backend.database.repository import EventRepository
-from backend.job_queue.interface import JobQueue, QueueUnavailableError
+from backend.job_queue.interface import JobQueue, QueueUnavailableError, enqueue_async
 from backend.observability import emit_decision_async, run_id_for_delivery
 from backend.webhook_receiver.parser import SUPPORTED_ACTIONS, parse_pull_request_payload
 from backend.webhook_receiver.validator import (
@@ -235,8 +267,15 @@ async def receive_webhook(
     # Step 2 (dedup) + Step 3 (enqueue): JobQueue.enqueue is itself the
     # idempotency check — calling it twice with the same delivery_id is a
     # no-op the second time. No heavy work happens here or after.
+    #
+    # L2 DEBUG fix: `await enqueue_async(...)`, not a direct `queue.enqueue(
+    # event)` call -- see this module's docstring's "L2 DEBUG fix" section.
+    # `enqueue_async` runs the same, unchanged, still-synchronous
+    # `queue.enqueue` on a worker thread (`asyncio.to_thread`), so a slow
+    # Redis call blocks only this request's own task, not uvicorn's shared
+    # event loop.
     try:
-        result = queue.enqueue(event)
+        result = await enqueue_async(queue, event)
     except QueueUnavailableError as exc:
         # M6: the queue could not accept this job right now (Redis
         # unreachable after retries, or its circuit breaker has opened).

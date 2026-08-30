@@ -30,6 +30,22 @@ does. This also means the enqueue actually goes through ARQ's real
 wire format (msgpack-encoded job data, its queue zset, etc.), so the ARQ
 worker in ``arq_worker.py`` can consume it with no special-casing.
 
+L2 DEBUG note (HIGH PRIORITY item from M7's L4 VERIFY, fixed post-M7):
+``enqueue`` itself is deliberately untouched by that fix -- it is still
+this exact synchronous method, still bridging onto this class's own
+private event-loop thread exactly as described above. What changed is
+only how ``backend.webhook_receiver.router`` *calls* it: no longer a bare
+unawaited ``queue.enqueue(event)``, but ``await
+backend.job_queue.interface.enqueue_async(queue, event)``, which runs this
+same method on a worker thread via ``asyncio.to_thread`` so a slow Redis
+call blocks only that request's own task, not uvicorn's shared event loop.
+See ``backend.job_queue.interface``'s module docstring and
+``enqueue_async``'s own docstring for the full defect and why this
+class's synchronous contract (and its own internal thread-bridge, which
+is still required for the sync/async boundary described in this
+docstring) was kept unchanged rather than reworking ``JobQueue`` into an
+async Protocol.
+
 M6 reliability layer, wired in here (not merely unit-tested in isolation —
 see ``.genesis/DONE.html`` section 2's "live call site" gate): both real
 Redis operations this class performs (the idempotency ``SET`` and the
