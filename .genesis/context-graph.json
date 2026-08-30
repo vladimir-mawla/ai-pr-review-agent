@@ -1,11 +1,12 @@
 {
   "$comment": "nodes=modules, edges=[cause,effect] where cause is imported-by effect. ADD invariants by hand.",
   "project": ".",
-  "generated": "2026-08-30T10:05:36.946Z",
+  "generated": "2026-08-30T14:48:33.982Z",
   "nodes": [
     "__future__",
     "__init__",
     "abc",
+    "anthropic",
     "argparse",
     "arq",
     "arq_worker",
@@ -13,6 +14,7 @@
     "audit",
     "base",
     "base_agent",
+    "budget",
     "circuit_breaker",
     "collections",
     "conftest",
@@ -39,9 +41,11 @@
     "itertools",
     "json",
     "langgraph_engine",
+    "llm_client",
     "logging",
     "main",
     "math",
+    "message",
     "models",
     "nodes",
     "observability",
@@ -51,6 +55,7 @@
     "parser",
     "pathlib",
     "postgres",
+    "pricing",
     "psycopg",
     "pydantic",
     "pydantic_settings",
@@ -60,13 +65,16 @@
     "re",
     "redis",
     "redis_arq",
+    "registry",
     "repository",
+    "response_parsing",
     "responses",
     "retry",
     "review",
     "router",
     "run_fixture_review",
     "runnables",
+    "security_agent",
     "send_signed_webhook",
     "settings",
     "sqlite",
@@ -74,12 +82,18 @@
     "state",
     "sys",
     "test_aggregator",
+    "test_budget_guard",
+    "test_budget_guard_events",
+    "test_events_failure_policy",
     "test_events_spine",
     "test_hitl_gate",
+    "test_llm_client",
     "test_models",
     "test_orchestrator_fanout",
     "test_queue_roundtrip",
     "test_reliability",
+    "test_security_agent_live",
+    "test_security_agent_schema",
     "test_webhook_validator",
     "testclient",
     "threading",
@@ -88,6 +102,7 @@
     "tracing",
     "types",
     "typing",
+    "usage",
     "uuid",
     "validator",
     "webhook",
@@ -107,6 +122,10 @@
     [
       "__future__",
       "base_agent"
+    ],
+    [
+      "__future__",
+      "budget"
     ],
     [
       "__future__",
@@ -138,6 +157,10 @@
     ],
     [
       "__future__",
+      "llm_client"
+    ],
+    [
+      "__future__",
       "main"
     ],
     [
@@ -158,6 +181,10 @@
     ],
     [
       "__future__",
+      "pricing"
+    ],
+    [
+      "__future__",
       "queue"
     ],
     [
@@ -166,7 +193,15 @@
     ],
     [
       "__future__",
+      "registry"
+    ],
+    [
+      "__future__",
       "repository"
+    ],
+    [
+      "__future__",
+      "response_parsing"
     ],
     [
       "__future__",
@@ -179,6 +214,10 @@
     [
       "__future__",
       "run_fixture_review"
+    ],
+    [
+      "__future__",
+      "security_agent"
     ],
     [
       "__future__",
@@ -198,11 +237,27 @@
     ],
     [
       "__future__",
+      "test_budget_guard"
+    ],
+    [
+      "__future__",
+      "test_budget_guard_events"
+    ],
+    [
+      "__future__",
+      "test_events_failure_policy"
+    ],
+    [
+      "__future__",
       "test_events_spine"
     ],
     [
       "__future__",
       "test_hitl_gate"
+    ],
+    [
+      "__future__",
+      "test_llm_client"
     ],
     [
       "__future__",
@@ -215,6 +270,14 @@
     [
       "__future__",
       "test_reliability"
+    ],
+    [
+      "__future__",
+      "test_security_agent_live"
+    ],
+    [
+      "__future__",
+      "test_security_agent_schema"
     ],
     [
       "__future__",
@@ -246,6 +309,10 @@
     ],
     [
       "abc",
+      "budget"
+    ],
+    [
+      "abc",
       "circuit_breaker"
     ],
     [
@@ -259,6 +326,10 @@
     [
       "abc",
       "test_events_spine"
+    ],
+    [
+      "abc",
+      "test_orchestrator_fanout"
     ],
     [
       "abc",
@@ -281,8 +352,16 @@
       "tracing"
     ],
     [
+      "anthropic",
+      "llm_client"
+    ],
+    [
       "argparse",
       "run_fixture_review"
+    ],
+    [
+      "argparse",
+      "security_agent"
     ],
     [
       "argparse",
@@ -298,7 +377,31 @@
     ],
     [
       "asyncio",
+      "events"
+    ],
+    [
+      "asyncio",
+      "interface"
+    ],
+    [
+      "asyncio",
+      "llm_client"
+    ],
+    [
+      "asyncio",
       "redis_arq"
+    ],
+    [
+      "asyncio",
+      "test_events_spine"
+    ],
+    [
+      "asyncio",
+      "test_llm_client"
+    ],
+    [
+      "asyncio",
+      "test_queue_roundtrip"
     ],
     [
       "audit",
@@ -314,11 +417,39 @@
     ],
     [
       "base_agent",
+      "nodes"
+    ],
+    [
+      "base_agent",
+      "security_agent"
+    ],
+    [
+      "base_agent",
       "test_aggregator"
+    ],
+    [
+      "base_agent",
+      "test_orchestrator_fanout"
     ],
     [
       "base",
       "graph"
+    ],
+    [
+      "budget",
+      "llm_client"
+    ],
+    [
+      "budget",
+      "test_budget_guard"
+    ],
+    [
+      "budget",
+      "test_budget_guard_events"
+    ],
+    [
+      "budget",
+      "test_llm_client"
     ],
     [
       "circuit_breaker",
@@ -326,7 +457,23 @@
     ],
     [
       "circuit_breaker",
+      "events"
+    ],
+    [
+      "circuit_breaker",
+      "llm_client"
+    ],
+    [
+      "circuit_breaker",
       "redis_arq"
+    ],
+    [
+      "circuit_breaker",
+      "repository"
+    ],
+    [
+      "circuit_breaker",
+      "test_events_failure_policy"
     ],
     [
       "circuit_breaker",
@@ -378,11 +525,35 @@
     ],
     [
       "dataclasses",
+      "llm_client"
+    ],
+    [
+      "dataclasses",
+      "pricing"
+    ],
+    [
+      "dataclasses",
       "retry"
     ],
     [
       "dataclasses",
+      "test_budget_guard"
+    ],
+    [
+      "dataclasses",
+      "test_llm_client"
+    ],
+    [
+      "dataclasses",
+      "test_security_agent_schema"
+    ],
+    [
+      "dataclasses",
       "timeout"
+    ],
+    [
+      "datetime",
+      "budget"
     ],
     [
       "datetime",
@@ -402,6 +573,10 @@
     ],
     [
       "datetime",
+      "repository"
+    ],
+    [
+      "datetime",
       "review"
     ],
     [
@@ -414,6 +589,18 @@
     ],
     [
       "datetime",
+      "test_budget_guard"
+    ],
+    [
+      "datetime",
+      "test_budget_guard_events"
+    ],
+    [
+      "datetime",
+      "test_events_failure_policy"
+    ],
+    [
+      "datetime",
       "test_events_spine"
     ],
     [
@@ -422,7 +609,15 @@
     ],
     [
       "datetime",
+      "test_llm_client"
+    ],
+    [
+      "datetime",
       "test_models"
+    ],
+    [
+      "decimal",
+      "budget"
     ],
     [
       "decimal",
@@ -434,6 +629,10 @@
     ],
     [
       "decimal",
+      "llm_client"
+    ],
+    [
+      "decimal",
       "models"
     ],
     [
@@ -442,11 +641,23 @@
     ],
     [
       "decimal",
+      "pricing"
+    ],
+    [
+      "decimal",
       "queue"
     ],
     [
       "decimal",
+      "repository"
+    ],
+    [
+      "decimal",
       "review"
+    ],
+    [
+      "decimal",
+      "security_agent"
     ],
     [
       "decimal",
@@ -458,6 +669,18 @@
     ],
     [
       "decimal",
+      "test_budget_guard"
+    ],
+    [
+      "decimal",
+      "test_budget_guard_events"
+    ],
+    [
+      "decimal",
+      "test_events_failure_policy"
+    ],
+    [
+      "decimal",
       "test_events_spine"
     ],
     [
@@ -466,11 +689,19 @@
     ],
     [
       "decimal",
+      "test_llm_client"
+    ],
+    [
+      "decimal",
       "test_models"
     ],
     [
       "decimal",
       "test_orchestrator_fanout"
+    ],
+    [
+      "decimal",
+      "test_security_agent_schema"
     ],
     [
       "enum",
@@ -507,6 +738,10 @@
     [
       "events",
       "__init__"
+    ],
+    [
+      "events",
+      "test_events_failure_policy"
     ],
     [
       "events",
@@ -554,6 +789,10 @@
     ],
     [
       "hashlib",
+      "test_queue_roundtrip"
+    ],
+    [
+      "hashlib",
       "test_reliability"
     ],
     [
@@ -574,6 +813,10 @@
     ],
     [
       "hmac",
+      "test_queue_roundtrip"
+    ],
+    [
+      "hmac",
       "test_reliability"
     ],
     [
@@ -587,6 +830,14 @@
     [
       "httpx",
       "send_signed_webhook"
+    ],
+    [
+      "httpx",
+      "test_events_spine"
+    ],
+    [
+      "httpx",
+      "test_queue_roundtrip"
     ],
     [
       "in_memory",
@@ -634,6 +885,10 @@
     ],
     [
       "json",
+      "response_parsing"
+    ],
+    [
+      "json",
       "router"
     ],
     [
@@ -646,7 +901,19 @@
     ],
     [
       "json",
+      "test_orchestrator_fanout"
+    ],
+    [
+      "json",
+      "test_queue_roundtrip"
+    ],
+    [
+      "json",
       "test_reliability"
+    ],
+    [
+      "json",
+      "test_security_agent_schema"
     ],
     [
       "json",
@@ -665,6 +932,22 @@
       "test_orchestrator_fanout"
     ],
     [
+      "llm_client",
+      "security_agent"
+    ],
+    [
+      "llm_client",
+      "test_llm_client"
+    ],
+    [
+      "llm_client",
+      "test_orchestrator_fanout"
+    ],
+    [
+      "llm_client",
+      "test_security_agent_schema"
+    ],
+    [
       "logging",
       "arq_worker"
     ],
@@ -673,8 +956,20 @@
       "events"
     ],
     [
+      "logging",
+      "response_parsing"
+    ],
+    [
+      "logging",
+      "security_agent"
+    ],
+    [
       "main",
       "test_events_spine"
+    ],
+    [
+      "main",
+      "test_queue_roundtrip"
     ],
     [
       "main",
@@ -687,6 +982,10 @@
     [
       "math",
       "repository"
+    ],
+    [
+      "message",
+      "test_llm_client"
     ],
     [
       "models",
@@ -738,6 +1037,14 @@
     ],
     [
       "models",
+      "response_parsing"
+    ],
+    [
+      "models",
+      "security_agent"
+    ],
+    [
+      "models",
       "state"
     ],
     [
@@ -746,11 +1053,23 @@
     ],
     [
       "models",
+      "test_budget_guard_events"
+    ],
+    [
+      "models",
+      "test_events_failure_policy"
+    ],
+    [
+      "models",
       "test_events_spine"
     ],
     [
       "models",
       "test_hitl_gate"
+    ],
+    [
+      "models",
+      "test_llm_client"
     ],
     [
       "models",
@@ -769,12 +1088,24 @@
       "test_reliability"
     ],
     [
+      "models",
+      "test_security_agent_live"
+    ],
+    [
+      "models",
+      "test_security_agent_schema"
+    ],
+    [
       "nodes",
       "graph"
     ],
     [
       "nodes",
       "test_orchestrator_fanout"
+    ],
+    [
+      "observability",
+      "llm_client"
     ],
     [
       "observability",
@@ -810,6 +1141,10 @@
     ],
     [
       "pathlib",
+      "registry"
+    ],
+    [
+      "pathlib",
       "send_signed_webhook"
     ],
     [
@@ -821,6 +1156,10 @@
       "test_orchestrator_fanout"
     ],
     [
+      "pathlib",
+      "test_security_agent_live"
+    ],
+    [
       "postgres",
       "__init__"
     ],
@@ -830,7 +1169,15 @@
     ],
     [
       "postgres",
+      "test_budget_guard_events"
+    ],
+    [
+      "postgres",
       "test_events_spine"
+    ],
+    [
+      "pricing",
+      "llm_client"
     ],
     [
       "psycopg",
@@ -843,6 +1190,14 @@
     [
       "psycopg",
       "repository"
+    ],
+    [
+      "psycopg",
+      "test_budget_guard_events"
+    ],
+    [
+      "psycopg",
+      "test_events_failure_policy"
     ],
     [
       "psycopg",
@@ -862,6 +1217,10 @@
     ],
     [
       "pydantic",
+      "response_parsing"
+    ],
+    [
+      "pydantic",
       "review"
     ],
     [
@@ -875,6 +1234,10 @@
     [
       "pydantic",
       "test_aggregator"
+    ],
+    [
+      "pydantic",
+      "test_events_failure_policy"
     ],
     [
       "pydantic",
@@ -894,7 +1257,23 @@
     ],
     [
       "pytest",
+      "test_budget_guard"
+    ],
+    [
+      "pytest",
+      "test_budget_guard_events"
+    ],
+    [
+      "pytest",
+      "test_events_failure_policy"
+    ],
+    [
+      "pytest",
       "test_events_spine"
+    ],
+    [
+      "pytest",
+      "test_llm_client"
     ],
     [
       "pytest",
@@ -911,6 +1290,10 @@
     [
       "pytest",
       "test_reliability"
+    ],
+    [
+      "pytest",
+      "test_security_agent_live"
     ],
     [
       "pytest",
@@ -957,6 +1340,10 @@
       "test_reliability"
     ],
     [
+      "registry",
+      "security_agent"
+    ],
+    [
       "repository",
       "__init__"
     ],
@@ -966,7 +1353,15 @@
     ],
     [
       "repository",
+      "budget"
+    ],
+    [
+      "repository",
       "events"
+    ],
+    [
+      "repository",
+      "llm_client"
     ],
     [
       "repository",
@@ -978,7 +1373,19 @@
     ],
     [
       "repository",
+      "test_budget_guard_events"
+    ],
+    [
+      "repository",
+      "test_events_failure_policy"
+    ],
+    [
+      "repository",
       "test_events_spine"
+    ],
+    [
+      "repository",
+      "test_queue_roundtrip"
     ],
     [
       "repository",
@@ -987,6 +1394,18 @@
     [
       "repository",
       "workflow_context"
+    ],
+    [
+      "re",
+      "response_parsing"
+    ],
+    [
+      "response_parsing",
+      "security_agent"
+    ],
+    [
+      "response_parsing",
+      "test_security_agent_schema"
     ],
     [
       "responses",
@@ -999,6 +1418,10 @@
     [
       "retry",
       "__init__"
+    ],
+    [
+      "retry",
+      "llm_client"
     ],
     [
       "retry",
@@ -1029,8 +1452,28 @@
       "nodes"
     ],
     [
+      "security_agent",
+      "nodes"
+    ],
+    [
+      "security_agent",
+      "test_orchestrator_fanout"
+    ],
+    [
+      "security_agent",
+      "test_security_agent_live"
+    ],
+    [
+      "security_agent",
+      "test_security_agent_schema"
+    ],
+    [
       "settings",
       "arq_worker"
+    ],
+    [
+      "settings",
+      "llm_client"
     ],
     [
       "settings",
@@ -1054,7 +1497,15 @@
     ],
     [
       "settings",
+      "test_budget_guard_events"
+    ],
+    [
+      "settings",
       "test_events_spine"
+    ],
+    [
+      "settings",
+      "test_llm_client"
     ],
     [
       "settings",
@@ -1063,6 +1514,10 @@
     [
       "settings",
       "test_reliability"
+    ],
+    [
+      "settings",
+      "test_security_agent_live"
     ],
     [
       "settings",
@@ -1110,6 +1565,10 @@
     ],
     [
       "sys",
+      "security_agent"
+    ],
+    [
+      "sys",
       "send_signed_webhook"
     ],
     [
@@ -1138,6 +1597,14 @@
     ],
     [
       "threading",
+      "test_events_spine"
+    ],
+    [
+      "threading",
+      "test_queue_roundtrip"
+    ],
+    [
+      "threading",
       "test_reliability"
     ],
     [
@@ -1150,11 +1617,19 @@
     ],
     [
       "time",
+      "llm_client"
+    ],
+    [
+      "time",
       "nodes"
     ],
     [
       "timeout",
       "__init__"
+    ],
+    [
+      "timeout",
+      "llm_client"
     ],
     [
       "timeout",
@@ -1170,7 +1645,23 @@
     ],
     [
       "time",
+      "security_agent"
+    ],
+    [
+      "time",
+      "test_events_spine"
+    ],
+    [
+      "time",
+      "test_llm_client"
+    ],
+    [
+      "time",
       "test_orchestrator_fanout"
+    ],
+    [
+      "time",
+      "test_queue_roundtrip"
     ],
     [
       "time",
@@ -1187,6 +1678,14 @@
     [
       "types",
       "graph"
+    ],
+    [
+      "types",
+      "llm_client"
+    ],
+    [
+      "types",
+      "test_llm_client"
     ],
     [
       "typing",
@@ -1206,6 +1705,10 @@
     ],
     [
       "typing",
+      "llm_client"
+    ],
+    [
+      "typing",
       "nodes"
     ],
     [
@@ -1215,6 +1718,10 @@
     [
       "typing",
       "redis_arq"
+    ],
+    [
+      "typing",
+      "response_parsing"
     ],
     [
       "typing",
@@ -1230,11 +1737,23 @@
     ],
     [
       "typing",
+      "test_llm_client"
+    ],
+    [
+      "typing",
       "workflow_engine"
+    ],
+    [
+      "usage",
+      "test_llm_client"
     ],
     [
       "uuid",
       "send_signed_webhook"
+    ],
+    [
+      "uuid",
+      "test_budget_guard_events"
     ],
     [
       "uuid",
