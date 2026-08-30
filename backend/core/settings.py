@@ -91,6 +91,38 @@ _DEFAULT_EVENTS_STATEMENT_TIMEOUT_MS = 2000
 _DEFAULT_EVENTS_CIRCUIT_BREAKER_FAILURE_THRESHOLD = 5
 _DEFAULT_EVENTS_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS = 30.0
 
+# M8: the driver model for every LLM-backed specialist agent. Pinned to
+# Haiku (not Opus, not Sonnet) per this milestone's explicit instruction --
+# a cheap, fast model is the right default for a per-PR-diff specialist
+# call that runs four times per review; Sonnet-tier judge calls (M13) are a
+# separate, deliberately more expensive concern. Configurable via
+# ANTHROPIC_MODEL so a future milestone (or an operator) can repoint every
+# specialist at a different model without a code change.
+_DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5"
+
+# M8 BudgetGuard: default daily USD cap on LLM spend, per PLAN.md's M8 text
+# ("BudgetGuard stub, daily cap read from BUDGET_DAILY_CAP_USD env var,
+# default 20"). Deliberately conservative for local development -- four
+# specialists x however many PRs a day is expected to stay well under this
+# for a haiku-tier model; a real production deployment should tune this to
+# its own expected volume.
+_DEFAULT_BUDGET_DAILY_CAP_USD = Decimal("20")
+
+# M8 reliability knobs for backend.tools.llm_client.AnthropicLLMClient's
+# outbound Anthropic API calls -- deliberately a THIRD, independent set
+# from the M6 (Redis) and M7 (events Postgres) knobs above, mirroring the
+# project's established pattern of one dependency, one set of knobs (tuning
+# one outbound call's timeout/breaker must never silently retune another
+# unrelated dependency's). An LLM completion call is expected to take
+# meaningfully longer than a Redis round trip or a single-row Postgres
+# insert, hence the larger default timeout and coarser backoff below.
+_DEFAULT_LLM_TIMEOUT_SECONDS = 30.0
+_DEFAULT_LLM_RETRY_MAX_ATTEMPTS = 3
+_DEFAULT_LLM_RETRY_BASE_DELAY_SECONDS = 0.5
+_DEFAULT_LLM_RETRY_MAX_DELAY_SECONDS = 8.0
+_DEFAULT_LLM_CIRCUIT_BREAKER_FAILURE_THRESHOLD = 5
+_DEFAULT_LLM_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS = 30.0
+
 
 class Settings(BaseSettings):
     """Runtime configuration for the pr-review-agent backend.
@@ -160,6 +192,37 @@ class Settings(BaseSettings):
             circuit breaker to OPEN, independent of ``RedisJobQueue``'s.
         events_circuit_breaker_reset_timeout_seconds: M7 L2 DEBUG fix. How
             long ``EventRepository``'s breaker stays OPEN before allowing a
+            single HALF_OPEN probe through.
+        anthropic_api_key: M8. Credential for the Anthropic API. Deliberately
+            ``str | None`` with no default (unlike ``github_webhook_secret``,
+            which fails fast if blank) -- this project's own credential
+            policy is that every unit test must pass without this key set
+            (a fake/stub LLM client stands in), and only the real live-demo
+            path actually needs it. ``backend.tools.llm_client.
+            AnthropicLLMClient`` raises its own clear error at the point it
+            would actually need this value, not at Settings construction.
+        anthropic_model: M8. The driver model every LLM-backed specialist
+            calls. Default ``claude-haiku-4-5`` (see module-level comment
+            for why Haiku, not Opus/Sonnet).
+        budget_daily_cap_usd: M8. ``backend.economics.budget.BudgetGuard``'s
+            daily USD cap on total LLM spend (summed from ``agent_events``'
+            ``llm.call`` rows) -- once today's spend meets or exceeds this,
+            the next call is hard-blocked before it reaches the LLM client.
+            Default 20, per PLAN.md.
+        llm_timeout_seconds: M8 reliability layer. Bound (seconds) on each
+            individual outbound Anthropic API call.
+        llm_retry_max_attempts: M8 reliability layer. Total attempts
+            (including the first) per LLM call before giving up.
+        llm_retry_base_delay_seconds: M8 reliability layer. Delay before the
+            second retry attempt; grows exponentially after that, capped by
+            ``llm_retry_max_delay_seconds``.
+        llm_retry_max_delay_seconds: M8 reliability layer. Upper bound the
+            exponential backoff delay is clamped to.
+        llm_circuit_breaker_failure_threshold: M8 reliability layer.
+            Consecutive failures required to trip the LLM client's circuit
+            breaker to OPEN, independent of the M6/M7 breakers above.
+        llm_circuit_breaker_reset_timeout_seconds: M8 reliability layer. How
+            long the LLM client's breaker stays OPEN before allowing a
             single HALF_OPEN probe through.
     """
 
@@ -308,6 +371,81 @@ class Settings(BaseSettings):
         gt=0,
         description=(
             "How long (seconds) EventRepository's circuit breaker stays "
+            "OPEN before allowing a single HALF_OPEN probe through. "
+            "Default 30.0."
+        ),
+    )
+
+    anthropic_api_key: str | None = Field(
+        default=None,
+        description=(
+            "Anthropic API key for the M8 LLM-backed specialist agents. "
+            "Deliberately optional with no default -- every unit test must "
+            "pass without it (a fake LLM client stands in); only the real "
+            "live demo command needs a real value."
+        ),
+    )
+
+    anthropic_model: str = Field(
+        default=_DEFAULT_ANTHROPIC_MODEL,
+        min_length=1,
+        description=(
+            "Driver model every LLM-backed specialist agent calls. Default "
+            "claude-haiku-4-5 -- deliberately not Opus, per this project's "
+            "approved driver-model decision."
+        ),
+    )
+
+    budget_daily_cap_usd: Decimal = Field(
+        default=_DEFAULT_BUDGET_DAILY_CAP_USD,
+        gt=Decimal("0"),
+        description=(
+            "BudgetGuard's daily USD cap on total LLM spend, summed from "
+            "agent_events' llm.call rows. Default 20."
+        ),
+    )
+
+    llm_timeout_seconds: float = Field(
+        default=_DEFAULT_LLM_TIMEOUT_SECONDS,
+        gt=0,
+        description="Bound (seconds) on each individual outbound Anthropic API call. Default 30.0.",
+    )
+
+    llm_retry_max_attempts: int = Field(
+        default=_DEFAULT_LLM_RETRY_MAX_ATTEMPTS,
+        ge=1,
+        description=(
+            "Total attempts (including the first) the LLM client makes per "
+            "call before giving up. Default 3."
+        ),
+    )
+
+    llm_retry_base_delay_seconds: float = Field(
+        default=_DEFAULT_LLM_RETRY_BASE_DELAY_SECONDS,
+        gt=0,
+        description="Delay (seconds) before the 2nd LLM retry attempt. Default 0.5.",
+    )
+
+    llm_retry_max_delay_seconds: float = Field(
+        default=_DEFAULT_LLM_RETRY_MAX_DELAY_SECONDS,
+        gt=0,
+        description="Upper bound (seconds) the LLM retry backoff is clamped to. Default 8.0.",
+    )
+
+    llm_circuit_breaker_failure_threshold: int = Field(
+        default=_DEFAULT_LLM_CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+        ge=1,
+        description=(
+            "Consecutive failures required to trip the LLM client's "
+            "circuit breaker to OPEN. Default 5."
+        ),
+    )
+
+    llm_circuit_breaker_reset_timeout_seconds: float = Field(
+        default=_DEFAULT_LLM_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS,
+        gt=0,
+        description=(
+            "How long (seconds) the LLM client's circuit breaker stays "
             "OPEN before allowing a single HALF_OPEN probe through. "
             "Default 30.0."
         ),
