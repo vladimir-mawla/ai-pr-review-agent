@@ -2,15 +2,21 @@
 - active_loop: none (between milestones)
 - target: M4
 - iteration: 0
-- last_gate: L4 VERIFY APPROVE on M3
-- last_action: An independent L4 VERIFY Sonnet session APPROVEd M3 with no blocking defects (re-ran all four gates plus the PLAN.md demo command independently; 57 tests passed). This session then ran the post-APPROVE housekeeping pass: fixed the M3 freeze-boundary authoring gap in PLAN.md (it omitted redis_arq.py -- the milestone's central deliverable -- plus settings.py/main.py/.env.example/pyproject.toml), audited M4-M13's freeze boundaries for the same gap and corrected the ones with clear omissions, documented the idempotency-loss-on-recreate caveat (docker-compose.yml + README.md), corrected the JobQueue.enqueue() docstring to match RedisJobQueue's actual bounded-blocking behavior (docstring only, no behavior change), flipped M3 to done in DONE.html/PLAN.md/implementation-notes.html, and wrote the M3 explain-diff HTML page.
-- next_action: run G0 existence pre-flight on M4
+- last_gate: L1 BUILD complete on M4 (all four gates + demo command green; not yet L4 VERIFYed)
+- last_action: L1 BUILD session built the M4 LangGraph orchestrator skeleton: backend/core/workflow_engine.py (ADR-001 abstract WorkflowEngine Protocol), backend/orchestrator/{state,nodes,graph,langgraph_engine}.py, and tests/integration/test_orchestrator_fanout.py. Smoke-tested langgraph-checkpoint-redis directly against this project's real docker-compose Redis before writing any production code; it failed (RediSearch/FT.INFO not supported by plain redis:7-alpine), so used langgraph-checkpoint-sqlite instead (a real, first-party LangGraph checkpointer, file-backed, not in-memory) and documented why in langgraph_engine.py's module docstring and the pyproject.toml commit. Validated LangGraph's Send-API fan-out is genuinely parallel (measured: ~0.31s wall time vs 1.2s sum of four 0.3s sleeps, all four execution windows pairwise overlapping) and that its pending-writes mechanism actually skips already-completed parallel branches on resume (prototyped standalone before writing production code, then proven again in the real test suite via a brand-new engine instance against the same on-disk checkpoint file). All four gates (ruff, mypy --strict, pytest -v [62 passed], lint-imports) plus PLAN.md's exact M4 demo command ran green. Context graph refreshed (53->68 nodes, 108->146 edges); all 4 hand-written invariants backed up before graphizer ran and restored/verified after. Redis (M3's, port 6380) brought up only for the full pytest -v gate run (queue-roundtrip tests need it), then torn down; ampliphi-redis-1/ampliphi-postgres-1 confirmed untouched throughout.
+- next_action: L4 VERIFY on M4 (separate session)
 - model: claude-sonnet-5
 - tokens_used: 0
 - tokens_budget: 50000
 - skills_loaded: []
 
 ## Deferred
+
+New from M4 BUILD, recorded for the verifier:
+- PLAN.md's M4 outcome text says the graph "checkpoints state to Redis"; this build uses langgraph-checkpoint-sqlite instead, not Redis. This is a deliberate, documented deviation (langgraph-checkpoint-redis needs RediSearch, which this project's plain redis:7-alpine does not have -- confirmed by an actual ResponseError, not assumed), not a silent substitution. See backend/orchestrator/langgraph_engine.py's module docstring for the full reasoning. A verifier should confirm this reading is acceptable, or that a future milestone should add Redis Stack to docker-compose.yml if Redis-backed checkpointing specifically (not just "a durable checkpointer") is actually required.
+- The orchestrator built at M4 is a standalone skeleton: nothing in backend/webhook_receiver or backend/job_queue calls into LangGraphWorkflowEngine yet. That wiring (webhook -> queue -> orchestrator run) is not part of M4's freeze boundary and is expected to land in a later milestone (M5 aggregator or M10 full dry-run), not a gap in this build.
+- LangGraphWorkflowEngine's default checkpoint DB path (var/orchestrator_checkpoints.sqlite3) is never exercised by the test suite (every test uses a tmp_path-scoped file) or created by this session's gate runs -- there is no evidence one way or the other that the default path itself works end-to-end outside of tests; only the mechanism (SqliteSaver against a real file, and the resume-across-a-new-engine-instance behavior) was verified.
+- aggregate_node is an intentional no-op (M5's aggregation logic is out of scope), so GraphState.node_errors and GraphState.findings pass through it unchanged; this is expected, not an oversight.
 
 Still open from M1:
 - `Review.overall_confidence` has no cross-field consistency check (not cross-checked against the mean of `findings[].confidence`)
@@ -39,6 +45,101 @@ Resolved (previously deferred from M2, now closed):
 - ~~`_is_hex` uses `int(value, 16)` which accepts underscore separators and a leading sign~~ -- fixed: replaced with a strict `[0-9a-fA-F]+` charset regex; regression test added (`test_underscore_in_digest_is_rejected_as_malformed_not_invalid`)
 - ~~The demo command needs an activated venv and a hand-created `.env` and neither is documented (no README exists)~~ -- fixed: README.md now documents venv creation/activation, `pip install -e ".[dev]"`, and copying `.env.example` to `.env`
 - ~~`InMemoryJobQueue` and its `_seen_delivery_ids` grow unboundedly with no eviction~~ -- fixed: M3's `RedisJobQueue` stores the idempotency key with an expiring TTL (`Settings.idempotency_ttl_seconds`, default one week) instead of an ever-growing in-process set; proven by a test that reads the TTL back from Redis directly.
+
+## M4 Build Summary (L1 BUILD complete, needs L4 VERIFY)
+
+### Outcome Achieved
+- A LangGraph StateGraph fans out from START to four parallel stub
+  specialist nodes (security, quality, tests, docs) via the Send API, and
+  fans back in through a shared aggregate join node to END.
+- Each specialist is a stub: one canned, deterministic Finding per agent
+  type, no LLM call, no API key read (backend/orchestrator/nodes.py).
+- Parallelism is real, not a linear chain: measured wall time for all four
+  nodes was ~0.3s (each node sleeps 0.2s) vs. the ~0.8-1.2s a sequential
+  chain would take, and every pair of nodes' recorded execution windows
+  pairwise overlaps -- both asserted in
+  test_fanout_runs_nodes_in_parallel.
+- State merges correctly across parallel branches: GraphState.findings uses
+  an operator.add reducer and node_errors uses a dict-merge reducer, so all
+  four specialists' writes combine instead of the last one to finish
+  overwriting the rest -- proven by asserting 4 distinct findings survive
+  (a reducer-less design would collapse this to 1).
+- The graph is compiled with a checkpointer, never without: build_graph()
+  takes checkpointer as a required parameter with no default.
+- Checkpoint resume actually skips completed work: arming a simulated crash
+  in one node, running (which raises), then building a brand-new
+  LangGraphWorkflowEngine against the same on-disk SQLite checkpoint file to
+  resume shows the three already-completed nodes' call counts stay at 1
+  (never re-executed) while the crashed node's count becomes 2 (genuinely
+  retried) -- test_checkpoint_resume_skips_completed_nodes.
+- A specialist's own failure is isolated: an AgentExecutionError from one
+  node is caught and recorded in node_errors rather than losing the other
+  three specialists' findings -- test_fanout_isolates_single_node_failure.
+- backend/core/workflow_engine.py adds the ADR-001 abstract WorkflowEngine
+  interface (run/resume/get_state), generic over an opaque state type so it
+  never has to import backend.orchestrator or backend.models (forbidden by
+  .importlinter's core-independence contract).
+
+### Checkpointer choice: SQLite, not Redis
+langgraph-checkpoint-redis was installed and smoke-tested directly against
+this project's own docker-compose Redis (plain redis:7-alpine, from M3)
+before any production code was written. It failed on .setup() with
+`redis.exceptions.ResponseError: unknown command 'FT.INFO'` -- it needs
+RediSearch to build its checkpoint index, which plain Redis does not
+provide. Switching the Redis image to Redis Stack is outside M4's freeze
+boundary (docker-compose.yml is not listed), so this build uses
+langgraph-checkpoint-sqlite instead: a real, first-party LangGraph
+checkpointer, file-backed (not :memory:) so checkpoints survive the writing
+process exiting. Full reasoning lives in
+backend/orchestrator/langgraph_engine.py's module docstring. This is a
+documented, justified deviation from PLAN.md's M4 outcome text ("checkpoints
+state to Redis"), in the same spirit as M3's Redis-port-6380 deviation --
+recorded, not hidden. See the Deferred section above.
+
+### Gate Results (this session, full output in the L1 BUILD transcript)
+- `ruff check .`: All checks passed, exit 0
+- `mypy --strict backend/`: Success: no issues found in 38 source files, exit 0
+- `pytest -v`: 62 passed (57 carried over from M1-M3 + 5 new orchestrator
+  tests), exit 0
+- `lint-imports --config .importlinter`: 2 contracts kept, 0 broken, exit 0
+- PLAN.md's M4 demo command run verbatim
+  (`pytest tests/integration/test_orchestrator_fanout.py -v -k "fanout or
+  checkpoint_resume"`): 5 passed (all 5 test names match the -k filter),
+  exit 0.
+- Cleaned up after: `docker compose down` run, confirmed no stray listeners
+  on :6380/:8000, and the unrelated ampliphi-redis-1/ampliphi-postgres-1
+  containers left untouched and running throughout.
+
+### Files Written
+- `backend/core/workflow_engine.py`: ADR-001 abstract WorkflowEngine Protocol
+- `backend/orchestrator/state.py`: GraphState TypedDict with parallel-merge reducers
+- `backend/orchestrator/nodes.py`: four stub specialist nodes + aggregate join node + test instrumentation (call_count/execution_windows/arm_crash/arm_agent_error)
+- `backend/orchestrator/graph.py`: Send-API fan-out/fan-in StateGraph builder
+- `backend/orchestrator/langgraph_engine.py`: LangGraphWorkflowEngine (SQLite-backed)
+- `pyproject.toml`: `langgraph`, `langgraph-checkpoint-sqlite`, `langchain-core` runtime deps
+- `.gitignore`: ignores `var/` (default local checkpoint DB directory)
+- `tests/integration/test_orchestrator_fanout.py`: 5 integration tests
+
+### Architecture notes for the verifier
+- The Redis-vs-SQLite checkpointer deviation above needs explicit sign-off.
+- WorkflowEngine is satisfied structurally (Protocol), not via explicit
+  inheritance -- LangGraphWorkflowEngine does not subclass it. Confirm this
+  reading of "abstract interface... so LangGraph could be swapped later" is
+  acceptable, or that explicit inheritance was intended.
+- The orchestrator is not yet wired into the webhook/worker path (not part
+  of M4's freeze boundary) -- confirm this is understood as intentional
+  scope, not a gap.
+
+### Deferred / not built at M4 (explicitly out of scope, do not treat as gaps)
+- No real LLM agents (M8); no aggregator confidence/dedup/HITL-routing logic (M5)
+- No wiring from the webhook/queue path into the orchestrator (later milestone)
+
+### Next Phase (M4 -> L4 VERIFY)
+A separate agent/model session should run L4 VERIFY against this build:
+re-run all four gates plus the demo command independently, check the
+DONE.html gate for M4 ("LangGraph checkpoints actually resume after a
+simulated worker crash -- compiled with a checkpointer, not without"), and
+rule on the Redis-vs-SQLite checkpointer deviation before marking M4 DONE.
 
 ## M3 Build Summary (L4 VERIFY APPROVED)
 
