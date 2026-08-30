@@ -1,16 +1,121 @@
 # CURRENT
-- active_loop: none (between L1 BUILD and L4 VERIFY)
+- active_loop: none (between L2 DEBUG and L4 VERIFY)
 - target: M7
-- iteration: 0
-- last_gate: L1 BUILD complete on M7 (this session); L4 VERIFY not yet run
-- last_action: L1 BUILD session built the M7 events spine end-to-end -- see
-  "M7 Build Summary" below for the full account, gate results, and files
-  written.
-- next_action: L4 VERIFY on M7 (separate session)
+- iteration: 1
+- last_gate: L4 VERIFY REJECTED M7's original L1 BUILD (separate session, real
+  reliability bug) -- this L2 DEBUG session applied the fix described in
+  "M7 L2 DEBUG fix (post-L4-REJECT)" below.
+- last_action: L2 DEBUG session fixed the blocking-events-write defect L4
+  VERIFY caught, plus the three non-blocking findings from the same review
+  (TRUNCATE bypassing the append-only trigger, an overly broad exception
+  swallow, and a demo command that doesn't work verbatim in a clean shell).
+  See "M7 L2 DEBUG fix (post-L4-REJECT)" below for the full account.
+- next_action: re-run L4 VERIFY on M7 (separate session)
 - model: claude-sonnet-5
 - tokens_used: 0
 - tokens_budget: 50000
 - skills_loaded: []
+
+## M7 L2 DEBUG fix (post-L4-REJECT)
+
+**The REJECT.** An independent L4 VERIFY session rejected M7's L1 BUILD for a
+real reliability defect, not a nitpick: `EventRepository.insert_event`
+(`backend/database/repository.py`) opened a synchronous `psycopg.connect(...,
+connect_timeout=2)` and was called directly (never awaited, never offloaded)
+from `async def receive_webhook` (`backend/webhook_receiver/router.py`) --
+`connect_timeout` bounds only the TCP handshake, not query execution or
+lock-wait time, and no `statement_timeout` or circuit breaker existed at all.
+L4 VERIFY proved this empirically: with an admin session holding
+`LOCK TABLE agent_events IN ACCESS EXCLUSIVE MODE; SELECT pg_sleep(6)`, three
+concurrent, independent webhook POSTs against a live uvicorn each took ~4.4s
+instead of the normal sub-10ms -- a stalled events write serialised every
+other in-flight request, violating `.genesis/DONE.html` section 2's "every
+outbound call has a timeout / circuit-breaker" gate (the exact gate M6 was
+built to satisfy for the Redis path).
+
+**The fix (blocking).** Three changes, composed:
+1. `backend/observability/events.py` gained `emit_decision_async`, the ONE
+   function `backend/webhook_receiver/router.py`'s `async def receive_webhook`
+   now `await`s instead of calling the plain synchronous `emit_decision`
+   directly. It runs the identical write via `asyncio.to_thread` (asyncio's
+   own default executor -- a bounded thread pool, not one thread per call),
+   so only the calling request's own coroutine waits, not the whole event
+   loop every other in-flight request also depends on. The orchestrator's
+   call sites (`backend/orchestrator/nodes.py`) did not need this change --
+   they already run on a LangGraph-managed worker thread for a sync graph,
+   never on an asyncio event loop.
+2. `backend/database/repository.py`'s `EventRepository` now sets Postgres's
+   own `statement_timeout` GUC (via libpq's `options` connection parameter,
+   new `statement_timeout_ms` constructor arg, default 2000ms) on every
+   connection it opens -- a real query-level bound that covers lock-wait
+   time, which `connect_timeout` provably does not.
+3. `EventRepository.insert_event` now runs through a per-instance
+   `backend.reliability.circuit_breaker.CircuitBreaker` (new
+   `circuit_breaker_failure_threshold`/`circuit_breaker_reset_timeout_seconds`
+   constructor args, and matching `Settings.events_*` fields, independent of
+   the pre-existing M6 knobs that guard Redis), mirroring
+   `RedisJobQueue`'s own composition pattern instead of hand-rolling
+   something new -- a persistently down/slow events store now fails fast
+   instead of being retried at full connect-timeout cost on every request.
+   `backend/observability/events.py`'s `_emit` was extended to also swallow
+   `CircuitOpenError`, alongside the pre-existing `psycopg.Error`/`OSError`.
+
+**Proof.** `tests/integration/test_events_spine.py::
+TestConcurrentWebhookWritesAreNotSerializedByALockedEventsTable` reproduces
+the exact mechanism (an ACCESS EXCLUSIVE lock held during concurrent webhook
+POSTs, driven in-process via `httpx.ASGITransport` on one event loop -- the
+same single-event-loop-thread concurrency model a real uvicorn worker uses)
+and is proven to fail against the pre-fix router (temporarily reverted:
+latencies `[1.22, 4.01, 2.44, 3.66]`s, clearly serialized) and pass against
+the fix (`[1.22, 1.22, 1.22, 1.22]`s, genuinely concurrent). A live-uvicorn
+manual repro against the SAME experiment L4 VERIFY used (real
+`docker compose up -d postgres`, a real admin session holding the table
+lock, three real concurrent `scripts/send_signed_webhook.py` POSTs) measured
+~4.76s/request before the fix (matching L4's ~4.4s finding) and ~2.26s/request
+after (bounded by `statement_timeout`, not serialized) -- full numbers in this
+session's final report.
+
+**Also fixed (non-blocking findings from the same L4 review):**
+- TRUNCATE bypassed the append-only trigger: PostgreSQL never fires a
+  row-level (`FOR EACH ROW`) trigger for TRUNCATE, so the pre-existing
+  `agent_events_no_update`/`agent_events_no_delete` pair did nothing to stop
+  it -- L4 VERIFY demonstrated a superuser `TRUNCATE agent_events;` silently
+  wiping all 94 rows, no exception. `backend/database/migrations/
+  0001_agent_events.sql` gained a statement-level (`FOR EACH STATEMENT`)
+  `agent_events_no_truncate` `BEFORE TRUNCATE` trigger, applied in place
+  (the migration is idempotent and this project's local Postgres has no
+  volume, so there is no deployed state to preserve). Proven: `TRUNCATE
+  agent_events;` as the "postgres" superuser now raises `agent_events is
+  append-only: TRUNCATE is not permitted`, exit code 1, row count unchanged.
+  The migration's misleading comment claiming the row-level trigger pair
+  holds "regardless of which role issues it" (false for TRUNCATE) was
+  corrected.
+- Narrowed `backend/observability/events.py`'s exception swallow: `_emit`
+  used to catch bare `(psycopg.Error, OSError)`, which also silently
+  swallowed `psycopg.errors.IntegrityError` (e.g. a CHECK-constraint
+  violation) -- our own bug, not an availability failure.
+  `psycopg.errors.IntegrityError` is now re-raised before the broad except
+  runs. New `tests/unit/test_events_failure_policy.py` proves both directions
+  (availability failures still swallowed; IntegrityError/CheckViolation now
+  propagate) and is proven to fail against the old broad except (temporarily
+  reverted, ran, captured 3 real failures, restored, reran, captured all
+  passing).
+- The M7 demo command didn't work verbatim in a clean shell: `.env` is read
+  by pydantic-settings but never exported, so a bare `psql "$DATABASE_URL"`
+  after only `python scripts/run_fixture_review.py` sees an empty string.
+  `.genesis/PLAN.md`'s M7 demo command now inlines
+  `set -a && source .env && set +a` before the `psql` step -- verified in a
+  clean shell via `env -i PATH=... HOME=... bash -c '...'`.
+- `.genesis/PLAN.md`'s demo SQL used bare `ORDER BY ts` with no `id`
+  tiebreak, so same-timestamp rows had undefined order; changed to
+  `ORDER BY ts ASC, id ASC`, matching `EventRepository.
+  fetch_events_for_review`'s own tiebreak.
+
+All four gates (`ruff check .`, `mypy --strict backend/`, `pytest -v` -- 160
+passed, both Redis and Postgres integration tests ran for real, none
+skipped -- `lint-imports --config .importlinter`) plus PLAN.md's (fixed) M7
+demo command were re-run after the fix; see this session's final report for
+the full pasted output and exit codes.
 
 ## M5 history (kept for context; superseded by the two lines above)
 - last_gate (superseded): L4 VERIFY REJECTED M5 (separate session, real safety bug) -- this L2 DEBUG session applied the approved fix; a second, independent L4 VERIFY session then re-ran everything against the fix and APPROVEd M5.
