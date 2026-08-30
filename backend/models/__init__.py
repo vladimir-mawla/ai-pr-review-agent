@@ -17,7 +17,7 @@ between frontend (dashboard) and backend.
 
 from backend.models.enums import AgentType, ReviewStatus, Severity
 from backend.models.findings import Finding
-from backend.models.review import Review
+from backend.models.review import Review, compute_overall_confidence
 from backend.models.webhook import WebhookEvent
 
 __all__ = [
@@ -26,5 +26,6 @@ __all__ = [
     "ReviewStatus",
     "Finding",
     "Review",
+    "compute_overall_confidence",
     "WebhookEvent",
 ]

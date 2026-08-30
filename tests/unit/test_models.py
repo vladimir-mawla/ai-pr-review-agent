@@ -359,6 +359,9 @@ class TestReview:
     def test_review_valid_construction(self) -> None:
         """Review can be constructed with valid fields."""
         now = datetime.now()
+        # overall_confidence must equal compute_overall_confidence(findings);
+        # with findings=[] that is 0.000 (see backend/models/review.py's M5
+        # note on the M1-deferred consistency gap) -- not an arbitrary value.
         review = Review(
             review_id="ghpr-12345-run-001",
             pr_number=12345,
@@ -366,7 +369,7 @@ class TestReview:
             repository_name="myapp",
             head_sha="a" * 40,
             findings=[],
-            overall_confidence=Decimal("0.750"),
+            overall_confidence=Decimal("0.000"),
             status=ReviewStatus.POSTED,
             created_at=now,
             posted_at=now,
@@ -374,7 +377,7 @@ class TestReview:
         )
         assert review.review_id == "ghpr-12345-run-001"
         assert review.pr_number == 12345
-        assert review.overall_confidence == Decimal("0.750")
+        assert review.overall_confidence == Decimal("0.000")
         assert review.status == ReviewStatus.POSTED
 
     def test_review_with_findings(self) -> None:
@@ -418,7 +421,8 @@ class TestReview:
         """head_sha must be exactly 40 hex characters."""
         now = datetime.now()
 
-        # Valid: exactly 40 hex chars
+        # Valid: exactly 40 hex chars. findings=[] => overall_confidence must
+        # be 0.000 (compute_overall_confidence's documented empty-list rule).
         review = Review(
             review_id="test",
             pr_number=1,
@@ -426,13 +430,15 @@ class TestReview:
             repository_name="repo",
             head_sha="a" * 40,
             findings=[],
-            overall_confidence=Decimal("0.500"),
+            overall_confidence=Decimal("0.000"),
             status=ReviewStatus.POSTED,
             created_at=now,
         )
         assert len(review.head_sha) == 40
 
-        # Invalid: too short
+        # Invalid: too short. head_sha's own field constraint rejects this
+        # before the overall_confidence/findings cross-check ever runs, so
+        # the (still-inconsistent) 0.500 here doesn't matter to this test.
         with pytest.raises(ValidationError):
             Review(
                 review_id="test",
@@ -446,7 +452,7 @@ class TestReview:
                 created_at=now,
             )
 
-        # Invalid: too long
+        # Invalid: too long. Same reasoning as above.
         with pytest.raises(ValidationError):
             Review(
                 review_id="test",
@@ -478,14 +484,26 @@ class TestReview:
         )
         assert review.overall_confidence == Decimal("0.000")
 
-        # Valid: 1
+        # Valid: 1. findings=[] can only produce overall_confidence 0.000
+        # (see compute_overall_confidence), so reaching 1.000 needs a
+        # finding whose own confidence is 1.000.
+        certain_finding = Finding(
+            agent_type=AgentType.SECURITY,
+            severity=Severity.INFO,
+            category="stub",
+            file_path="src/x.py",
+            line_start=1,
+            line_end=1,
+            confidence=Decimal("1.000"),
+            rationale="test",
+        )
         review = Review(
             review_id="test",
             pr_number=1,
             repository_owner="org",
             repository_name="repo",
             head_sha="a" * 40,
-            findings=[],
+            findings=[certain_finding],
             overall_confidence=Decimal("1.000"),
             status=ReviewStatus.POSTED,
             created_at=now,
@@ -520,17 +538,108 @@ class TestReview:
                 created_at=now,
             )
 
+    def test_review_overall_confidence_must_match_findings_mean(self) -> None:
+        """Closes the M1-deferred gap: a Review whose overall_confidence
+        contradicts its findings is rejected, not silently accepted.
+
+        Before M5, `Review(findings=[<confidence averaging 0.500>],
+        overall_confidence=Decimal("0.000"))` validated successfully -- the
+        exact scenario L4 VERIFY flagged as deferred at M1. It must now be
+        impossible to construct.
+        """
+        finding = Finding(
+            agent_type=AgentType.QUALITY,
+            severity=Severity.MEDIUM,
+            category="stub",
+            file_path="src/x.py",
+            line_start=1,
+            line_end=1,
+            confidence=Decimal("0.500"),
+            rationale="test",
+        )
+        now = datetime.now()
+
+        with pytest.raises(ValidationError, match="overall_confidence"):
+            Review(
+                review_id="test",
+                pr_number=1,
+                repository_owner="org",
+                repository_name="repo",
+                head_sha="a" * 40,
+                findings=[finding],
+                overall_confidence=Decimal("0.000"),  # contradicts the mean (0.500)
+                status=ReviewStatus.POSTED,
+                created_at=now,
+            )
+
+    def test_review_empty_findings_defaults_overall_confidence_to_zero(self) -> None:
+        """An empty findings list only accepts overall_confidence == 0.000.
+
+        "No findings yet" must never be representable as "high confidence" --
+        see compute_overall_confidence's docstring for why 0.000 (not, say,
+        1.000) is the defined value for the empty case.
+        """
+        now = datetime.now()
+        review = Review(
+            review_id="test",
+            pr_number=1,
+            repository_owner="org",
+            repository_name="repo",
+            head_sha="a" * 40,
+            findings=[],
+            overall_confidence=Decimal("0.000"),
+            status=ReviewStatus.QUEUED_FOR_HITL,
+            created_at=now,
+        )
+        assert review.overall_confidence == Decimal("0.000")
+
+        with pytest.raises(ValidationError, match="overall_confidence"):
+            Review(
+                review_id="test",
+                pr_number=1,
+                repository_owner="org",
+                repository_name="repo",
+                head_sha="a" * 40,
+                findings=[],
+                overall_confidence=Decimal("1.000"),
+                status=ReviewStatus.POSTED,
+                created_at=now,
+            )
+
     def test_review_json_round_trip(self) -> None:
         """Review serializes and deserializes via JSON."""
         now = datetime.now()
+        # A non-empty findings list whose mean confidence is exactly 0.750,
+        # so overall_confidence=0.750 satisfies the compute_overall_confidence
+        # cross-check both before and after the JSON round-trip.
+        finding_a = Finding(
+            agent_type=AgentType.SECURITY,
+            severity=Severity.HIGH,
+            category="stub",
+            file_path="src/a.py",
+            line_start=1,
+            line_end=1,
+            confidence=Decimal("0.900"),
+            rationale="test",
+        )
+        finding_b = Finding(
+            agent_type=AgentType.DOCS,
+            severity=Severity.INFO,
+            category="stub",
+            file_path="src/b.py",
+            line_start=2,
+            line_end=2,
+            confidence=Decimal("0.600"),
+            rationale="test",
+        )
         original = Review(
             review_id="ghpr-12345-run-001",
             pr_number=12345,
             repository_owner="myorg",
             repository_name="myapp",
             head_sha="c" * 40,
-            findings=[],
-            overall_confidence=Decimal("0.750"),
+            findings=[finding_a, finding_b],
+            overall_confidence=Decimal("0.750"),  # (0.900 + 0.600) / 2
             status=ReviewStatus.POSTED,
             created_at=now,
             error_message=None,
