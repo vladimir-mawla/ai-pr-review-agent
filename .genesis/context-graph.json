@@ -1,7 +1,7 @@
 {
   "$comment": "nodes=modules, edges=[cause,effect] where cause is imported-by effect. ADD invariants by hand.",
   "project": ".",
-  "generated": "2026-08-30T00:05:12.919Z",
+  "generated": "2026-08-30T06:45:45.301Z",
   "nodes": [
     "__future__",
     "__init__",
@@ -10,6 +10,8 @@
     "arq",
     "arq_worker",
     "asyncio",
+    "base",
+    "collections",
     "conftest",
     "connections",
     "constants",
@@ -22,15 +24,20 @@
     "fastapi",
     "findings",
     "functools",
+    "graph",
     "hashlib",
     "hmac",
     "httpx",
     "in_memory",
     "interface",
     "json",
+    "langgraph_engine",
     "logging",
     "main",
     "models",
+    "nodes",
+    "operator",
+    "orchestrator",
     "os",
     "parser",
     "pathlib",
@@ -43,24 +50,36 @@
     "responses",
     "review",
     "router",
+    "runnables",
     "send_signed_webhook",
     "settings",
+    "sqlite",
+    "sqlite3",
+    "state",
     "sys",
     "test_models",
+    "test_orchestrator_fanout",
     "test_queue_roundtrip",
     "test_webhook_validator",
     "testclient",
     "threading",
+    "time",
+    "types",
     "typing",
     "uuid",
     "validator",
     "webhook",
-    "worker"
+    "worker",
+    "workflow_engine"
   ],
   "edges": [
     [
       "__future__",
       "arq_worker"
+    ],
+    [
+      "__future__",
+      "graph"
     ],
     [
       "__future__",
@@ -72,7 +91,15 @@
     ],
     [
       "__future__",
+      "langgraph_engine"
+    ],
+    [
+      "__future__",
       "main"
+    ],
+    [
+      "__future__",
+      "nodes"
     ],
     [
       "__future__",
@@ -96,6 +123,14 @@
     ],
     [
       "__future__",
+      "state"
+    ],
+    [
+      "__future__",
+      "test_orchestrator_fanout"
+    ],
+    [
+      "__future__",
       "test_queue_roundtrip"
     ],
     [
@@ -105,6 +140,10 @@
     [
       "__future__",
       "validator"
+    ],
+    [
+      "__future__",
+      "workflow_engine"
     ],
     [
       "abc",
@@ -129,6 +168,14 @@
     [
       "asyncio",
       "redis_arq"
+    ],
+    [
+      "base",
+      "graph"
+    ],
+    [
+      "collections",
+      "nodes"
     ],
     [
       "connections",
@@ -176,6 +223,10 @@
     ],
     [
       "decimal",
+      "nodes"
+    ],
+    [
+      "decimal",
       "review"
     ],
     [
@@ -217,6 +268,10 @@
     [
       "functools",
       "settings"
+    ],
+    [
+      "graph",
+      "langgraph_engine"
     ],
     [
       "hashlib",
@@ -291,6 +346,10 @@
       "test_webhook_validator"
     ],
     [
+      "langgraph_engine",
+      "test_orchestrator_fanout"
+    ],
+    [
       "logging",
       "arq_worker"
     ],
@@ -308,6 +367,10 @@
     ],
     [
       "models",
+      "nodes"
+    ],
+    [
+      "models",
       "parser"
     ],
     [
@@ -316,11 +379,35 @@
     ],
     [
       "models",
+      "state"
+    ],
+    [
+      "models",
       "test_models"
     ],
     [
       "models",
+      "test_orchestrator_fanout"
+    ],
+    [
+      "models",
       "test_queue_roundtrip"
+    ],
+    [
+      "nodes",
+      "graph"
+    ],
+    [
+      "nodes",
+      "test_orchestrator_fanout"
+    ],
+    [
+      "operator",
+      "state"
+    ],
+    [
+      "orchestrator",
+      "test_orchestrator_fanout"
     ],
     [
       "os",
@@ -332,7 +419,15 @@
     ],
     [
       "pathlib",
+      "langgraph_engine"
+    ],
+    [
+      "pathlib",
       "send_signed_webhook"
+    ],
+    [
+      "pathlib",
+      "test_orchestrator_fanout"
     ],
     [
       "pydantic_settings",
@@ -365,6 +460,10 @@
     [
       "pytest",
       "test_models"
+    ],
+    [
+      "pytest",
+      "test_orchestrator_fanout"
     ],
     [
       "pytest",
@@ -407,6 +506,14 @@
       "main"
     ],
     [
+      "runnables",
+      "langgraph_engine"
+    ],
+    [
+      "runnables",
+      "nodes"
+    ],
+    [
       "settings",
       "arq_worker"
     ],
@@ -431,6 +538,30 @@
       "test_webhook_validator"
     ],
     [
+      "sqlite3",
+      "langgraph_engine"
+    ],
+    [
+      "sqlite",
+      "langgraph_engine"
+    ],
+    [
+      "state",
+      "graph"
+    ],
+    [
+      "state",
+      "langgraph_engine"
+    ],
+    [
+      "state",
+      "nodes"
+    ],
+    [
+      "state",
+      "test_orchestrator_fanout"
+    ],
+    [
       "sys",
       "send_signed_webhook"
     ],
@@ -440,7 +571,23 @@
     ],
     [
       "threading",
+      "nodes"
+    ],
+    [
+      "threading",
       "redis_arq"
+    ],
+    [
+      "time",
+      "nodes"
+    ],
+    [
+      "time",
+      "test_orchestrator_fanout"
+    ],
+    [
+      "types",
+      "graph"
     ],
     [
       "typing",
@@ -449,6 +596,14 @@
     [
       "typing",
       "interface"
+    ],
+    [
+      "typing",
+      "langgraph_engine"
+    ],
+    [
+      "typing",
+      "nodes"
     ],
     [
       "typing",
@@ -467,8 +622,20 @@
       "settings"
     ],
     [
+      "typing",
+      "state"
+    ],
+    [
+      "typing",
+      "workflow_engine"
+    ],
+    [
       "uuid",
       "send_signed_webhook"
+    ],
+    [
+      "uuid",
+      "test_orchestrator_fanout"
     ],
     [
       "uuid",
