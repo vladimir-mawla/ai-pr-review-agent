@@ -1,24 +1,149 @@
 # CURRENT
 - active_loop: none (between milestones)
 - target: M8
-- iteration: 1
-- last_gate: L1 BUILD (2026-08-30) -- all four gates green (`ruff check .`,
-  `mypy --strict backend/` on 57 source files, `pytest -v` 205 passed + 1
-  skipped, `lint-imports --config .importlinter` 2 kept/0 broken), both
-  Redis and Postgres up so every DB-dependent test genuinely ran, none
-  skipped except the one test that legitimately needs a live credential.
-  PLAN.md's M8 demo command (`ANTHROPIC_API_KEY=... python -m
-  backend.agents.security_agent --diff tests/fixtures/sqli_diff.patch`) is
-  **BLOCKED -- awaiting credential**: `ANTHROPIC_API_KEY` is not present in
-  `.env`, confirmed both by `grep` and by actually running the CLI, which
-  fails with a clear `LLMConfigurationError` (not a fabricated pass, not a
-  mocked run) at exactly the point a real call would be made -- see this
-  session's final report for the full traceback.
-- next_action: L4 VERIFY on M8 (separate session)
+- iteration: 2
+- last_gate: L2 DEBUG (2026-08-30) -- fixed all three findings from an
+  independent L4 VERIFY session (unbounded BudgetGuard spend query,
+  security_node's bare `except Exception` swallowing a budget block into a
+  fake-clean review, and the `budget-guard-hard-blocks` invariant's stale
+  per-node wording). All four gates re-run and green after the fix
+  (`ruff check .`; `mypy --strict backend/` on 57 source files; `pytest -v`
+  218 passed + 1 skipped -- up from 205+1 before this session's 13 new
+  tests; `lint-imports --config .importlinter` 2 kept/0 broken), both Redis
+  (6380) and Postgres (5433) up so every DB-dependent test genuinely ran,
+  none skipped except the one test that legitimately needs a live
+  credential. PLAN.md's M8 demo command is still **BLOCKED -- awaiting
+  credential**: `ANTHROPIC_API_KEY` is still not present in `.env`
+  (confirmed by `grep`), and running the CLI for real still fails with a
+  clear `LLMConfigurationError` at exactly the point a real call would be
+  made -- notably with NO spurious `BudgetExceededError` this time, despite
+  this same session's own test runs having written many events (including
+  a deliberately-reintroduced-then-reverted future-dated one) into this
+  same real Postgres -- see `## M8 L2 DEBUG` below and this session's final
+  report for the full traceback and regression proof.
+- next_action: L4 VERIFY on M8 (separate session) -- re-verify the three
+  fixes below (query bound + rename, security_node's narrowed exception
+  handling, the invariant wording) and re-run PLAN.md's demo command for
+  real once `ANTHROPIC_API_KEY` is available
 - model: claude-sonnet-5
 - tokens_used: 0
 - tokens_budget: 50000
 - skills_loaded: []
+
+## M8 L2 DEBUG (2026-08-30) -- 3 findings from an independent L4 VERIFY session, all fixed
+
+L4 VERIFY reviewed the M8 L1 BUILD above and raised three findings, none of
+which required rejecting the milestone outright but all of which needed a
+real fix before re-verification. This L2 DEBUG session fixed all three.
+
+**Finding 1 (highest priority) -- `EventRepository.sum_llm_cost_since` had
+no upper bound, so a future-dated row counted toward "today"'s spend.**
+This had already caused two independent false `BudgetExceededError`
+failures: the M8 builder session's own 2030-dated fixture rows ($2119.000446
+of $20), and L4 VERIFY's own, INDEPENDENTLY reproduced failure from its own
+2099-dated boundary-test fixture rows ($40.00 of $20) -- proving the earlier
+"fix" (re-pinning `tests/integration/test_budget_guard_events.py`'s fixture
+day to the past, see `## M8 history` below) had only relocated the symptom,
+never touched the actual defect. Fixed for real this time: the query itself
+now takes a genuine half-open `[day_start, day_start + 1 day)` window
+(`WHERE event_type = %s AND ts >= %s AND ts < %s`), and the method was
+renamed `sum_llm_cost_for_day` (from `sum_llm_cost_since`) since the old
+name no longer described what it does -- every call site
+(`BudgetGuard.current_spend_usd`, both fake-repository test doubles in
+`tests/unit/test_budget_guard.py`/`tests/unit/test_llm_client.py`) updated
+to match. DESIGN DECISION: a future-dated row is IGNORED for the day it
+doesn't belong to (excluded by the upper bound), not counted and not
+raised/logged as a separate anomaly signal inline -- `BudgetGuard.
+check_and_raise()` runs on this milestone's hot path (once per LLM call),
+so the query stays the single, cheap, already-necessary bounded scan it was
+before rather than growing a second unbounded "scan for anomalies" query
+alongside it; surfacing future-dated rows to an operator is left as
+follow-up infrastructure (see Deferred), not built here since nothing has
+asked for it yet. Proven, not just asserted: `tests/integration/
+test_budget_guard_events.py` gained `TestFutureDatedRowsAreExcluded` (a row
+one second into the next day, and a row dated 10 years ahead reproducing
+the exact $2119.000446 repro number, both proven not to change
+`current_spend_usd()` at all) and `TestExactBoundaryInstants` (a row at
+exactly `day_start` counts in full; a row at exactly `day_start + 1 day`
+does not count at all) -- and the fix is proven to actually catch the real
+bug: the query's upper bound was temporarily reverted (keeping the new name
+so the revert isolates only the SQL bound, not a naming mismatch), all 3 of
+the new tests failed against the reverted query with real Postgres output
+(`AssertionError: spend changed from 1059.500100 to 3178.500546 after
+inserting a far-future-dated row`, etc.), then the fix was restored and all
+8 tests in the file passed again (Postgres recycled via `docker compose
+down && up` between runs, matching M8 L1 BUILD's own precedent, so no
+polluted row from the temporary revert leaked into the passing run or the
+later live demo attempt) -- full pasted output in this session's final
+report.
+
+**Finding 2 -- `backend/orchestrator/nodes.py`'s `security_node` caught
+`BudgetExceededError` (and any other infrastructure failure) with a bare
+`except Exception` and turned it into an EMPTY findings list --
+indistinguishable from "the model ran and found nothing to flag".** Masked
+today only because the three remaining stub specialists keep
+`overall_confidence` below the HITL threshold regardless; at M10, once they
+are real, a budget block would silently read as a clean security review.
+Fixed by narrowing the catch to exactly
+`_SECURITY_INFRASTRUCTURE_FAILURE_EXCEPTIONS` (`BudgetExceededError`,
+`LLMConfigurationError`, `LLMCallFailedError` -- the same set `SecurityAgent
+.analyze`'s own docstring names as "unable to even attempt an analysis")
+and, on any of them, returning ONE synthetic CRITICAL/confidence-0.000
+`Finding` (new `backend.agents.security_agent.
+infrastructure_failure_fallback_finding`) instead of `[]` -- reusing the
+EXACT mechanism `SecurityAgent`'s own total-parse-failure fallback already
+uses to force human review (`backend.hitl.queue.has_critical_finding`'s
+unconditional CRITICAL-forces-HITL routing), per this session's own
+instruction to reuse rather than invent a second mechanism. The failure is
+still recorded in `node_errors` either way. A genuine programming bug
+(anything NOT in that narrow tuple -- a `TypeError`/`KeyError` standing in
+for a real defect in our own code) is deliberately NOT caught and
+propagates uncaught out of the node, consistent with how M7 narrowed the
+events failure policy to stop swallowing `IntegrityError` alongside real
+outages. Checked the other three stub specialists (`quality_node`,
+`tests_node`, `docs_node`): none of them has a bare `except Exception` at
+all -- only `SimulatedNodeCrashError` (re-raised) and `AgentExecutionError`
+(isolated) are caught in any of the three -- so no equivalent fix was
+needed there; this is a `security_node`-only pattern (from its own M8 L1
+BUILD addition), not a repo-wide one. New `tests/unit/
+test_security_node_infrastructure_failures.py` (9 tests) proves: a
+`BudgetExceededError` (and `LLMConfigurationError`/`LLMCallFailedError`)
+during the security node returns a forced-HITL CRITICAL finding, is
+recorded in `node_errors`, and actually routes an otherwise-confident
+review to `QUEUED_FOR_HITL` through the real `route_review` function; a
+genuine empty-findings result from the agent (no exception) still returns
+`{"findings": [], "node_errors": {}}` and does not by itself force HITL for
+an otherwise-confident review; a `TypeError`/`KeyError` from the agent
+propagates out of `security_node` uncaught.
+
+**Finding 3 -- `.genesis/context-graph.json`'s `budget-guard-hard-blocks`
+invariant described a per-node check that was never built.** The real,
+built design centralizes the check once, inside `AnthropicLLMClient.
+complete`/`complete_async`, guarding every caller uniformly -- L4 VERIFY
+ruled this design better (no caller can forget it; covers both sync and
+async paths) and recommended rewording rather than requiring the literal
+per-node duplication. Reworded to L4 VERIFY's own suggested wording (the
+real, verifiable rule): "AnthropicLLMClient.complete/complete_async call
+BudgetGuard.check_and_raise() as the first statement, before the underlying
+Anthropic client is constructed or invoked; verify by grepping every call
+site of `Anthropic(` and `messages.create` and confirming each is reachable
+only through complete." Verified checkable: `grep -rn "Anthropic("
+backend/` and `grep -rn "messages\.create" backend/` each find exactly one
+real (non-comment/non-docstring) call site, both inside
+`AnthropicLLMClient.complete`, with `self._guard().check_and_raise()` as
+that method's literal first statement. All 4 hand-written invariants
+(`inward-only-dependencies`, `hmac-verified-before-any-work`,
+`budget-guard-hard-blocks`, `events-table-append-only`) confirmed present
+after the edit -- graphizer wipes this block on every run, so this was
+edited by hand and verified, not regenerated. `.genesis/DONE.html` section
+2's BudgetGuard gate text ("BudgetGuard hard-blocks the next LLM call once
+the daily cap is exceeded") was checked and needs NO change -- it is
+already implementation-agnostic (it never described the per-node
+architecture the invariant wrongly did), so there was nothing there to
+reconcile.
+
+Gate results, regression-proof output, and the demo command's real output
+are all in this session's final report.
 
 ## M8 history (kept for context; superseded by the two lines above)
 
@@ -59,7 +184,12 @@ failed against the bug (`test_empty_findings_list_is_valid_not_an_error`,
 passing.
 
 **A second real bug found and fixed, this one with a genuine
-data-hygiene consequence:** the integration test proving BudgetGuard reads
+data-hygiene consequence** (SEE THE `## Resolved` SECTION ABOVE -- this
+paragraph is kept for historical context, but this "fix" turned out to be
+incomplete: it re-pinned the symptom, not the underlying query defect,
+which an independent L4 VERIFY session then re-triggered with its own
+2099-dated fixture rows, and this session's L2 DEBUG loop actually fixed):
+the integration test proving BudgetGuard reads
 real spend from `agent_events` originally pinned its fixture rows to a
 FAR-FUTURE day (2030-06-15) for test isolation. This was backwards --
 `sum_llm_cost_since` correctly has NO upper bound (a real production
@@ -68,7 +198,8 @@ row is still `>= today's real midnight` and silently polluted the *live*
 BudgetGuard's actual accounting: running the M8 demo CLI immediately
 afterward raised `BudgetExceededError: spent $2119.000446 of $20 cap` --
 the sum of every future-pinned fixture row this session's own test suite
-had written, not a real defect in production code. Fixed by re-pinning the
+had written, not a real defect in production code. Fixed (INCOMPLETELY --
+see above) by re-pinning the
 fixture day to 2020-06-15 (safely in the past, unconditionally excluded
 from any real "since today's midnight" query for the life of this test
 suite) and, since the append-only table cannot be cleaned up any other way
@@ -212,6 +343,48 @@ of the REJECT-then-fix cycle.
 
 A second, independent L4 VERIFY session then re-ran all four gates plus PLAN.md's M5 demo command against the fixed code, re-verified the CRITICAL-survives-dedupe guarantee through the real compiled graph (not just the unit-level regression test), and APPROVEd M5. M5 is now DONE; see `.genesis/PLAN.md`'s Progress entry and `.genesis/explanations/2026-08-30-explanation-m5.html` for the full account of the REJECT-then-fix cycle.
 
+## Resolved (raised by an independent L4 VERIFY session on M8, fixed in this L2 DEBUG loop on 2026-08-30, now closed)
+
+- ~~`EventRepository.sum_llm_cost_since` had no upper bound, so a
+  future-dated row counted toward "today"'s spend~~ -- fixed for real, not
+  re-pinned again: renamed to `sum_llm_cost_for_day` and bounded to a
+  genuine half-open `[day_start, day_start + 1 day)` window
+  (`backend/database/repository.py`). This is the SAME defect class the M8
+  builder session's own fixture re-pin (see `## M8 history` below) only
+  masked, and L4 VERIFY independently re-triggered it with its own
+  2099-dated boundary-test rows ($40.00 of $20 cap) -- proof the earlier
+  "fix" never touched the query itself. Proven with a real
+  failing-then-passing regression run against real Postgres (query
+  temporarily reverted to unbounded, 3 new tests failed with real spend
+  figures inflated by the future-dated row; fix restored, all 8 tests in
+  `tests/integration/test_budget_guard_events.py` passed) -- see this
+  session's final report for both pasted runs.
+- ~~`backend/orchestrator/nodes.py`'s `security_node` caught
+  `BudgetExceededError` behind a bare `except Exception` and returned an
+  empty findings list, indistinguishable from a clean security review~~ --
+  fixed: the catch is narrowed to exactly the infrastructure/availability
+  exceptions `SecurityAgent.analyze` can raise (`BudgetExceededError`,
+  `LLMConfigurationError`, `LLMCallFailedError`), and any of them now
+  returns one synthetic CRITICAL/confidence-0.000 `Finding`
+  (`backend.agents.security_agent.infrastructure_failure_fallback_finding`)
+  that forces `route_review` to `QUEUED_FOR_HITL` via the same mechanism
+  `SecurityAgent`'s own total-parse-failure fallback already uses, instead
+  of an empty list. A genuine programming bug (anything outside that narrow
+  tuple) is no longer caught here and propagates. Checked and confirmed the
+  other three stub specialist nodes (`quality`, `tests`, `docs`) never had
+  this pattern -- no equivalent fix was needed there. Proven by 9 new tests
+  in `tests/unit/test_security_node_infrastructure_failures.py`.
+- ~~`context-graph.json`'s `budget-guard-hard-blocks` invariant described a
+  per-node check that was never built~~ -- fixed: reworded to describe the
+  real, centralized design (`AnthropicLLMClient.complete`/`complete_async`
+  call `BudgetGuard.check_and_raise()` as the first statement), using L4
+  VERIFY's own suggested wording verbatim. Verified checkable by grep
+  (`Anthropic(` and `messages.create` each have exactly one real call site,
+  both inside `complete`, reached only after `check_and_raise()`), and all
+  4 hand-written invariants confirmed present after the edit.
+  `.genesis/DONE.html` section 2's BudgetGuard gate text was checked and
+  needs no change -- it was already implementation-agnostic.
+
 ## Deferred
 
 New from M8 (L1 BUILD), non-blocking except where noted:
@@ -222,27 +395,6 @@ New from M8 (L1 BUILD), non-blocking except where noted:
   (`LLMConfigurationError`, at the point a real API call would be made).
   L4 VERIFY should re-run the demo for real once the key is available;
   until then this is the expected, honest state, not a build gap.
-- **`context-graph.json`'s `budget-guard-hard-blocks` invariant wording
-  mismatch, flagged for L4 VERIFY to rule on:** the invariant's literal
-  text describes `BudgetGuard.check()` being called "at the start of every
-  specialist agent node in backend/orchestrator/nodes.py ... before any
-  call into backend/tools/llm_client.py" -- i.e. duplicated at each
-  orchestrator node's own call site. What was actually built centralizes
-  the check instead: `BudgetGuard.check_and_raise()` (named `check_and_
-  raise`, not `check`) is called once, inside
-  `AnthropicLLMClient.complete()` itself, guarding every caller of the LLM
-  client uniformly (the orchestrator's `security_node`, PLAN.md's own CLI
-  demo entry point, and any future caller) rather than relying on each
-  call site to remember to check first. This is a deliberate, arguably
-  more robust design (one enforcement point, not N duplicated ones) but it
-  does not literally match the invariant's wording or the verification
-  method it describes ("no orchestrator node calls llm_client without a
-  preceding BudgetGuard.check() in the same function body"). Not resolved
-  unilaterally in this session -- `.genesis/context-graph.json`'s
-  hand-written invariants are meant to be ruled on, not silently rewritten
-  by the builder. Flagging for L4 VERIFY (or a follow-up decision) to
-  either accept this design and update the invariant's wording, or require
-  the literal per-node duplication instead.
 - **`complete_async` (`backend.tools.llm_client.AnthropicLLMClient`) has no
   live call site yet** -- the one live call site this milestone built
   (`security_node` -> `SecurityAgent.analyze` -> `complete`) runs on a
