@@ -33,28 +33,78 @@ docstring for the full defect history -- which is what
 ``TestFutureDatedRowsAreExcluded`` and ``TestExactBoundaryInstants`` below
 exist to prove directly, not merely to dodge again.
 
-ISOLATION: every event this file writes is still pinned to a fixed day well
-in the PAST (2020-06-15) via an explicit ``ts``, and every ``BudgetGuard``
-here uses a clock pinned to a timestamp later the same day. This is now
-belt-and-suspenders, not the load-bearing fix: with the query correctly
-bounded, a fixture row pinned to ANY day other than the one a real
-BudgetGuard is actually querying -- past or future -- is unconditionally
-excluded from that real query's ``[real_today_start, real_today_start + 1
-day)`` window. Keeping the past-day pin costs nothing and preserves defense
-in depth against a future regression of this exact bug reintroducing an
-unbounded query. Each test also uses its own unique ``review_id`` so the
-events table's append-only nature (rows are never cleaned up between tests
-within one process run) never lets one test's rows leak into another's
-spend total in a way that would matter -- though since
-``sum_llm_cost_for_day`` is deliberately NOT scoped by ``review_id`` (a
-daily budget is process/organization-wide, not per-review -- see
-``backend.database.repository.EventRepository.sum_llm_cost_for_day``), the
-pinned-day isolation is what actually matters here, not the review_id.
+ISOLATION (past-day pin): every event this file writes is still pinned to a
+fixed day well in the PAST (2020-06-15) via an explicit ``ts``, and every
+``BudgetGuard`` here uses a clock pinned to a timestamp later the same day.
+This is belt-and-suspenders, not the load-bearing fix for the "wrong day"
+class of bug: with the query correctly bounded, a fixture row pinned to ANY
+day other than the one a real BudgetGuard is actually querying -- past or
+future -- is unconditionally excluded from that real query's
+``[real_today_start, real_today_start + 1 day)`` window.
+
+ISOLATION (per-run disposable schema -- L2 DEBUG, test-isolation defect):
+the past-day pin above does NOT, by itself, make this file repeatable
+against a long-lived database, because ``sum_llm_cost_for_day`` sums
+*every* ``llm.call`` row on the queried day, globally, by design (a daily
+budget is process/organization-wide -- see that method's own docstring).
+Every run of this file used to write its pinned-2020-06-15 fixture rows
+into the SAME production ``agent_events`` table (append-only by design, so
+nothing could ever clean them up -- see ``backend.database.migrations.
+0001_agent_events``), and they accumulated across every pytest invocation
+ever run against this docker-compose Postgres. Eventually accumulated
+same-day spend crossed this file's own hardcoded thresholds --
+``test_events_from_a_previous_day_are_not_counted`` asserts
+``spend < Decimal("999")``, and one long-lived container had accumulated
+over $1,197 of pinned-day spend from earlier runs alone, a real, observed
+failure, not a hypothetical one. Re-pinning the day again would only have
+relocated the symptom, exactly as the module docstring above already notes
+happened once before with the day-vs-query-window bug.
+
+The actual fix: every test in this module now writes through an
+``EventRepository`` pointed at a schema created fresh by the
+``_isolated_events_schema`` fixture below (module-scoped, autouse) and
+dropped again once the module's tests finish -- ``CREATE SCHEMA
+test_events_<uuid>``, then the exact same ``backend/database/migrations/
+*.sql`` files applied against that schema (via ``SET search_path`` before
+running them), so the isolated table has the SAME columns, indexes, AND
+append-only triggers (``agent_events_no_update``/``_no_delete``/
+``_no_truncate``) as production -- not a hand-rolled lookalike that could
+silently drift out of sync with the real append-only invariant.
+``backend.database.repository.EventRepository`` never hardcodes a schema:
+every SQL string in it refers to ``agent_events`` unqualified, so which
+actual table it resolves to is entirely a function of the connection's
+Postgres ``search_path``. Passing ``search_path=<schema>,public`` to its
+constructor (a new, purely additive keyword argument -- omitting it, as
+every production call site does, leaves libpq's own default search_path
+untouched) is what redirects this file's reads/writes into the disposable
+copy instead of production, with no change to any SQL text and no change
+to how production connects. See ``TestIsolatedSchemaIsAppendOnly`` below
+for the guardrail this design calls for on its own terms: if the isolated
+schema's copy of the triggers were ever missing or wrong, an append-only
+regression could sail through this suite undetected, so that class asserts
+UPDATE is rejected against the isolated table too, not only production's
+(``tests/integration/test_events_spine.py::TestAppendOnlyEnforcement``
+already covers production directly, including TRUNCATE and the restricted
+role's own revoked grants).
+
+Production's own ``agent_events`` table is never written to by this file
+anymore, and whatever rows have already accumulated there (from before
+this fix, across whatever date range) are simply irrelevant to every
+assertion here -- each pytest run gets its own empty, disposable table, so
+BudgetGuard's real, global, per-day query starts every run at $0 for its
+pinned day, unaffected by anything already sitting in production.
+
+Each test also uses its own unique ``review_id`` purely for readability of
+individual rows (not for isolation -- ``sum_llm_cost_for_day`` is
+deliberately NOT scoped by ``review_id``, see above); the schema-per-run
+fixture is what actually makes repeated suite runs produce identical
+results.
 """
 
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -63,7 +113,7 @@ import pytest
 
 from backend.core.settings import get_settings
 from backend.database.models import AgentEvent, EventType
-from backend.database.postgres import apply_migrations
+from backend.database.postgres import MIGRATIONS_DIR
 from backend.database.repository import EventRepository
 from backend.economics.budget import BudgetExceededError, BudgetGuard
 
@@ -99,14 +149,68 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-@pytest.fixture(scope="module", autouse=True)
-def _migrated_database() -> None:
-    apply_migrations(_DATABASE_ADMIN_URL)
+def _create_isolated_events_schema(admin_dsn: str, schema: str) -> None:
+    """Build a disposable ``agent_events`` copy, schema-isolated from production.
+
+    Applies every ``backend/database/migrations/*.sql`` file (the same files
+    ``backend.database.postgres.apply_migrations`` runs against production)
+    against ``admin_dsn``, but with the connection's ``search_path`` pointed
+    at ``schema`` first -- every unqualified ``CREATE TABLE``/``CREATE
+    INDEX``/``CREATE TRIGGER``/``GRANT`` statement in those files then lands
+    in ``schema`` instead of ``public``, giving it the exact same shape and
+    the exact same append-only triggers as production, generated from the
+    same source rather than hand-duplicated and liable to drift.
+
+    ``GRANT USAGE ON SCHEMA <schema> TO agent_events_writer`` is the one
+    statement the migration files themselves cannot provide, since they
+    only ever grant against the hardcoded ``public`` schema by name -- a
+    fresh schema needs its own explicit USAGE grant before the restricted
+    application role can reach anything inside it.
+    """
+    with psycopg.connect(admin_dsn, autocommit=True, cursor_factory=psycopg.ClientCursor) as conn:
+        conn.execute(f"CREATE SCHEMA {schema}")
+        conn.execute(f"SET search_path TO {schema}, public")
+        for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
+            conn.execute(path.read_text())
+        conn.execute(f"GRANT USAGE ON SCHEMA {schema} TO agent_events_writer")
+
+
+@pytest.fixture(scope="module")
+def _isolated_events_schema() -> Iterator[str]:
+    """Create a fresh, uniquely-named schema for this test-module run, drop it after.
+
+    This is the actual test-isolation fix: previously every run of this
+    module wrote its fixture rows into the SAME long-lived production
+    ``agent_events`` table (append-only, so nothing could ever remove them --
+    see the module docstring's ISOLATION notes). Creating a brand-new schema
+    per run and dropping it (``CASCADE``, which also drops the table, its
+    triggers, its indexes, and the schema-scoped GRANTs together) when this
+    module's tests finish is what makes running the full suite twice in a
+    row produce identical results: each run starts from a genuinely empty
+    table, unaffected by anything any previous run -- or production itself --
+    ever wrote.
+    """
+    schema = f"test_events_{uuid.uuid4().hex}"
+    _create_isolated_events_schema(_DATABASE_ADMIN_URL, schema)
+    try:
+        yield schema
+    finally:
+        with psycopg.connect(_DATABASE_ADMIN_URL, autocommit=True) as conn:
+            conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
 
 
 @pytest.fixture
-def repository() -> EventRepository:
-    return EventRepository(_DATABASE_URL)
+def repository(_isolated_events_schema: str) -> EventRepository:
+    """A real ``EventRepository``, redirected into this run's disposable schema.
+
+    ``search_path=<schema>,public`` (no embedded space -- see
+    ``EventRepository``'s own docstring: this string is passed straight
+    through into libpq's ``-c search_path=...`` connection option, where an
+    unescaped space would split it into two malformed tokens) makes every
+    unqualified ``agent_events`` reference in ``EventRepository``'s SQL
+    resolve to this run's isolated table instead of production's.
+    """
+    return EventRepository(_DATABASE_URL, search_path=f"{_isolated_events_schema},public")
 
 
 def _unique_review_id() -> str:
@@ -320,3 +424,47 @@ class TestExactBoundaryInstants:
             f"spend changed from {spend_before} to {spend_after} -- a row at exactly "
             "day_start + 1 day (the exclusive upper bound) must NOT count"
         )
+
+
+class TestIsolatedSchemaIsAppendOnly:
+    """Guardrail for this file's own isolation fixture, not for BudgetGuard.
+
+    Every other test in this module only proves BudgetGuard's query
+    behavior against the isolated schema -- none of them would notice if
+    ``_create_isolated_events_schema`` ever stopped carrying the real
+    append-only triggers into the disposable copy (e.g. a future migration
+    stopped being schema-agnostic, or someone changed the fixture to build
+    the table by hand instead of replaying the real migration files). If
+    that happened, an append-only regression in the ISOLATED table would
+    sail through this entire suite undetected, exactly the failure mode
+    the L2 DEBUG instructions for this fix called out by name. This test
+    closes that gap directly: it attempts a real UPDATE against the
+    isolated schema's own ``agent_events`` copy and asserts Postgres
+    rejects it, the same shape of proof
+    ``tests/integration/test_events_spine.py::TestAppendOnlyEnforcement``
+    already runs against PRODUCTION's table (that module is still the
+    canonical, independent proof that production itself is unaffected by
+    any of this).
+    """
+
+    def test_update_is_rejected_on_the_isolated_table_too(
+        self, _isolated_events_schema: str, repository: EventRepository
+    ) -> None:
+        review_id = _unique_review_id()
+        _insert_llm_call(
+            repository, review_id=review_id, ts=_PINNED_DAY_START, cost_usd=Decimal("1.000000")
+        )
+
+        with (
+            psycopg.connect(_DATABASE_ADMIN_URL, autocommit=True) as conn,
+            pytest.raises(psycopg.errors.RaiseException) as exc_info,
+        ):
+            conn.execute(
+                f"UPDATE {_isolated_events_schema}.agent_events SET agent = 'hacked' "
+                "WHERE review_id = %s",
+                (review_id,),
+            )
+
+        message = str(exc_info.value)
+        assert "append-only" in message
+        assert "UPDATE" in message
