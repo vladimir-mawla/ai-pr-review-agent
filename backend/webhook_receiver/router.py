@@ -21,6 +21,25 @@ Status code choices (documented here since the spec asks for deliberateness):
       unsupported action, intentionally ignored". All three are successful
       outcomes from GitHub's point of view — GitHub should not retry any of
       them — which is why none of them is a 4xx or 202.
+    - 503: the queue itself could not accept the job (M6; previously this
+      surfaced as an unhandled 500 -- see the M3-deferred item this closes,
+      tracked in ``.genesis/checkpoints/CURRENT.md``). ``RedisJobQueue``
+      raises ``JobQueue.enqueue``'s ``QueueUnavailableError`` when Redis is
+      unreachable after retries, or when its circuit breaker has opened.
+      Both are the same kind of failure from a caller's point of view: "the
+      dependency this needs is down right now" -- a condition GitHub's own
+      redelivery mechanism is designed to handle, not a bug in this
+      service. 503 (not 500) tells GitHub, and any other caller, that this
+      is a transient, expected condition worth retrying, not a defect.
+
+Freeze-boundary note (M6): this file is outside M6's literal freeze
+boundary (``backend/reliability/{retry,circuit_breaker,idempotency,timeout}.py``,
+``tests/unit/test_reliability.py``), but the M6 L1 BUILD driver's own
+instructions explicitly called for this specific, narrow change (closing
+the tracked "Redis-down enqueue returns 500 not 503" deferred item now that
+a circuit breaker makes "the dependency is down" a distinguishable state) —
+disclosed here and in that session's final report, not silently expanded
+scope.
 """
 
 from __future__ import annotations
@@ -34,7 +53,7 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from backend.core.settings import Settings
-from backend.job_queue.interface import JobQueue
+from backend.job_queue.interface import JobQueue, QueueUnavailableError
 from backend.webhook_receiver.parser import SUPPORTED_ACTIONS, parse_pull_request_payload
 from backend.webhook_receiver.validator import (
     InvalidSignatureError,
@@ -144,7 +163,16 @@ async def receive_webhook(
     # Step 2 (dedup) + Step 3 (enqueue): JobQueue.enqueue is itself the
     # idempotency check — calling it twice with the same delivery_id is a
     # no-op the second time. No heavy work happens here or after.
-    result = queue.enqueue(event)
+    try:
+        result = queue.enqueue(event)
+    except QueueUnavailableError as exc:
+        # M6: the queue could not accept this job right now (Redis
+        # unreachable after retries, or its circuit breaker has opened).
+        # 503, not an unhandled 500 -- GitHub's own redelivery will retry
+        # this exact webhook later, once the dependency recovers.
+        raise HTTPException(
+            status_code=503, detail=f"job queue temporarily unavailable: {exc}"
+        ) from exc
     return JSONResponse(
         status_code=200,
         content={
