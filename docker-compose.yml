@@ -1,10 +1,10 @@
 # Local development infrastructure for pr-review-agent.
 #
-# M3 scope only: a single Redis instance backing the real JobQueue
+# M3 added a single Redis instance backing the real JobQueue
 # (backend/job_queue/redis_arq.py) and the ARQ worker
-# (backend/job_queue/arq_worker.py). No Postgres/pgvector here yet --
-# those are M7/M9 additions, out of scope for this milestone's freeze
-# boundary.
+# (backend/job_queue/arq_worker.py). M7 adds a local Postgres instance
+# backing the events spine (backend/database/, backend/observability/).
+# pgvector is still M9's addition, out of scope here.
 #
 # NOTE ON THE HOST PORT: Redis's default 6379 was occupied on the build
 # machine by an unrelated project's own long-running container
@@ -37,6 +37,58 @@ services:
       - "6380:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  postgres:
+    # M7 scope: the events spine's storage (backend/database/,
+    # backend/observability/). Backs the `agent_events` append-only table.
+    #
+    # NOTE ON THE HOST PORT: Postgres's default 5432 is occupied on the
+    # build machine by an unrelated project's own long-running container
+    # (`ampliphi-postgres-1`, a different docker-compose project, not
+    # something this project should stop or touch) -- same situation, and
+    # same fix, as the Redis 6380 note above. This project's Postgres is
+    # published on host port 5433 instead, mapped to the container's normal
+    # 5432. DATABASE_URL / DATABASE_ADMIN_URL in .env.example and Settings'
+    # defaults all point at 5433 to match. If your machine's 5432 is free,
+    # you may change the "5433:5432" mapping back to "5432:5432" and update
+    # those connection strings accordingly -- nothing else depends on the
+    # specific host port. Verified free with `lsof -i :5433` before choosing
+    # it (see this milestone's build report for the command output).
+    #
+    # IMAGE CHOICE: plain `postgres:16-alpine`, deliberately NOT a
+    # TimescaleDB image. M7's own freeze-boundary text describes
+    # `backend/database/{postgres,models,repository}.py` as building a
+    # "local Postgres/SQLite dev schema MIRRORING agent_events" -- i.e. a
+    # stand-in for the eventual Tiger Cloud/TimescaleDB hypertable (M12's
+    # explicit "Tiger Cloud Migration" scope), not an early adoption of it.
+    # M9 (the other pre-Tiger-Cloud milestone) follows the same pattern
+    # locally with pgvector rather than jumping straight to Tiger. Reaching
+    # for TimescaleDB-specific features here (hypertables, compression,
+    # continuous aggregates) at M7 would be scope creep into M12's own
+    # ADR-003 four-stage plan. `agent_events` is a plain, ordinary table;
+    # migrating it to a hypertable later is exactly one
+    # `SELECT create_hypertable('agent_events', 'ts');` call against this
+    # same schema, so nothing built here blocks that migration -- it is a
+    # deliberate choice, not an oversight.
+    #
+    # NOTE ON RECREATE: like the Redis service above, this has no volume,
+    # on purpose -- `docker compose down && docker compose up` starts
+    # Postgres empty every time, so `agent_events` (and the migration-
+    # applied schema/roles) are recreated from scratch on every fresh boot.
+    # This is fine for a local, ephemeral events log; a durable events
+    # store would need a named volume, which nobody has asked for yet.
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: pr_review_agent
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pr_review_agent"]
       interval: 2s
       timeout: 2s
       retries: 15
