@@ -1,7 +1,7 @@
 {
   "$comment": "nodes=modules, edges=[cause,effect] where cause is imported-by effect. ADD invariants by hand.",
   "project": ".",
-  "generated": "2026-08-30T22:45:26.241Z",
+  "generated": "2026-08-31T09:48:36.922Z",
   "nodes": [
     "__future__",
     "__init__",
@@ -17,7 +17,6 @@
     "base_agent",
     "budget",
     "circuit_breaker",
-    "collections",
     "conftest",
     "connections",
     "constants",
@@ -27,6 +26,7 @@
     "dataclasses",
     "datetime",
     "decimal",
+    "docs_agent",
     "embedder",
     "enum",
     "enums",
@@ -35,6 +35,7 @@
     "findings",
     "functools",
     "futures",
+    "github_client",
     "graph",
     "hashlib",
     "hmac",
@@ -43,6 +44,7 @@
     "in_memory",
     "interface",
     "itertools",
+    "job_queue",
     "json",
     "langgraph_engine",
     "llm_client",
@@ -66,6 +68,7 @@
     "pydantic",
     "pydantic_settings",
     "pytest",
+    "quality_agent",
     "queue",
     "random",
     "re",
@@ -77,6 +80,7 @@
     "responses",
     "retry",
     "review",
+    "review_local",
     "router",
     "run_fixture_review",
     "runnables",
@@ -87,23 +91,32 @@
     "sqlite",
     "sqlite3",
     "state",
+    "subprocess",
     "sys",
+    "test_agent",
     "test_aggregator",
+    "test_all_agents_live",
+    "test_all_specialist_agents_in_graph",
+    "test_all_specialist_nodes_infrastructure_failures",
     "test_budget_guard",
+    "test_budget_guard_across_four_agents",
     "test_budget_guard_events",
     "test_embedder",
     "test_events_failure_policy",
     "test_events_spine",
+    "test_full_local_review",
     "test_hitl_gate",
     "test_hybrid_retrieval",
     "test_llm_client",
     "test_models",
     "test_orchestrator_fanout",
     "test_queue_roundtrip",
+    "test_queue_to_orchestrator",
     "test_reliability",
     "test_security_agent_live",
     "test_security_agent_schema",
     "test_security_node_infrastructure_failures",
+    "test_specialist_agents",
     "test_webhook_validator",
     "testclient",
     "threading",
@@ -152,11 +165,19 @@
     ],
     [
       "__future__",
+      "docs_agent"
+    ],
+    [
+      "__future__",
       "embedder"
     ],
     [
       "__future__",
       "events"
+    ],
+    [
+      "__future__",
+      "github_client"
     ],
     [
       "__future__",
@@ -204,6 +225,10 @@
     ],
     [
       "__future__",
+      "quality_agent"
+    ],
+    [
+      "__future__",
       "queue"
     ],
     [
@@ -225,6 +250,10 @@
     [
       "__future__",
       "retry"
+    ],
+    [
+      "__future__",
+      "review_local"
     ],
     [
       "__future__",
@@ -256,11 +285,31 @@
     ],
     [
       "__future__",
+      "test_agent"
+    ],
+    [
+      "__future__",
       "test_aggregator"
     ],
     [
       "__future__",
+      "test_all_agents_live"
+    ],
+    [
+      "__future__",
+      "test_all_specialist_agents_in_graph"
+    ],
+    [
+      "__future__",
+      "test_all_specialist_nodes_infrastructure_failures"
+    ],
+    [
+      "__future__",
       "test_budget_guard"
+    ],
+    [
+      "__future__",
+      "test_budget_guard_across_four_agents"
     ],
     [
       "__future__",
@@ -277,6 +326,10 @@
     [
       "__future__",
       "test_events_spine"
+    ],
+    [
+      "__future__",
+      "test_full_local_review"
     ],
     [
       "__future__",
@@ -300,6 +353,10 @@
     ],
     [
       "__future__",
+      "test_queue_to_orchestrator"
+    ],
+    [
+      "__future__",
       "test_reliability"
     ],
     [
@@ -313,6 +370,10 @@
     [
       "__future__",
       "test_security_node_infrastructure_failures"
+    ],
+    [
+      "__future__",
+      "test_specialist_agents"
     ],
     [
       "__future__",
@@ -360,11 +421,23 @@
     ],
     [
       "abc",
+      "nodes"
+    ],
+    [
+      "abc",
       "redis_arq"
     ],
     [
       "abc",
       "retry"
+    ],
+    [
+      "abc",
+      "test_all_specialist_nodes_infrastructure_failures"
+    ],
+    [
+      "abc",
+      "test_budget_guard_events"
     ],
     [
       "abc",
@@ -377,6 +450,10 @@
     [
       "abc",
       "test_queue_roundtrip"
+    ],
+    [
+      "abc",
+      "test_queue_to_orchestrator"
     ],
     [
       "abc",
@@ -412,6 +489,10 @@
     ],
     [
       "argparse",
+      "review_local"
+    ],
+    [
+      "argparse",
       "run_fixture_review"
     ],
     [
@@ -431,12 +512,20 @@
       "test_queue_roundtrip"
     ],
     [
+      "arq_worker",
+      "test_queue_to_orchestrator"
+    ],
+    [
       "arq",
       "redis_arq"
     ],
     [
       "ast",
       "seed_code_chunks"
+    ],
+    [
+      "asyncio",
+      "arq_worker"
     ],
     [
       "asyncio",
@@ -488,7 +577,15 @@
     ],
     [
       "base_agent",
+      "docs_agent"
+    ],
+    [
+      "base_agent",
       "nodes"
+    ],
+    [
+      "base_agent",
+      "quality_agent"
     ],
     [
       "base_agent",
@@ -496,7 +593,15 @@
     ],
     [
       "base_agent",
+      "test_agent"
+    ],
+    [
+      "base_agent",
       "test_aggregator"
+    ],
+    [
+      "base_agent",
+      "test_all_specialist_nodes_infrastructure_failures"
     ],
     [
       "base_agent",
@@ -505,6 +610,10 @@
     [
       "base_agent",
       "test_security_node_infrastructure_failures"
+    ],
+    [
+      "base_agent",
+      "test_specialist_agents"
     ],
     [
       "base",
@@ -520,7 +629,15 @@
     ],
     [
       "budget",
+      "test_all_specialist_nodes_infrastructure_failures"
+    ],
+    [
+      "budget",
       "test_budget_guard"
+    ],
+    [
+      "budget",
+      "test_budget_guard_across_four_agents"
     ],
     [
       "budget",
@@ -571,10 +688,6 @@
       "test_reliability"
     ],
     [
-      "collections",
-      "nodes"
-    ],
-    [
       "connections",
       "arq_worker"
     ],
@@ -587,8 +700,16 @@
       "test_queue_roundtrip"
     ],
     [
+      "connections",
+      "test_queue_to_orchestrator"
+    ],
+    [
       "constants",
       "redis_arq"
+    ],
+    [
+      "context_retriever",
+      "nodes"
     ],
     [
       "context_retriever",
@@ -653,6 +774,10 @@
     [
       "dataclasses",
       "test_security_agent_schema"
+    ],
+    [
+      "dataclasses",
+      "test_specialist_agents"
     ],
     [
       "dataclasses",
@@ -728,6 +853,10 @@
     ],
     [
       "decimal",
+      "base_agent"
+    ],
+    [
+      "decimal",
       "budget"
     ],
     [
@@ -768,10 +897,6 @@
     ],
     [
       "decimal",
-      "security_agent"
-    ],
-    [
-      "decimal",
       "settings"
     ],
     [
@@ -780,7 +905,23 @@
     ],
     [
       "decimal",
+      "test_all_agents_live"
+    ],
+    [
+      "decimal",
+      "test_all_specialist_agents_in_graph"
+    ],
+    [
+      "decimal",
+      "test_all_specialist_nodes_infrastructure_failures"
+    ],
+    [
+      "decimal",
       "test_budget_guard"
+    ],
+    [
+      "decimal",
+      "test_budget_guard_across_four_agents"
     ],
     [
       "decimal",
@@ -793,6 +934,10 @@
     [
       "decimal",
       "test_events_spine"
+    ],
+    [
+      "decimal",
+      "test_full_local_review"
     ],
     [
       "decimal",
@@ -812,6 +957,10 @@
     ],
     [
       "decimal",
+      "test_queue_to_orchestrator"
+    ],
+    [
+      "decimal",
       "test_security_agent_schema"
     ],
     [
@@ -819,8 +968,48 @@
       "test_security_node_infrastructure_failures"
     ],
     [
+      "decimal",
+      "test_specialist_agents"
+    ],
+    [
+      "docs_agent",
+      "nodes"
+    ],
+    [
+      "docs_agent",
+      "test_all_agents_live"
+    ],
+    [
+      "docs_agent",
+      "test_all_specialist_agents_in_graph"
+    ],
+    [
+      "docs_agent",
+      "test_budget_guard_across_four_agents"
+    ],
+    [
+      "docs_agent",
+      "test_events_spine"
+    ],
+    [
+      "docs_agent",
+      "test_full_local_review"
+    ],
+    [
+      "docs_agent",
+      "test_queue_to_orchestrator"
+    ],
+    [
+      "docs_agent",
+      "test_specialist_agents"
+    ],
+    [
       "embedder",
       "context_retriever"
+    ],
+    [
+      "embedder",
+      "nodes"
     ],
     [
       "embedder",
@@ -907,6 +1096,22 @@
       "timeout"
     ],
     [
+      "github_client",
+      "arq_worker"
+    ],
+    [
+      "github_client",
+      "review_local"
+    ],
+    [
+      "github_client",
+      "test_full_local_review"
+    ],
+    [
+      "github_client",
+      "test_queue_to_orchestrator"
+    ],
+    [
       "graph",
       "langgraph_engine"
     ],
@@ -921,6 +1126,10 @@
     [
       "hashlib",
       "test_events_spine"
+    ],
+    [
+      "hashlib",
+      "test_hybrid_retrieval"
     ],
     [
       "hashlib",
@@ -1027,6 +1236,10 @@
       "test_aggregator"
     ],
     [
+      "job_queue",
+      "test_queue_to_orchestrator"
+    ],
+    [
       "json",
       "response_parsing"
     ],
@@ -1036,7 +1249,23 @@
     ],
     [
       "json",
+      "test_all_specialist_agents_in_graph"
+    ],
+    [
+      "json",
+      "test_budget_guard_across_four_agents"
+    ],
+    [
+      "json",
       "test_events_spine"
+    ],
+    [
+      "json",
+      "test_full_local_review"
+    ],
+    [
+      "json",
+      "test_hybrid_retrieval"
     ],
     [
       "json",
@@ -1052,6 +1281,10 @@
     ],
     [
       "json",
+      "test_queue_to_orchestrator"
+    ],
+    [
+      "json",
       "test_reliability"
     ],
     [
@@ -1060,7 +1293,19 @@
     ],
     [
       "json",
+      "test_specialist_agents"
+    ],
+    [
+      "json",
       "test_webhook_validator"
+    ],
+    [
+      "langgraph_engine",
+      "arq_worker"
+    ],
+    [
+      "langgraph_engine",
+      "review_local"
     ],
     [
       "langgraph_engine",
@@ -1068,11 +1313,35 @@
     ],
     [
       "langgraph_engine",
+      "test_all_specialist_agents_in_graph"
+    ],
+    [
+      "langgraph_engine",
+      "test_budget_guard_across_four_agents"
+    ],
+    [
+      "langgraph_engine",
       "test_events_spine"
     ],
     [
       "langgraph_engine",
+      "test_full_local_review"
+    ],
+    [
+      "langgraph_engine",
       "test_orchestrator_fanout"
+    ],
+    [
+      "langgraph_engine",
+      "test_queue_to_orchestrator"
+    ],
+    [
+      "llm_client",
+      "base_agent"
+    ],
+    [
+      "llm_client",
+      "docs_agent"
     ],
     [
       "llm_client",
@@ -1080,7 +1349,35 @@
     ],
     [
       "llm_client",
+      "quality_agent"
+    ],
+    [
+      "llm_client",
       "security_agent"
+    ],
+    [
+      "llm_client",
+      "test_agent"
+    ],
+    [
+      "llm_client",
+      "test_all_specialist_agents_in_graph"
+    ],
+    [
+      "llm_client",
+      "test_all_specialist_nodes_infrastructure_failures"
+    ],
+    [
+      "llm_client",
+      "test_budget_guard_across_four_agents"
+    ],
+    [
+      "llm_client",
+      "test_events_spine"
+    ],
+    [
+      "llm_client",
+      "test_full_local_review"
     ],
     [
       "llm_client",
@@ -1092,6 +1389,10 @@
     ],
     [
       "llm_client",
+      "test_queue_to_orchestrator"
+    ],
+    [
+      "llm_client",
       "test_security_agent_schema"
     ],
     [
@@ -1099,8 +1400,16 @@
       "test_security_node_infrastructure_failures"
     ],
     [
+      "llm_client",
+      "test_specialist_agents"
+    ],
+    [
       "logging",
       "arq_worker"
+    ],
+    [
+      "logging",
+      "base_agent"
     ],
     [
       "logging",
@@ -1109,10 +1418,6 @@
     [
       "logging",
       "response_parsing"
-    ],
-    [
-      "logging",
-      "security_agent"
     ],
     [
       "main",
@@ -1148,6 +1453,10 @@
     ],
     [
       "models",
+      "arq_worker"
+    ],
+    [
+      "models",
       "audit"
     ],
     [
@@ -1160,7 +1469,15 @@
     ],
     [
       "models",
+      "docs_agent"
+    ],
+    [
+      "models",
       "events"
+    ],
+    [
+      "models",
+      "github_client"
     ],
     [
       "models",
@@ -1180,6 +1497,10 @@
     ],
     [
       "models",
+      "quality_agent"
+    ],
+    [
+      "models",
       "queue"
     ],
     [
@@ -1196,6 +1517,10 @@
     ],
     [
       "models",
+      "review_local"
+    ],
+    [
+      "models",
       "security_agent"
     ],
     [
@@ -1204,7 +1529,27 @@
     ],
     [
       "models",
+      "test_agent"
+    ],
+    [
+      "models",
       "test_aggregator"
+    ],
+    [
+      "models",
+      "test_all_agents_live"
+    ],
+    [
+      "models",
+      "test_all_specialist_agents_in_graph"
+    ],
+    [
+      "models",
+      "test_all_specialist_nodes_infrastructure_failures"
+    ],
+    [
+      "models",
+      "test_budget_guard_across_four_agents"
     ],
     [
       "models",
@@ -1217,6 +1562,10 @@
     [
       "models",
       "test_events_spine"
+    ],
+    [
+      "models",
+      "test_full_local_review"
     ],
     [
       "models",
@@ -1240,6 +1589,10 @@
     ],
     [
       "models",
+      "test_queue_to_orchestrator"
+    ],
+    [
+      "models",
       "test_reliability"
     ],
     [
@@ -1253,6 +1606,10 @@
     [
       "models",
       "test_security_node_infrastructure_failures"
+    ],
+    [
+      "models",
+      "test_specialist_agents"
     ],
     [
       "nodes",
@@ -1284,7 +1641,31 @@
     ],
     [
       "orchestrator",
+      "test_all_specialist_agents_in_graph"
+    ],
+    [
+      "orchestrator",
+      "test_all_specialist_nodes_infrastructure_failures"
+    ],
+    [
+      "orchestrator",
+      "test_budget_guard_across_four_agents"
+    ],
+    [
+      "orchestrator",
+      "test_events_spine"
+    ],
+    [
+      "orchestrator",
+      "test_full_local_review"
+    ],
+    [
+      "orchestrator",
       "test_orchestrator_fanout"
+    ],
+    [
+      "orchestrator",
+      "test_queue_to_orchestrator"
     ],
     [
       "orchestrator",
@@ -1293,6 +1674,10 @@
     [
       "os",
       "conftest"
+    ],
+    [
+      "os",
+      "test_hybrid_retrieval"
     ],
     [
       "parser",
@@ -1312,6 +1697,10 @@
     ],
     [
       "pathlib",
+      "review_local"
+    ],
+    [
+      "pathlib",
       "seed_code_chunks"
     ],
     [
@@ -1320,11 +1709,35 @@
     ],
     [
       "pathlib",
+      "test_all_agents_live"
+    ],
+    [
+      "pathlib",
+      "test_all_specialist_agents_in_graph"
+    ],
+    [
+      "pathlib",
+      "test_budget_guard_across_four_agents"
+    ],
+    [
+      "pathlib",
       "test_events_spine"
     ],
     [
       "pathlib",
+      "test_full_local_review"
+    ],
+    [
+      "pathlib",
+      "test_hybrid_retrieval"
+    ],
+    [
+      "pathlib",
       "test_orchestrator_fanout"
+    ],
+    [
+      "pathlib",
+      "test_queue_to_orchestrator"
     ],
     [
       "pathlib",
@@ -1448,6 +1861,14 @@
     ],
     [
       "pytest",
+      "test_all_agents_live"
+    ],
+    [
+      "pytest",
+      "test_all_specialist_nodes_infrastructure_failures"
+    ],
+    [
+      "pytest",
       "test_budget_guard"
     ],
     [
@@ -1465,6 +1886,10 @@
     [
       "pytest",
       "test_events_spine"
+    ],
+    [
+      "pytest",
+      "test_full_local_review"
     ],
     [
       "pytest",
@@ -1488,6 +1913,10 @@
     ],
     [
       "pytest",
+      "test_queue_to_orchestrator"
+    ],
+    [
+      "pytest",
       "test_reliability"
     ],
     [
@@ -1500,7 +1929,43 @@
     ],
     [
       "pytest",
+      "test_specialist_agents"
+    ],
+    [
+      "pytest",
       "test_webhook_validator"
+    ],
+    [
+      "quality_agent",
+      "nodes"
+    ],
+    [
+      "quality_agent",
+      "test_all_agents_live"
+    ],
+    [
+      "quality_agent",
+      "test_all_specialist_agents_in_graph"
+    ],
+    [
+      "quality_agent",
+      "test_budget_guard_across_four_agents"
+    ],
+    [
+      "quality_agent",
+      "test_events_spine"
+    ],
+    [
+      "quality_agent",
+      "test_full_local_review"
+    ],
+    [
+      "quality_agent",
+      "test_queue_to_orchestrator"
+    ],
+    [
+      "quality_agent",
+      "test_specialist_agents"
     ],
     [
       "queue",
@@ -1509,6 +1974,10 @@
     [
       "queue",
       "test_aggregator"
+    ],
+    [
+      "queue",
+      "test_all_specialist_nodes_infrastructure_failures"
     ],
     [
       "queue",
@@ -1531,12 +2000,20 @@
       "retry"
     ],
     [
+      "re",
+      "base_agent"
+    ],
+    [
       "redis_arq",
       "main"
     ],
     [
       "redis_arq",
       "test_queue_roundtrip"
+    ],
+    [
+      "redis_arq",
+      "test_queue_to_orchestrator"
     ],
     [
       "redis_arq",
@@ -1552,6 +2029,10 @@
     ],
     [
       "redis",
+      "test_queue_to_orchestrator"
+    ],
+    [
+      "redis",
       "test_reliability"
     ],
     [
@@ -1560,7 +2041,7 @@
     ],
     [
       "registry",
-      "security_agent"
+      "base_agent"
     ],
     [
       "repository",
@@ -1620,6 +2101,10 @@
     ],
     [
       "response_parsing",
+      "base_agent"
+    ],
+    [
+      "response_parsing",
       "security_agent"
     ],
     [
@@ -1633,6 +2118,10 @@
     [
       "re",
       "test_events_spine"
+    ],
+    [
+      "re",
+      "test_hybrid_retrieval"
     ],
     [
       "retry",
@@ -1663,6 +2152,10 @@
       "__init__"
     ],
     [
+      "review_local",
+      "test_full_local_review"
+    ],
+    [
       "router",
       "main"
     ],
@@ -1680,7 +2173,31 @@
     ],
     [
       "security_agent",
+      "test_all_agents_live"
+    ],
+    [
+      "security_agent",
+      "test_all_specialist_agents_in_graph"
+    ],
+    [
+      "security_agent",
+      "test_budget_guard_across_four_agents"
+    ],
+    [
+      "security_agent",
+      "test_events_spine"
+    ],
+    [
+      "security_agent",
+      "test_full_local_review"
+    ],
+    [
+      "security_agent",
       "test_orchestrator_fanout"
+    ],
+    [
+      "security_agent",
+      "test_queue_to_orchestrator"
     ],
     [
       "security_agent",
@@ -1689,6 +2206,14 @@
     [
       "security_agent",
       "test_security_agent_schema"
+    ],
+    [
+      "security_agent",
+      "test_specialist_agents"
+    ],
+    [
+      "seed_code_chunks",
+      "test_hybrid_retrieval"
     ],
     [
       "settings",
@@ -1732,6 +2257,10 @@
     ],
     [
       "settings",
+      "test_all_agents_live"
+    ],
+    [
+      "settings",
       "test_budget_guard_events"
     ],
     [
@@ -1753,6 +2282,10 @@
     [
       "settings",
       "test_queue_roundtrip"
+    ],
+    [
+      "settings",
+      "test_queue_to_orchestrator"
     ],
     [
       "settings",
@@ -1780,6 +2313,10 @@
     ],
     [
       "state",
+      "arq_worker"
+    ],
+    [
+      "state",
       "graph"
     ],
     [
@@ -1792,7 +2329,23 @@
     ],
     [
       "state",
+      "review_local"
+    ],
+    [
+      "state",
       "run_fixture_review"
+    ],
+    [
+      "state",
+      "test_all_specialist_agents_in_graph"
+    ],
+    [
+      "state",
+      "test_all_specialist_nodes_infrastructure_failures"
+    ],
+    [
+      "state",
+      "test_budget_guard_across_four_agents"
     ],
     [
       "state",
@@ -1805,6 +2358,14 @@
     [
       "state",
       "test_security_node_infrastructure_failures"
+    ],
+    [
+      "subprocess",
+      "test_hybrid_retrieval"
+    ],
+    [
+      "sys",
+      "review_local"
     ],
     [
       "sys",
@@ -1821,6 +2382,42 @@
     [
       "sys",
       "send_signed_webhook"
+    ],
+    [
+      "sys",
+      "test_hybrid_retrieval"
+    ],
+    [
+      "test_agent",
+      "nodes"
+    ],
+    [
+      "test_agent",
+      "test_all_agents_live"
+    ],
+    [
+      "test_agent",
+      "test_all_specialist_agents_in_graph"
+    ],
+    [
+      "test_agent",
+      "test_budget_guard_across_four_agents"
+    ],
+    [
+      "test_agent",
+      "test_events_spine"
+    ],
+    [
+      "test_agent",
+      "test_full_local_review"
+    ],
+    [
+      "test_agent",
+      "test_queue_to_orchestrator"
+    ],
+    [
+      "test_agent",
+      "test_specialist_agents"
     ],
     [
       "testclient",
@@ -1845,6 +2442,10 @@
     [
       "threading",
       "redis_arq"
+    ],
+    [
+      "threading",
+      "test_budget_guard_across_four_agents"
     ],
     [
       "threading",
@@ -1964,11 +2565,19 @@
     ],
     [
       "typing",
+      "base_agent"
+    ],
+    [
+      "typing",
       "circuit_breaker"
     ],
     [
       "typing",
       "embedder"
+    ],
+    [
+      "typing",
+      "github_client"
     ],
     [
       "typing",
@@ -2012,6 +2621,10 @@
     ],
     [
       "typing",
+      "test_all_specialist_nodes_infrastructure_failures"
+    ],
+    [
+      "typing",
       "test_embedder"
     ],
     [
@@ -2032,7 +2645,19 @@
     ],
     [
       "uuid",
+      "review_local"
+    ],
+    [
+      "uuid",
       "send_signed_webhook"
+    ],
+    [
+      "uuid",
+      "test_all_specialist_agents_in_graph"
+    ],
+    [
+      "uuid",
+      "test_budget_guard_across_four_agents"
     ],
     [
       "uuid",
@@ -2049,6 +2674,10 @@
     [
       "uuid",
       "test_queue_roundtrip"
+    ],
+    [
+      "uuid",
+      "test_queue_to_orchestrator"
     ],
     [
       "uuid",
@@ -2071,12 +2700,24 @@
       "test_queue_roundtrip"
     ],
     [
+      "worker",
+      "test_queue_to_orchestrator"
+    ],
+    [
       "workflow_context",
       "__init__"
     ],
     [
       "workflow_context",
       "test_events_spine"
+    ],
+    [
+      "workflow_engine",
+      "arq_worker"
+    ],
+    [
+      "workflow_engine",
+      "review_local"
     ]
   ],
   "invariants": {
