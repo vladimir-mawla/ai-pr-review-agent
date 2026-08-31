@@ -92,6 +92,7 @@ from backend.agents.quality_agent import QualityAgent
 from backend.agents.security_agent import SecurityAgent
 from backend.agents.test_agent import TestsAgent
 from backend.core.settings import get_settings
+from backend.database.review_store import get_review_repository, persist_review
 from backend.economics.budget import BudgetExceededError
 from backend.hitl.queue import route_review
 from backend.memory.context_retriever import HybridRetriever
@@ -506,4 +507,11 @@ def aggregate_node(state: GraphState, config: RunnableConfig) -> dict[str, Any]:
         outcome=status.value,
         confidence=overall_confidence,
     )
+    # M13: the durable HITL-queue/dashboard read model
+    # (backend.database.review_store) -- see that module's docstring for
+    # why agent_events alone cannot answer "what are this review's actual
+    # findings/reason". Same fail-safe posture as emit_decision above: a
+    # write failure here is logged and swallowed, never allowed to fail
+    # the review itself (persist_review's own docstring).
+    persist_review(get_review_repository(), review, reason=reason)
     return {"review": review, "routing_reason": reason}
