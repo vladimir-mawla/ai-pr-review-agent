@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>M11 Explained — Real GitHub Integration</title>
+<style>
+  :root {
+    --bg: #f7f7f5;
+    --bg-card: #ffffff;
+    --ink: #1b1f23;
+    --mut: #5b6472;
+    --line: #e2e4e8;
+    --accent: #2f6feb;
+    --accent-ink: #ffffff;
+    --ok: #1a7f37;
+    --warn: #9a6700;
+    --bad: #cf222e;
+    --code-bg: #f0f1f3;
+    --pill-bg: #eef2ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1117;
+      --bg-card: #161b22;
+      --ink: #e6edf3;
+      --mut: #9aa4b2;
+      --line: #2d333b;
+      --accent: #6ea8fe;
+      --accent-ink: #0d1117;
+      --ok: #3fb950;
+      --warn: #d29922;
+      --bad: #f85149;
+      --code-bg: #1c2128;
+      --pill-bg: #1c2440;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1117;
+    --bg-card: #161b22;
+    --ink: #e6edf3;
+    --mut: #9aa4b2;
+    --line: #2d333b;
+    --accent: #6ea8fe;
+    --accent-ink: #0d1117;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --bad: #f85149;
+    --code-bg: #1c2128;
+    --pill-bg: #1c2440;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    font-size: 16px;
+  }
+  .page { max-width: 880px; margin: 0 auto; padding: 40px 20px 100px; }
+  header.hero { margin-bottom: 32px; }
+  header.hero .kicker {
+    color: var(--accent);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-size: 12.5px;
+    margin: 0 0 10px;
+  }
+  h1 { font-size: clamp(26px, 4vw, 36px); margin: 0 0 12px; line-height: 1.2; }
+  .lede { color: var(--mut); font-size: 17px; max-width: 70ch; }
+  nav.toc {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin: 28px 0 40px;
+  }
+  nav.toc h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--mut);
+    margin: 0 0 10px;
+  }
+  nav.toc ol { margin: 0; padding-left: 20px; columns: 2; column-gap: 24px; }
+  nav.toc li { margin: 4px 0; break-inside: avoid; }
+  nav.toc a { color: var(--ink); text-decoration: none; border-bottom: 1px dashed var(--line); }
+  nav.toc a:hover { border-bottom-color: var(--accent); color: var(--accent); }
+
+  section { margin: 56px 0; }
+  section > h2 {
+    font-size: 22px;
+    margin: 0 0 16px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--line);
+  }
+  section > h2 .num { color: var(--accent); font-variant-numeric: tabular-nums; margin-right: 10px; }
+  h3 { font-size: 17px; margin: 26px 0 10px; }
+  p { margin: 12px 0; }
+  a { color: var(--accent); }
+  a:focus-visible, button:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .card { background: var(--bg-card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 22px; margin: 16px 0; }
+  .callout { border-left: 4px solid var(--accent); background: var(--pill-bg); border-radius: 8px; padding: 14px 18px; margin: 18px 0; }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.ok { border-left-color: var(--ok); }
+  .callout.bad { border-left-color: var(--bad); }
+  .callout .label {
+    font-weight: 700;
+    font-size: 12.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--mut);
+    margin-bottom: 6px;
+  }
+
+  code {
+    background: var(--code-bg);
+    padding: 1px 6px;
+    border-radius: 5px;
+    font-size: 0.9em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    white-space: pre;
+    font-size: 13.5px;
+    line-height: 1.55;
+  }
+  pre code { background: none; padding: 0; border-radius: 0; }
+
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14.5px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--mut); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .tablewrap { overflow-x: auto; }
+
+  .pill {
+    display: inline-block;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 2px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    color: var(--mut);
+    white-space: nowrap;
+  }
+  .pill.ok { color: var(--ok); border-color: var(--ok); }
+  .pill.bad { color: var(--bad); border-color: var(--bad); }
+  .pill.warn { color: var(--warn); border-color: var(--warn); }
+
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 18px 0; }
+  .flow .node {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 13.5px;
+    min-width: 120px;
+    text-align: center;
+  }
+  .flow .node.core { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .flow .node.bad { border-color: var(--bad); color: var(--bad); font-weight: 600; }
+  .flow .node.ok { border-color: var(--ok); color: var(--ok); font-weight: 600; }
+  .flow .node.warn { border-color: var(--warn); color: var(--warn); font-weight: 600; }
+  .flow .arrow { color: var(--mut); font-size: 18px; }
+  .flow.vertical { flex-direction: column; align-items: stretch; }
+  .flow.vertical .node { text-align: left; }
+  .flow.vertical .arrow { text-align: center; }
+
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+  @media (max-width: 640px) { .compare { grid-template-columns: 1fr; } }
+  .compare .col { border-radius: 12px; padding: 16px 18px; border: 1px solid var(--line); }
+  .compare .col.before { background: color-mix(in srgb, var(--bad) 6%, var(--bg-card)); }
+  .compare .col.after { background: color-mix(in srgb, var(--ok) 6%, var(--bg-card)); }
+  .compare h4 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .compare.before-after .before h4 { color: var(--bad); }
+  .compare.before-after .after h4 { color: var(--ok); }
+
+  .module-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin: 18px 0; }
+  .module-card { background: var(--bg-card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .module-card h4 {
+    margin: 0 0 6px;
+    font-size: 15px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: var(--accent);
+  }
+  .module-card p { margin: 6px 0 0; font-size: 14px; color: var(--mut); }
+
+  .lane-grid { display: flex; flex-wrap: wrap; gap: 12px; margin: 18px 0; align-items: stretch; }
+  .lane {
+    flex: 1 1 220px;
+    border-radius: 12px;
+    border: 2px solid var(--line);
+    padding: 14px 16px;
+    background: var(--bg-card);
+  }
+  .lane .lane-tag {
+    font-size: 11.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--mut);
+    margin-bottom: 6px;
+  }
+  .lane.busy { border-color: var(--bad); }
+  .lane.busy .lane-tag { color: var(--bad); }
+  .lane.ok { border-color: var(--ok); }
+  .lane.ok .lane-tag { color: var(--ok); }
+  .lane p { font-size: 13.5px; margin: 6px 0 0; }
+
+  .finding-card { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 10px 0; background: var(--bg-card); }
+  .finding-card .sev { color: var(--bad); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .finding-card .loc { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; color: var(--mut); }
+  .finding-card .conf { float: right; color: var(--mut); font-size: 13px; }
+  .finding-card .rationale { margin-top: 8px; font-size: 14px; }
+
+  ol.gaps li, ul.plain li { margin: 8px 0; }
+
+  .timeline { margin: 20px 0; padding: 0; list-style: none; }
+  .timeline li {
+    position: relative;
+    padding: 4px 0 18px 26px;
+    border-left: 2px solid var(--line);
+    margin-left: 6px;
+  }
+  .timeline li:last-child { border-left-color: transparent; padding-bottom: 0; }
+  .timeline li::before {
+    content: "";
+    position: absolute;
+    left: -7px;
+    top: 6px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--bg-card);
+    border: 2px solid var(--accent);
+  }
+  .timeline li.reject::before { border-color: var(--bad); }
+  .timeline li.approve::before { border-color: var(--ok); }
+  .timeline li .when { font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .timeline li.reject .when { color: var(--bad); }
+  .timeline li.approve .when { color: var(--ok); }
+
+  details.quiz {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 18px;
+    margin: 16px 0;
+  }
+  details.quiz summary { cursor: pointer; font-weight: 600; list-style: none; }
+  details.quiz summary::-webkit-details-marker { display: none; }
+  details.quiz summary::before { content: "▸ "; color: var(--accent); }
+  details.quiz[open] summary::before { content: "▾ "; }
+  details.quiz .q { font-weight: 600; margin-bottom: 4px; }
+  details.quiz .answer { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
+  details.quiz .answer .verdict { font-weight: 700; color: var(--ok); }
+
+  footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--mut); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <p class="kicker">Genesis L4 · Explain Diff · Milestone M11</p>
+    <h1>Real GitHub Integration</h1>
+    <p class="lede">
+      M11 swaps M10's mocked <code>github_client</code> for a real GitHub
+      App: a real RS256 JWT, a real cached installation token, real REST
+      calls, all still wrapped in M6's retry/breaker/timeout composition
+      with GitHub-specific error classification. The centerpiece is not
+      the auth handshake — it's what happens when an LLM's reported line
+      number doesn't actually correspond to a line GitHub will accept a
+      comment on, and why that must never take the whole review down. This
+      page covers the App-vs-PAT auth model; why an installation on one
+      throwaway repo is the actual safety boundary, not the App's
+      permission set; the diff-position mapping problem and its
+      degradation path; a real, re-provable idempotency check; a
+      contract test built to avoid mock/reality drift; and the honest
+      limits an independent L4 VERIFY session found and judged
+      non-blocking. Diff range <code>91a756a</code>&nbsp;&hellip;&nbsp;<code>7da16e1</code>
+      on <code>main</code> — 10 commits, 20 files changed, 3289
+      insertions(+), 87 deletions(-).
+    </p>
+  </header>
+
+  <nav class="toc">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#background">Background: from a PAT to a GitHub App</a></li>
+      <li><a href="#install-scope">One throwaway repo: install scope is the safety boundary</a></li>
+      <li><a href="#centerpiece">The centerpiece: diff-position mapping</a></li>
+      <li><a href="#idempotency">Idempotency: the review_id marker</a></li>
+      <li><a href="#contract">The contract test: why a mock needs a leash</a></li>
+      <li><a href="#limits">Honest limits</a></li>
+      <li><a href="#quiz">Quiz</a></li>
+    </ol>
+  </nav>
+
+  <section id="background">
+    <h2><span class="num">1</span>Background: from a PAT to a GitHub App</h2>
+    <p>
+      Anyone who has scripted against GitHub with a personal access token
+      (PAT) has used the simplest possible auth model: one long-lived
+      string, generated once by a human in a settings page, sent as a
+      bearer token on every request, valid until the human revokes it. It
+      authenticates <em>as that human</em>, with whatever scopes they
+      granted it, for as long as they choose to leave it alive.
+    </p>
+    <p>
+      A GitHub App is a different actor entirely — it authenticates as
+      itself, not as any one person, and it does so through two separate
+      credentials with two separate lifetimes instead of one:
+    </p>
+    <div class="flow">
+      <div class="node core">App's RSA private key<br><span style="color:var(--mut);font-size:12px">generated once, never sent over the wire</span></div>
+      <div class="arrow">&rarr;</div>
+      <div class="node">signs a JWT<br><span style="color:var(--mut);font-size:12px">&le; 10 min TTL</span></div>
+      <div class="arrow">&rarr;</div>
+      <div class="node core">exchanged for an<br>installation token<br><span style="color:var(--mut);font-size:12px">~1h TTL, <code>ghs_...</code></span></div>
+      <div class="arrow">&rarr;</div>
+      <div class="node ok">real REST calls<br><span style="color:var(--mut);font-size:12px">fetch diff, post review</span></div>
+    </div>
+    <p>
+      Step one — <code>mint_app_jwt</code> in
+      <code>backend/integrations/github_auth.py</code> — signs a JWT
+      asserting only "I am App <code>&lt;app_id&gt;</code>" (the <code>iss</code>
+      claim), using RS256 so the signature can only be produced by the
+      holder of the App's private key. This JWT is good for exactly two
+      things: app-level endpoints like <code>GET /app</code>, and
+      exchanging itself for an installation token. It cannot fetch a diff
+      or post a comment directly.
+    </p>
+    <p>
+      <b>Why the JWT must live under 10 minutes.</b> This is GitHub's own
+      hard rule, not a local choice: a JWT whose <code>exp</code> claim is
+      more than 10 minutes past <code>iat</code> is rejected outright. The
+      reasoning is the same reason short-lived credentials exist anywhere
+      — a JWT is signed with the App's most sensitive secret (the private
+      key itself), so the App's own code goes out of its way to mint a
+      fresh one for essentially every use rather than caching one for
+      hours the way a PAT effectively is. This project clamps to a
+      conservative <b>9 minutes</b> (<code>_MAX_JWT_TTL_SECONDS = 9 * 60</code>),
+      not the literal ceiling, specifically so a token minted right at the
+      boundary is never rejected by a few seconds of clock rounding. It
+      also backdates <code>iat</code> by 60 seconds
+      (<code>CLOCK_SKEW_TOLERANCE_SECONDS</code>) because GitHub rejects a
+      JWT whose <code>iat</code> appears to be in <em>GitHub's own</em>
+      future — a JWT minted at this machine's honest current time can
+      still look "not yet valid" to a GitHub server whose clock runs a
+      few seconds behind.
+    </p>
+    <pre><code>current = now if now is not None else datetime.now(UTC)
+issued_at = current - timedelta(seconds=CLOCK_SKEW_TOLERANCE_SECONDS)   # backdated 60s
+expires_at = issued_at + timedelta(seconds=_MAX_JWT_TTL_SECONDS)        # +9min from there
+
+payload = {"iat": int(issued_at.timestamp()), "exp": int(expires_at.timestamp()), "iss": app_id}
+encoded = jwt.encode(payload, private_key_pem, algorithm="RS256")</code></pre>
+    <p>
+      Step two exchanges that JWT for an installation access token via
+      <code>POST /app/installations/{id}/access_tokens</code>. This token
+      — not the JWT — is what actually authenticates a real diff fetch or
+      a real review post, and it authenticates as <em>the installation</em>
+      (this App, as installed on this specific account's chosen
+      repositories), never as the App in the abstract and never as any
+      human. It lives roughly an hour, which is long enough that minting a
+      fresh one before every one of a review's several outbound calls
+      (metadata, diff, changed files, the post itself) would be wasteful
+      and would needlessly hammer GitHub's own rate limit on the
+      token-exchange endpoint — so <code>InstallationTokenCache</code>
+      holds one token per installation id and only re-mints when the
+      cached one is within <code>_REFRESH_MARGIN_SECONDS</code> (5
+      minutes) of its real, GitHub-reported expiry.
+    </p>
+    <p>
+      <b>Why the installation id is discovered, not configured.</b> A
+      naive integration might put an installation id in <code>.env</code>
+      next to the App id. This project deliberately does not:
+      <code>discover_installation_id</code> calls
+      <code>GET /repos/{owner}/{repo}/installation</code> for real, every
+      time a new (owner, repo) pair is seen, and GitHub's own answer — 200
+      with an id, or 404 — <em>is</em> the fact being asked about. A
+      hardcoded id could go stale the moment someone uninstalls and
+      reinstalls the App, or could simply be typed wrong with no
+      mechanism to catch it; the discovery call cannot be wrong about
+      whether the App is actually installed, because it <em>is</em>
+      GitHub's own installation registry answering directly. The same
+      call also becomes the authorization gate — see the next section.
+    </p>
+  </section>
+
+  <section id="install-scope">
+    <h2><span class="num">2</span>One throwaway repo: install scope is the safety boundary</h2>
+    <p>
+      This project's GitHub App is installed on exactly one repository:
+      <code>vladimir-mawla/pr-review-agent-testbed</code>, a disposable
+      repo created specifically to receive real, live reviews. It would
+      be easy to assume the safety boundary here is the App's
+      <em>permission set</em> — the specific scopes granted on the App's
+      settings page (<code>pull_requests: write</code>, <code>contents:
+      read</code>, and so on). That's not quite right. Permissions say
+      <em>what kinds of actions</em> the App could take if it were
+      installed somewhere; they say nothing about <em>where</em>.
+    </p>
+    <div class="compare before-after">
+      <div class="col before">
+        <h4>Permission set alone</h4>
+        <p>Answers "can this App write pull-request reviews at all?" — a
+        yes/no that is the same everywhere the App happens to be
+        installed. It cannot answer "should this App be allowed to touch
+        <em>this specific</em> repository" — that's not a question
+        permissions are shaped to ask.</p>
+      </div>
+      <div class="col after">
+        <h4>Install scope (what actually gates M11)</h4>
+        <p><code>RepositoryAuthorizer.authorize</code> calls
+        <code>GET /repos/{owner}/{repo}/installation</code> before any
+        real action. A 404 — this App is simply not installed on that
+        repo — refuses the action outright, regardless of what the App's
+        permission set would otherwise allow. With the App installed on
+        exactly one throwaway repo, this call 404s for literally every
+        other repository on GitHub.</p>
+      </div>
+    </div>
+    <p>
+      Put concretely: even if a bug elsewhere in this codebase somehow
+      passed an arbitrary <code>(owner, repo)</code> through to
+      <code>RealGitHubClient</code> — a real programming error, not a
+      hypothetical attacker — the App's write permission would be
+      structurally unable to reach anywhere except the one repo it is
+      actually installed on. GitHub itself enforces this, not application
+      logic this project could get wrong; <code>rbac.py</code>'s
+      <code>RepositoryAuthorizer</code> is a thin, testable wrapper around
+      that real, external fact, not a second, locally-maintained allowlist
+      that could quietly drift out of sync with what's actually
+      installed.
+    </p>
+    <p class="callout">
+      <span class="label">Why this beats a local allowlist</span>
+      A hand-maintained list of "repos we're allowed to touch" living in
+      this codebase would be a second source of truth that could drift
+      from reality — someone uninstalls the App and forgets to update the
+      list, or updates the list without actually installing anywhere. The
+      real installation record IS the list; asking GitHub is asking the
+      one place that can't be stale relative to itself.
+    </p>
+  </section>
+
+  <section id="centerpiece">
+    <h2><span class="num">3</span>The centerpiece: diff-position mapping</h2>
+    <p>
+      A GitHub pull request review can attach a comment to a specific
+      line, but "line 47 of <code>app.py</code>" is not, by itself, enough
+      information for GitHub to accept it. An inline review comment must
+      anchor to a line the <em>diff itself</em> actually shows — a line
+      that was added, removed, or is part of a context window GitHub
+      chose to render around a change. A line that exists in the file but
+      falls outside every hunk of this particular diff has no anchor
+      GitHub will accept a comment against, full stop.
+    </p>
+    <p>
+      This matters because an LLM-reported line number is exactly the
+      kind of number that can miss. A specialist agent reads a diff as
+      text and reports "line 47" from its own reading of that text — but
+      the model can be off by a line, can report a line number from the
+      full file rather than the diff's own numbering, or can name a line
+      that got shifted between when the diff was fetched and when the
+      review is posted. None of that is a parsing bug; it's an inherent
+      gap between "a number an LLM wrote down" and "a number GitHub's diff
+      renderer actually produced a comment slot for."
+    </p>
+    <div class="callout bad">
+      <span class="label">Why one bad anchor is catastrophic, not just wrong</span>
+      GitHub's review-creation endpoint takes one <code>comments</code>
+      array for the whole review. If even one entry in that array anchors
+      to a line GitHub's diff doesn't recognize, the ENTIRE POST fails
+      with HTTP 422 — not just that one comment. A review with five
+      solid, well-anchored findings and one bad line number does not post
+      four good comments and skip the bad one; it posts nothing at all,
+      and every other finding in that review is lost along with it.
+    </div>
+    <h3>Two schemes, one choice</h3>
+    <p>
+      GitHub's REST API has historically supported two ways to anchor an
+      inline comment:
+    </p>
+    <table>
+      <thead><tr><th>Scheme</th><th>How it addresses a line</th><th>Why it's fragile / why it isn't</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>position</code> (legacy)</td>
+          <td>An integer offset counted from the first line of the
+          unified diff for that file — every hunk header and context
+          line counts, not just changed ones.</td>
+          <td>Brittle by construction: it silently shifts if GitHub ever
+          changes hunk-splitting or context-line heuristics between when
+          a diff is fetched and when the review posts, and it has no
+          natural relationship to "line 47 of the file" — translating one
+          into the other needs extra bookkeeping this project's domain
+          model doesn't otherwise carry.</td>
+        </tr>
+        <tr>
+          <td><code>line</code> + <code>side</code> (current, chosen here)</td>
+          <td>The real line number in the file — new-file numbering when
+          <code>side="RIGHT"</code>, old-file numbering when
+          <code>side="LEFT"</code> — the same addressing the GitHub web UI
+          itself uses when a human leaves an inline comment.</td>
+          <td>Matches what a <code>Finding</code> already carries
+          (<code>file_path</code> + <code>line_start</code>) with zero
+          translation, and is GitHub's own currently-documented,
+          recommended mechanism rather than an older, less-documented
+          one.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>
+      <code>backend/integrations/diff_mapping.py</code> builds one
+      <code>DiffIndex</code> per PR by walking every changed file's
+      unified-diff patch text once, tracking the running old-file and
+      new-file line counters through each hunk:
+    </p>
+    <pre><code>marker = raw_line[0] if raw_line else ""
+if marker == "+":
+    index.right_lines.add(new_line); new_line += 1
+elif marker == "-":
+    index.left_lines.add(old_line); old_line += 1
+elif marker == " ":
+    # a context line is the SAME source line on both sides
+    index.right_lines.add(new_line); index.left_lines.add(old_line)
+    old_line += 1; new_line += 1</code></pre>
+    <p>
+      <code>map_finding_to_anchor</code> then looks up
+      <code>(file_path, line_start)</code> against that index — RIGHT
+      first (an added or context line, the overwhelming common case),
+      then LEFT (a genuinely removed line — a real, valid thing to
+      comment on: "this validation you just deleted was load-bearing").
+      If neither set contains the line, it returns <code>None</code>. It
+      never raises.
+    </p>
+    <h3>The degradation path</h3>
+    <p>
+      <code>None</code> is not treated as a failure to recover from — it's
+      a routing decision. <code>RealGitHubClient.post_review_comment</code>
+      classifies every finding independently: a mappable finding becomes
+      one entry in the review's real <code>comments</code> array; an
+      unmappable one is rendered, in full, into the review's summary
+      <code>body</code> instead.
+    </p>
+    <div class="flow vertical">
+      <div class="node">Finding from a specialist agent</div>
+      <div class="arrow">&darr;</div>
+      <div class="node core">map_finding_to_anchor(file_path, line_start)</div>
+      <div class="arrow">&darr;</div>
+      <div class="flow" style="justify-content:space-between">
+        <div class="node ok" style="flex:1">Anchor found &rarr; real inline comment,<br><code>line</code>+<code>side</code></div>
+        <div class="node warn" style="flex:1">No anchor &rarr; folded into the review's<br>summary body, clearly labeled</div>
+      </div>
+      <div class="arrow">&darr;</div>
+      <div class="node ok">One <code>POST .../reviews</code> call, every finding accounted for, never a 422 from a mapping miss</div>
+    </div>
+    <p>
+      This is what makes one bad line number harmless instead of
+      catastrophic: the review still posts, still contains every finding
+      the pipeline produced, and a reader can immediately see which
+      findings got a precise inline anchor and which are listed in the
+      summary because their reported line didn't correspond to anything
+      the diff shows.
+    </p>
+    <div class="callout bad">
+      <span class="label">The reference implementation's choice, and why it's worse</span>
+      The project this system is measured against
+      (<code>ayush488-glitch/ai-pr-review-agent</code>) gave up on this
+      problem entirely: it posts summary-only, for <em>every</em> review,
+      regardless of whether that specific review's findings would have
+      mapped cleanly or not. That trades a rare failure (one bad anchor)
+      for a permanent one (no inline comments, ever) — the reviewer loses
+      GitHub's native "comment attached to the exact line" experience on
+      every single review, including the overwhelming majority that would
+      have mapped perfectly fine, just to avoid the possibility that one
+      review in a hundred might have had a bad line number. Independent
+      classification plus degradation gets the precise, inline experience
+      for the common case and a safe, informative fallback for the rare
+      miss — without sacrificing one to avoid the other.
+    </div>
+  </section>
+
+  <section id="idempotency">
+    <h2><span class="num">4</span>Idempotency: the review_id marker</h2>
+    <p>
+      GitHub retries webhook deliveries — a slow or momentarily-erroring
+      receiver can see the same delivery arrive twice, and separately,
+      this project's own ARQ job queue can retry a job that raised after
+      it successfully posted but before it finished cleanly. Either path
+      risks the same real-world outcome: the same review posted to the
+      same PR twice.
+    </p>
+    <p>
+      The fix does not need a database table, a distributed lock, or a
+      new piece of infrastructure — it needs one fact GitHub is already
+      willing to store: <code>post_review_comment</code> writes a hidden
+      HTML comment into every review body it posts, keyed by this
+      project's own <code>review_id</code>:
+    </p>
+    <pre><code>_IDEMPOTENCY_MARKER_PREFIX = "&lt;!-- pr-review-agent:review_id="
+_IDEMPOTENCY_MARKER_SUFFIX = " --&gt;"
+
+def _find_existing_review_id_marker(self, *, owner, repo, pr_number, headers, review_id):
+    marker = f"{_IDEMPOTENCY_MARKER_PREFIX}{review_id}{_IDEMPOTENCY_MARKER_SUFFIX}"
+    response = self._call_reliably(lambda: self._http_client.get(
+        f"/repos/{owner}/{repo}/pulls/{pr_number}/reviews", headers=headers,
+        params={"per_page": _FILES_PAGE_SIZE},
+    ))
+    existing = [ExistingReview.model_validate(e) for e in response.json()]
+    return any(marker in review.body for review in existing)</code></pre>
+    <p>
+      Before doing any real work — before even fetching the diff —
+      <code>post_review_comment</code> checks whether a review carrying
+      this exact <code>review_id</code>'s marker is already on the PR. If
+      so, it logs and returns without calling GitHub's write endpoint at
+      all. A job retried from the top after a successful first post finds
+      its own marker already there and becomes a safe no-op on its second
+      execution, regardless of ARQ's <code>max_tries</code> setting.
+    </p>
+    <p>
+      This was proven for real, not asserted from reading the code: the
+      live integration test was run twice against the real testbed PR,
+      and the review count on the PR was confirmed unchanged between the
+      two runs — the second run found the marker and skipped.
+    </p>
+    <p class="callout warn">
+      <span class="label">The limitation this session's closeout found</span>
+      The GET above fetches exactly one page of reviews
+      (<code>per_page</code>, no follow-the-next-link loop). On a PR with
+      more than 100 reviews, a marker sitting on an earlier page would go
+      unseen, and a retried job could post a genuine duplicate. Not a risk
+      for how this project actually uses a throwaway testbed PR today, but
+      a real correctness gap on a busier PR — see
+      <a href="#limits">Honest limits</a>.
+    </p>
+  </section>
+
+  <section id="contract">
+    <h2><span class="num">5</span>The contract test: why a mock needs a leash</h2>
+    <p>
+      <code>MockGitHubClient</code> has stood in for GitHub since M10, and
+      every unit test that exercises the review-posting path runs against
+      it, never the real network. That's the right default for speed and
+      determinism — but it creates a specific risk: the mock encodes
+      <em>assumptions</em> about what GitHub's real API returns
+      (field names, nesting, types), and nothing stops those assumptions
+      from quietly drifting away from what GitHub actually sends, e.g. if
+      a future change to <code>github_models.py</code> renames a field the
+      real API never renamed. A test suite built entirely against a mock
+      that has drifted from reality stays green while testing nothing
+      real — false confidence is worse than an obviously-broken build,
+      because nothing signals the problem until a real call fails in
+      production.
+    </p>
+    <p>
+      <code>tests/contract/test_github_client_contract.py</code> exists
+      specifically to catch that drift, and it was built to avoid being
+      circular — a contract test that only checks the mock against
+      itself, or against a fixture the same session invented by hand,
+      proves nothing. Instead it's split into two halves:
+    </p>
+    <div class="module-grid">
+      <div class="module-card">
+        <h4>TestFixtureMatchesRealShape</h4>
+        <p>Default, no marker, no credential needed. Loads
+        <code>tests/fixtures/github_api_contract.json</code> — JSON
+        captured from real, live calls against
+        <code>vladimir-mawla/pr-review-agent-testbed#1</code> during this
+        milestone's own build session — and asserts every
+        <code>github_models.py</code> model parses it without error, with
+        the exact field values GitHub itself returned. THIS is the actual
+        drift guard: it fails the moment a model change stops agreeing
+        with what GitHub really sends, without a network call.</p>
+      </div>
+      <div class="module-card">
+        <h4>TestLiveCaptureReproducesTheFixtureShape</h4>
+        <p><code>@pytest.mark.live</code>, skipped without a credential.
+        Re-runs the SAME calls against the REAL API right now and asserts
+        the response still parses under the same models — proving the
+        fixture isn't stale or fabricated, and would catch GitHub itself
+        changing a response shape out from under this project.</p>
+      </div>
+    </div>
+    <p>
+      The independence is what makes this non-circular: the fixture was
+      captured from a real API response once, checked into the repo, and
+      is separately re-pullable from the real API on demand — it is
+      neither hand-written nor validated only against itself. The
+      fixture's own <code>_captured_from</code> field records exactly
+      where it came from
+      (<code>https://github.com/vladimir-mawla/pr-review-agent-testbed/pull/1</code>,
+      2026-08-31), and its <code>_note</code> field records that the
+      token field is deliberately redacted — no credential material rides
+      along with the shape being pinned.
+    </p>
+  </section>
+
+  <section id="limits">
+    <h2><span class="num">6</span>Honest limits</h2>
+    <div class="callout bad">
+      <span class="label">The ngrok webhook-tunnel leg was never exercised</span>
+      PLAN.md's own M11 demo command opens with <code>ngrok http 8000 &amp;
+      python scripts/register_webhook.py ...</code> — <code>ngrok</code>
+      is not installed on this build machine, and
+      <code>scripts/register_webhook.py</code> does not exist at all
+      (confirmed directly: <code>ls scripts/register_webhook.py</code>
+      fails with "no such file"). No real inbound GitHub webhook was ever
+      received by this system. Everything downstream of a webhook
+      delivery — auth, real diff fetch, the real four-agent pipeline,
+      diff-position mapping, real posting — was proven end to end via
+      direct calls instead. This is judged non-blocking because the
+      webhook &rarr; queue &rarr; orchestrator path a real delivery would
+      drive was already independently proven real at M10; only the
+      inbound-delivery leg itself remains unexercised.
+    </div>
+    <div class="callout warn">
+      <span class="label">The live demo bypassed the M5 HITL gate — on purpose, and it cannot recur in production</span>
+      The real four-agent pipeline, run against the real testbed PR,
+      correctly found a genuine CRITICAL SQL-injection defect and
+      correctly routed to <code>QUEUED_FOR_HITL</code> — the safety gate
+      working exactly as designed. To still satisfy this milestone's own
+      "post a real review to a real PR" requirement,
+      <code>post_review_comment</code> was called directly instead of
+      through <code>post_or_queue</code>, a disclosed, demo-only bypass.
+      This cannot happen by accident in the real system: both production
+      call sites — <code>backend/job_queue/arq_worker.py</code> and
+      <code>backend/cli/review_local.py</code> — call only
+      <code>post_or_queue</code>, never <code>post_review_comment</code>
+      directly (grep-verified). A CRITICAL finding routes to a human in
+      every real path this project actually runs.
+    </div>
+    <div class="callout">
+      <span class="label">The LLM's own line attribution was off by two lines</span>
+      The diff-position <em>mapping mechanism</em> worked correctly for
+      the real demo review — both findings resolved to valid anchors, no
+      422, nothing degraded. But the underlying line number the
+      specialist agent reported for the SQL-injection finding was itself
+      two lines off from the actual vulnerable statement in
+      <code>app.py</code>. This is a distinct failure mode from what
+      <a href="#centerpiece">the centerpiece section</a> covers: mapping
+      answers "does GitHub have an anchor for the line I was given,"
+      not "is the line I was given actually correct." A precisely mapped
+      comment on the wrong line is still a wrong comment — a reminder that
+      solving the anchoring problem does not, by itself, solve the
+      separate problem of an LLM's own line-counting accuracy.
+    </div>
+    <div class="callout">
+      <span class="label">Two smaller, code-level gaps found in this closeout's own review</span>
+      <code>RealGitHubClient.__init__</code> raises a raw
+      <code>FileNotFoundError</code> — not the documented
+      <code>GitHubAuthError</code> — when the configured private-key path
+      doesn't exist, because the <code>open(...)</code> call at
+      construction isn't wrapped in a try/except. And
+      <code>RepositoryAuthorizer.authorize</code> distinguishes "not
+      installed" from other auth failures by checking whether the literal
+      substring <code>"HTTP 404"</code> appears in an exception's string
+      form, rather than checking a typed status code — fragile if that
+      message format ever changes upstream.
+    </div>
+  </section>
+
+  <section id="quiz">
+    <h2><span class="num">7</span>Quiz</h2>
+    <p>Three questions. Click each one to reveal the answer.</p>
+
+    <details class="quiz">
+      <summary class="q">1. A review has five findings. Four map cleanly to real diff lines; one specialist reported a stale line number that the diff doesn't show at all. If this project posted all five as inline comments anyway, what would actually happen — and how does the real degradation path avoid it?</summary>
+      <div class="answer">
+        <p class="verdict">GitHub's review-creation endpoint takes one `comments` array for the entire review — if even one entry anchors to a line GitHub's diff doesn't recognize, the WHOLE POST fails with HTTP 422. All five findings would be lost, not just the one bad one.</p>
+        <p>
+          `map_finding_to_anchor` classifies every finding independently
+          before anything is posted: the four that resolve against the
+          PR's real `DiffIndex` become real inline `line`+`side`
+          comments; the one that resolves to `None` is instead rendered
+          into the review's summary body by
+          `_format_summary_body`, clearly labeled as unable to be
+          anchored. The review still posts, with all five findings
+          represented — just four inline and one in the summary — instead
+          of a 422 that would have silently destroyed all five.
+        </p>
+      </div>
+    </details>
+
+    <details class="quiz">
+      <summary class="q">2. `RepositoryAuthorizer.authorize` calls the real GitHub API on every new `(owner, repo)` pair rather than checking a hardcoded installation id from `.env`. Given that the App's permission set (`pull_requests: write`, etc.) is configured once on GitHub's own App settings page regardless of where it's installed, why is the *installation scope* — not the permission set — actually what keeps this system from touching an arbitrary repository?</summary>
+      <div class="answer">
+        <p class="verdict">The permission set only answers "what KINDS of actions could this App take if installed somewhere" — it says nothing about WHERE. `GET /repos/{owner}/{repo}/installation` returning 404 for every repo except the one throwaway testbed repo is what actually makes an arbitrary target unreachable, regardless of what the App's permissions would otherwise allow there.</p>
+        <p>
+          Even a real bug elsewhere that passed an arbitrary `(owner,
+          repo)` through to `RealGitHubClient` would hit this same real,
+          external check — GitHub itself enforces "not installed here"
+          before any write permission could ever be exercised against
+          that repository. A hardcoded id or a local allowlist would be a
+          second, driftable source of truth that could go stale the
+          moment the App is uninstalled or reinstalled elsewhere; asking
+          GitHub's own installation registry directly cannot be stale
+          relative to itself.
+        </p>
+      </div>
+    </details>
+
+    <details class="quiz">
+      <summary class="q">3. `_find_existing_review_id_marker` fetches only page 1 of a PR's existing reviews (`per_page`, no pagination loop) before deciding whether `review_id` has already been posted. Under what real circumstance does this stop being a safe idempotency check, and why doesn't this affect the M11 live demo itself?</summary>
+      <div class="answer">
+        <p class="verdict">On a PR with more than 100 reviews, a marker sitting on an earlier page (page 2 or beyond) would never be seen by a single-page GET — a retried job could then post a genuine duplicate review, the exact failure this check exists to prevent.</p>
+        <p>
+          The M11 live demo itself isn't affected because the testbed PR
+          (`vladimir-mawla/pr-review-agent-testbed#1`) has a tiny number
+          of reviews — nowhere close to the page boundary — so the
+          idempotency re-run that proved "review count unchanged on a
+          second run" never exercised the pagination edge at all. This is
+          exactly why it's logged as an open item rather than something
+          the live demo already ruled out: proving the mechanism works on
+          a small PR is not the same as proving it works on a busy one.
+        </p>
+      </div>
+    </details>
+  </section>
+
+  <footer>
+    Generated by the <code>explain-diff-html</code> skill for milestone M11
+    of the <code>pr-review-agent</code> genesis-kit project, during this
+    milestone's POST-APPROVE bookkeeping closeout session. Diff range:
+    <code>91a756a</code> (end of M10's own closeout) through
+    <code>7da16e1</code> (M11's own L1 BUILD closeout) — 10 commits, 20
+    files changed, 3289 insertions(+), 87 deletions(-). Self-contained: no
+    external stylesheets, fonts, scripts, or images (verify with
+    <code>grep -E "https?://|&lt;link|&lt;script src"</code> against this
+    file — no matches expected outside this sentence's own example). No
+    API key material, `.pem` content, or token of any kind appears
+    anywhere on this page.
+  </footer>
+
+</div>
+</body>
+</html>
