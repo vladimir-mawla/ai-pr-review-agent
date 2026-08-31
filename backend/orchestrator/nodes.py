@@ -1,13 +1,17 @@
-"""Stub specialist nodes (M4), the real aggregator join node (M5), and the real security node (M8).
+"""The four real specialist nodes (M8 SECURITY, M10 QUALITY/TESTS/DOCS) and the real aggregator (M5).
 
 Owns: the four parallel "specialist" nodes (security, quality, tests, docs)
 that the graph in ``backend.orchestrator.graph`` fans out to, plus the join
 node they converge on. Per M4's original scope, every specialist was a
-STUB: it returned a canned, deterministic ``Finding`` and made no LLM call
-and read no API key. As of M8, ``security`` is real (see the M8 addition
-below); ``quality``/``tests``/``docs`` remain M4's canned stubs, per this
-milestone's explicit scope — wiring in the other three is a later
-milestone's job (M10).
+STUB returning a canned, deterministic ``Finding``. M8 made SECURITY real
+(a real ``backend.agents.security_agent.SecurityAgent``, a real LLM call).
+M10 makes the remaining three real too (``backend.agents.{quality_agent,
+test_agent,docs_agent}``) -- all four specialist nodes now share one
+generic body (``_run_specialist``) that delegates to a real,
+``BaseAgent``-shaped agent for that node's ``AgentType``, with the exact
+same instrumentation (call-count, execution-window timing, crash/error
+arming) M4 originally built and M8 already proved works unchanged for a
+real agent.
 
 ``aggregate_node`` (the join point) is no longer a stub as of M5: it dedupes
 the merged findings (``backend.agents.contracts.dedupe_findings``), computes
@@ -15,98 +19,98 @@ the merged findings (``backend.agents.contracts.dedupe_findings``), computes
 runs the HITL gate (``backend.hitl.queue.route_review``), and writes the
 resulting ``Review`` plus the routing reason into ``GraphState`` (see
 ``backend.orchestrator.state`` for why those two fields are ``NotRequired``).
-No LLM call happens here either — M5's whole aggregation/routing pipeline is
-pure Python over already-produced ``Finding`` objects, which is exactly what
-makes it testable without one (``tests/unit/test_aggregator.py`` and
-``tests/unit/test_hitl_gate.py`` exercise this logic directly, with
-fixtures, faster and more precisely than driving it through the graph).
+No LLM call happens here either -- M5's whole aggregation/routing pipeline is
+pure Python over already-produced ``Finding`` objects.
 
 This module also owns two things needed only to *prove* M4's behavior in
 tests, not for any production purpose:
 
-1. Instrumentation (``call_count`` / ``execution_windows``) — a thread-safe,
+1. Instrumentation (``call_count`` / ``execution_windows``) -- a thread-safe,
    per-``(thread_id, node_name)`` record of how many times a node's body
-   actually ran and the wall-clock window each successful run occupied. This
-   is what lets a test assert, with numbers rather than a manual demo, that
-   (a) the four nodes' execution windows overlap (real parallelism) and (b)
-   a node that already completed before a simulated crash is not re-executed
-   on resume (its call count does not increase).
+   actually ran and the wall-clock window each successful run occupied.
+2. Two independent failure-injection hooks (``arm_crash`` /
+   ``arm_agent_error``), unchanged since M4.
 
-2. Two independent failure-injection hooks, because M4 must prove two
-   different things that are easy to conflate:
-   - ``arm_crash`` simulates the *worker process dying* mid-node (a real
-     ``SimulatedNodeCrashError`` propagates out of the node, out of the graph, and
-     out of ``WorkflowEngine.run`` uncaught — exactly what a killed process
-     looks like from the checkpointer's point of view). This is what the
-     checkpoint-resume test exercises.
-   - ``arm_agent_error`` simulates a specialist's *own* logic failing (e.g.
-     a malformed diff, a future LLM call erroring) — an ``AgentExecutionError``
-     that the node itself catches and isolates, so the other three
-     specialists' findings still reach the final state instead of the whole
-     run being lost to one agent's bug.
-
-M7 addition: every specialist node's stub work now runs inside
+M7 addition: every specialist node's work now runs inside
 ``backend.observability.traced_span``, which emits a ``span.start`` event
-before ``_run_stub`` begins and a ``span.end`` event (with measured
-``latency_ms`` and an "ok"/"error" outcome) after it finishes or raises —
-this is the events spine's live call site for per-specialist tracing.
+before the node's work begins and a ``span.end`` event (with measured
+``latency_ms`` and an "ok"/"error" outcome) after it finishes or raises.
 ``aggregate_node`` additionally emits one ``decision`` event recording the
-final ``status``/``overall_confidence`` — the events spine's live call site
-for the aggregator's routing decision. Both freeze-boundary exceptions
-(this file is not in M7's literal freeze-boundary list) are disclosed in
-this milestone's build report, following M5/M6's own precedent for
-explicitly-instructed out-of-boundary changes.
+final ``status``/``overall_confidence``.
 
-M8 addition: ``security_node`` is no longer a canned stub — it delegates to
-a real ``backend.agents.security_agent.SecurityAgent`` (or a test-installed
-override; see ``set_security_agent_for_testing`` below), which makes a
-real LLM call and returns schema-validated ``Finding`` objects derived from
-``GraphState["diff"]``. The other three specialists (``quality``, ``tests``,
-``docs``) are UNCHANGED — still ``_run_stub``'s canned findings, per this
-milestone's explicit scope. ``_run_security`` deliberately mirrors
-``_run_stub``'s exact instrumentation (call-count, execution-window timing,
-crash/error arming, all keyed by the same ``(thread_id, "security")`` pair)
-so the M4 fan-out/crash-resume tests' mechanics-only assertions
-(parallelism, checkpoint-resume-skips-completed-nodes) stay meaningful
-regardless of which real work the node does — see
-``tests/integration/test_orchestrator_fanout.py``'s autouse fixture, which
-installs a stub-equivalent fake agent for those pre-existing tests, and its
-new ``test_real_security_agent_slots_into_the_graph...`` test, which
-installs a real ``SecurityAgent`` (with a fake LLM client) to prove the
-real agent's own findings actually flow through the compiled graph.
+M8 INFRASTRUCTURE-FAILURE FIX, GENERALIZED AT M10: M8's L2 DEBUG fix
+narrowed ``security_node``'s exception handling so a ``BudgetGuard`` block
+(or any other infrastructure/availability failure --
+``LLMConfigurationError``, ``LLMCallFailedError``) returns ONE synthetic
+CRITICAL/confidence-0.000 forced-HITL Finding instead of an empty findings
+list -- because an empty list is indistinguishable from "the model ran and
+genuinely found nothing to flag", and that gap was masked only because the
+three remaining stub specialists kept ``overall_confidence`` below the HITL
+threshold regardless. M8's own L4 VERIFY flagged, by name, that the masking
+would disappear once M10 made the other three real -- this module's own
+``quality_node``/``tests_node``/``docs_node`` now apply the EXACT SAME
+narrow-catch-and-fallback treatment ``security_node`` already used, via the
+same generic mechanism (``backend.agents.base_agent.
+infrastructure_failure_fallback_finding``, generalized from SECURITY-only
+to any ``AgentType`` -- see that module's docstring). All four specialist
+nodes share one implementation of this (``_run_specialist`` /
+``_INFRASTRUCTURE_FAILURE_EXCEPTIONS``), so there is exactly one place this
+policy is defined, not four copies that could silently drift apart.
+
+M10 RETRIEVAL WIRING: each real agent (constructed by this module's
+``_get_<agent>_agent`` lazy singletons) is given a real
+``backend.memory.context_retriever.HybridRetriever`` (``_get_retriever``),
+so every specialist's prompt is grounded with retrieved repository context,
+not just the raw diff -- see ``backend.agents.base_agent``'s module
+docstring for the query strategy and per-agent context budget. Test
+overrides (``set_<agent>_agent_for_testing``) install a full ``BaseAgent``
+replacement, which bypasses this retriever entirely -- exactly how M8's
+security override already worked with the real ``AnthropicLLMClient``, so
+no unit test in this project needs a real pgvector connection.
 """
 
 from __future__ import annotations
 
 import threading
 import time
-from collections import defaultdict
+from collections.abc import Callable
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 
-from backend.agents.base_agent import BaseAgent
+from backend.agents.base_agent import (
+    AGENT_NAME_BY_TYPE,
+    BaseAgent,
+    RetrieverProtocol,
+    infrastructure_failure_fallback_finding,
+)
 from backend.agents.contracts import dedupe_findings
-from backend.agents.security_agent import SecurityAgent, infrastructure_failure_fallback_finding
+from backend.agents.docs_agent import DocsAgent
+from backend.agents.quality_agent import QualityAgent
+from backend.agents.security_agent import SecurityAgent
+from backend.agents.test_agent import TestsAgent
 from backend.core.settings import get_settings
 from backend.economics.budget import BudgetExceededError
 from backend.hitl.queue import route_review
+from backend.memory.context_retriever import HybridRetriever
+from backend.memory.embedder import get_embedder
 from backend.models import AgentType, Finding, Review, Severity, compute_overall_confidence
 from backend.observability import emit_decision, get_event_repository, traced_span
 from backend.orchestrator.state import GraphState
 from backend.tools.llm_client import LLMCallFailedError, LLMConfigurationError
 
-# Simulated per-node work duration. Large enough that overlapping windows are
-# unambiguous under normal scheduling jitter, small enough that the fan-out
-# test suite stays fast. Four nodes run sequentially would take 4x this; run
-# in parallel, wall time should stay close to this single value.
+# Simulated per-node work duration -- still used by test doubles that stand
+# in for a specialist (e.g. tests/integration/test_orchestrator_fanout.py's
+# stub-equivalent fakes) to reproduce M4's original timing characteristics,
+# even though no *production* node code sleeps for a fixed duration anymore
+# (a real LLM call's latency stands in for it).
 NODE_WORK_SECONDS = 0.2
 
 
 class SimulatedNodeCrashError(RuntimeError):
-    """Raised by a stub node when a test has armed a simulated worker crash.
+    """Raised by a node when a test has armed a simulated worker crash.
 
     Deliberately a distinct type from ``AgentExecutionError``: node wrapper
     functions let this one propagate uncaught (it represents the whole
@@ -117,14 +121,12 @@ class SimulatedNodeCrashError(RuntimeError):
 
 
 class AgentExecutionError(RuntimeError):
-    """Raised (internally) when a specialist's own stub work fails.
+    """Raised (internally) when a specialist's own work fails.
 
-    Represents a normal, isolated agent-level failure — the kind a real LLM-
-    backed agent could hit in M8 (a malformed diff, a provider error, a
-    response that fails schema validation). Node wrapper functions catch
-    this and record it in ``GraphState.node_errors`` instead of letting it
-    fail the whole run: one bad specialist must not cost the other three
-    their findings.
+    Represents a normal, isolated agent-level failure. Node wrapper
+    functions catch this and record it in ``GraphState.node_errors``
+    instead of letting it fail the whole run: one bad specialist must not
+    cost the other three their findings.
     """
 
 
@@ -136,10 +138,10 @@ class AgentExecutionError(RuntimeError):
 # ---------------------------------------------------------------------------
 
 _lock = threading.Lock()
-_call_counts: dict[tuple[str, str], int] = defaultdict(int)
-_execution_windows: dict[tuple[str, str], list[tuple[float, float]]] = defaultdict(list)
-_armed_crashes: dict[tuple[str, str], int] = defaultdict(int)
-_armed_errors: dict[tuple[str, str], int] = defaultdict(int)
+_call_counts: dict[tuple[str, str], int] = {}
+_execution_windows: dict[tuple[str, str], list[tuple[float, float]]] = {}
+_armed_crashes: dict[tuple[str, str], int] = {}
+_armed_errors: dict[tuple[str, str], int] = {}
 
 
 def reset_instrumentation() -> None:
@@ -163,70 +165,127 @@ def arm_crash(thread_id: str, node_name: str, *, times: int = 1) -> None:
     without any further test setup.
     """
     with _lock:
-        _armed_crashes[(thread_id, node_name)] += times
+        _armed_crashes[(thread_id, node_name)] = _armed_crashes.get((thread_id, node_name), 0) + (
+            times
+        )
 
 
 def arm_agent_error(thread_id: str, node_name: str, *, times: int = 1) -> None:
     """Test-only: make ``node_name`` raise (and internally isolate) an error."""
     with _lock:
-        _armed_errors[(thread_id, node_name)] += times
+        _armed_errors[(thread_id, node_name)] = _armed_errors.get((thread_id, node_name), 0) + times
 
 
 def call_count(thread_id: str, node_name: str) -> int:
     """Number of times ``node_name`` has actually executed its body for this run."""
     with _lock:
-        return _call_counts[(thread_id, node_name)]
+        return _call_counts.get((thread_id, node_name), 0)
 
 
 def execution_windows(thread_id: str, node_name: str) -> list[tuple[float, float]]:
     """(start, end) ``time.monotonic()`` windows for each successful run."""
     with _lock:
-        return list(_execution_windows[(thread_id, node_name)])
+        return list(_execution_windows.get((thread_id, node_name), []))
 
 
 # ---------------------------------------------------------------------------
-# M8: which BaseAgent security_node delegates to. Mirrors the test-only
-# override pattern already established above (arm_crash/arm_agent_error/
-# reset_instrumentation) rather than inventing a second mechanism.
+# M8/M10: which BaseAgent each specialist node delegates to, generalized
+# from M8's SECURITY-only override mechanism to all four AgentTypes. One
+# dict keyed by AgentType instead of four near-identical globals, so a new
+# specialist (were one ever added) is a one-line addition, not a fourth
+# copy-pasted pair of functions.
 # ---------------------------------------------------------------------------
 
-_security_agent_override: BaseAgent | None = None
-_real_security_agent: BaseAgent | None = None
+_agent_overrides: dict[AgentType, BaseAgent | None] = {}
+_real_agents: dict[AgentType, BaseAgent] = {}
+_real_retriever: RetrieverProtocol | None = None
+
+# Concrete BaseAgent subclass to lazily construct for each AgentType, when
+# no test override is installed. Each constructor takes the same
+# (llm_client=None, *, prompt_version=..., retriever=...) shape.
+_AGENT_CLASSES: dict[AgentType, Callable[..., BaseAgent]] = {
+    AgentType.SECURITY: SecurityAgent,
+    AgentType.QUALITY: QualityAgent,
+    AgentType.TESTS: TestsAgent,
+    AgentType.DOCS: DocsAgent,
+}
 
 
 def set_security_agent_for_testing(agent: BaseAgent | None) -> None:
     """Test-only: override which ``BaseAgent`` ``security_node`` delegates to.
 
     Production code never calls this. Pass ``None`` to clear a previously
-    installed override and fall back to the real, lazily-constructed
-    ``SecurityAgent``. See ``_get_security_agent`` for why the real agent is
-    constructed lazily rather than at import time.
+    installed override and fall back to the real, lazily-constructed agent.
     """
-    global _security_agent_override
-    _security_agent_override = agent
+    _set_agent_override_for_testing(AgentType.SECURITY, agent)
 
 
-def _get_security_agent() -> BaseAgent:
-    """Return the ``BaseAgent`` ``security_node`` should delegate to this call.
+def set_quality_agent_for_testing(agent: BaseAgent | None) -> None:
+    """Test-only: override which ``BaseAgent`` ``quality_node`` delegates to. See ``set_security_agent_for_testing``."""
+    _set_agent_override_for_testing(AgentType.QUALITY, agent)
+
+
+def set_tests_agent_for_testing(agent: BaseAgent | None) -> None:
+    """Test-only: override which ``BaseAgent`` ``tests_node`` delegates to. See ``set_security_agent_for_testing``."""
+    _set_agent_override_for_testing(AgentType.TESTS, agent)
+
+
+def set_docs_agent_for_testing(agent: BaseAgent | None) -> None:
+    """Test-only: override which ``BaseAgent`` ``docs_node`` delegates to. See ``set_security_agent_for_testing``."""
+    _set_agent_override_for_testing(AgentType.DOCS, agent)
+
+
+def _set_agent_override_for_testing(agent_type: AgentType, agent: BaseAgent | None) -> None:
+    if agent is None:
+        _agent_overrides.pop(agent_type, None)
+    else:
+        _agent_overrides[agent_type] = agent
+
+
+def _get_retriever() -> RetrieverProtocol:
+    """Lazily construct and cache ONE real ``HybridRetriever`` for this process.
+
+    Mirrors ``_get_agent``'s laziness for the LLM client: constructing a
+    ``HybridRetriever`` performs no I/O of its own (each of its methods
+    opens its own short-lived connection only when actually called -- see
+    that class's docstring), so this is safe to reach with no pgvector
+    container running at all; only an actual ``.hybrid_search()`` call
+    would need one reachable, and
+    ``backend.agents.base_agent.build_user_message`` already treats a
+    retrieval failure as non-fatal (falls back to the diff alone -- see
+    that function's docstring for why).
+
+    No test-override hook exists for this specifically because every test
+    in this project that cares about a specialist node installs a full
+    ``BaseAgent`` override (``set_<agent>_agent_for_testing``), which
+    bypasses this function entirely -- the same reason
+    ``_get_security_agent``'s real ``AnthropicLLMClient()`` construction
+    was never exercised directly by M8's own test suite either.
+    """
+    global _real_retriever
+    if _real_retriever is None:
+        settings = get_settings()
+        _real_retriever = HybridRetriever(settings.pgvector_url, get_embedder(settings))
+    return _real_retriever
+
+
+def _get_agent(agent_type: AgentType) -> BaseAgent:
+    """Return the ``BaseAgent`` the node for ``agent_type`` should delegate to this call.
 
     Returns the test-installed override if one is set, otherwise lazily
-    constructs and caches ONE real ``SecurityAgent`` for this process.
-    Lazy construction (rather than a module-level ``SecurityAgent()`` built
-    at import time) is what lets importing this module -- and running every
-    test that always installs an override before invoking the graph, as
-    ``tests/integration/test_orchestrator_fanout.py``'s autouse fixture
-    does -- work with no ``ANTHROPIC_API_KEY`` set at all;
-    ``SecurityAgent()``'s own default LLM client
-    (``backend.tools.llm_client.AnthropicLLMClient``) only requires a real
-    key at the moment an actual, non-injected API call is attempted, not at
-    construction time.
+    constructs and caches ONE real agent instance (with a real retriever
+    for grounding -- see ``_get_retriever``) for this process. Lazy
+    construction is what lets importing this module -- and running every
+    test that always installs an override before invoking the graph --
+    work with no ``ANTHROPIC_API_KEY``/pgvector at all.
     """
-    if _security_agent_override is not None:
-        return _security_agent_override
-    global _real_security_agent
-    if _real_security_agent is None:
-        _real_security_agent = SecurityAgent()
-    return _real_security_agent
+    override = _agent_overrides.get(agent_type)
+    if override is not None:
+        return override
+    if agent_type not in _real_agents:
+        agent_class = _AGENT_CLASSES[agent_type]
+        _real_agents[agent_type] = agent_class(retriever=_get_retriever())
+    return _real_agents[agent_type]
 
 
 def _thread_id_from_config(config: RunnableConfig) -> str:
@@ -237,21 +296,42 @@ def _thread_id_from_config(config: RunnableConfig) -> str:
     return thread_id
 
 
-def _run_stub(node_name: str, agent_type: AgentType, config: RunnableConfig) -> Finding:
-    """Shared body for all four specialist stub nodes.
+# M8 L2 DEBUG (post-L4-VERIFY), generalized at M10: the specific "the
+# specialist could not even attempt or complete its analysis" exceptions
+# every specialist node must turn into a forced-HITL fallback Finding,
+# never an empty findings list -- see this module's own docstring for the
+# full defect this fixes and why it now applies identically to all four
+# specialists, not just SECURITY. Deliberately narrow (mirroring how M7's
+# own events-failure-policy swallow was narrowed from bare
+# `(psycopg.Error, OSError)` down to exactly the availability exceptions
+# that mean "the dependency, not our code, failed"): a genuine programming
+# bug in our own code (a TypeError, a KeyError from a real defect) is NOT
+# in this tuple, so it propagates out of the node uncaught, exactly like
+# SimulatedNodeCrashError already does, instead of being silently
+# reinterpreted as "the specialist is unavailable".
+_INFRASTRUCTURE_FAILURE_EXCEPTIONS: tuple[type[Exception], ...] = (
+    BudgetExceededError,
+    LLMConfigurationError,
+    LLMCallFailedError,
+)
+
+
+def _run_specialist(node_name: str, agent_type: AgentType, config: RunnableConfig, diff: str) -> list[Finding]:
+    """Shared body for all four specialist nodes: instrumentation + delegate to the real agent.
 
     Records the call, honors any armed crash/error for this
-    ``(thread_id, node_name)``, sleeps to simulate work, records the
-    execution window, and returns this agent's canned ``Finding``.
+    ``(thread_id, node_name)``, times the real (or fake) agent's work, and
+    returns its findings. Generalizes M8's ``_run_security`` to all four
+    agent types -- see this module's docstring.
     """
     thread_id = _thread_id_from_config(config)
 
     with _lock:
-        _call_counts[(thread_id, node_name)] += 1
-        should_crash = _armed_crashes[(thread_id, node_name)] > 0
+        _call_counts[(thread_id, node_name)] = _call_counts.get((thread_id, node_name), 0) + 1
+        should_crash = _armed_crashes.get((thread_id, node_name), 0) > 0
         if should_crash:
             _armed_crashes[(thread_id, node_name)] -= 1
-        should_error = _armed_errors[(thread_id, node_name)] > 0
+        should_error = _armed_errors.get((thread_id, node_name), 0) > 0
         if should_error:
             _armed_errors[(thread_id, node_name)] -= 1
 
@@ -265,60 +345,63 @@ def _run_stub(node_name: str, agent_type: AgentType, config: RunnableConfig) -> 
         )
 
     start = time.monotonic()
-    time.sleep(NODE_WORK_SECONDS)
+    findings = _get_agent(agent_type).analyze(diff, review_id=thread_id)
     end = time.monotonic()
     with _lock:
-        _execution_windows[(thread_id, node_name)].append((start, end))
-
-    return _CANNED_FINDINGS[agent_type]
-
-
-def _run_security(state: GraphState, config: RunnableConfig) -> list[Finding]:
-    """M8: the security specialist's real (or test-overridden) work.
-
-    Deliberately mirrors ``_run_stub``'s exact instrumentation dance
-    (call-count, crash/error arming, execution-window timing, all keyed by
-    the same ``(thread_id, "security")`` pair ``arm_crash``/``arm_agent_error``/
-    ``call_count``/``execution_windows`` already read/write) so those
-    shared, pre-existing test hooks keep working unchanged for this node —
-    only the "what actually happens between recording the start and the end
-    timestamp" changed, from "sleep and return a canned Finding" to
-    "delegate to ``_get_security_agent()``".
-    """
-    thread_id = _thread_id_from_config(config)
-    node_name = "security"
-
-    with _lock:
-        _call_counts[(thread_id, node_name)] += 1
-        should_crash = _armed_crashes[(thread_id, node_name)] > 0
-        if should_crash:
-            _armed_crashes[(thread_id, node_name)] -= 1
-        should_error = _armed_errors[(thread_id, node_name)] > 0
-        if should_error:
-            _armed_errors[(thread_id, node_name)] -= 1
-
-    if should_crash:
-        raise SimulatedNodeCrashError(
-            f"simulated worker crash in node {node_name!r} (thread {thread_id!r})"
-        )
-    if should_error:
-        raise AgentExecutionError(
-            f"simulated agent failure in node {node_name!r} (thread {thread_id!r})"
-        )
-
-    start = time.monotonic()
-    findings = _get_security_agent().analyze(state.get("diff", ""), review_id=state["review_id"])
-    end = time.monotonic()
-    with _lock:
-        _execution_windows[(thread_id, node_name)].append((start, end))
+        _execution_windows.setdefault((thread_id, node_name), []).append((start, end))
 
     return findings
 
 
-# Canned, deterministic findings — one per specialist. Real reasoning (an
-# actual LLM call producing a real Finding from a real diff) is M8's scope;
-# M4 only has to prove that four distinct agent types can each contribute a
-# schema-valid Finding through the graph.
+def _specialist_node(agent_type: AgentType, state: GraphState, config: RunnableConfig) -> dict[str, Any]:
+    """Shared node body: run the specialist, isolate its failures, force HITL on infrastructure failure.
+
+    Every one of the four exported node functions below
+    (``security_node``/``quality_node``/``tests_node``/``docs_node``) is a
+    one-line wrapper around this, parameterized only by ``AgentType`` --
+    see this module's docstring for why the M8 infrastructure-failure
+    treatment (previously SECURITY-only) is now identical for all four.
+    """
+    node_name = AGENT_NAME_BY_TYPE[agent_type]
+    with traced_span(get_event_repository(), state["review_id"], node_name):
+        try:
+            findings = _run_specialist(node_name, agent_type, config, state.get("diff", ""))
+        except SimulatedNodeCrashError:
+            raise
+        except AgentExecutionError as exc:
+            return {"findings": [], "node_errors": {node_name: str(exc)}}
+        except _INFRASTRUCTURE_FAILURE_EXCEPTIONS as exc:
+            fallback = infrastructure_failure_fallback_finding(agent_type, exc)
+            return {"findings": [fallback], "node_errors": {node_name: str(exc)}}
+    return {"findings": findings, "node_errors": {}}
+
+
+def security_node(state: GraphState, config: RunnableConfig) -> dict[str, Any]:
+    """Specialist: real, LLM-backed security review (M8). See module docstring."""
+    return _specialist_node(AgentType.SECURITY, state, config)
+
+
+def quality_node(state: GraphState, config: RunnableConfig) -> dict[str, Any]:
+    """Specialist: real, LLM-backed code-quality review (M10). See module docstring."""
+    return _specialist_node(AgentType.QUALITY, state, config)
+
+
+def tests_node(state: GraphState, config: RunnableConfig) -> dict[str, Any]:
+    """Specialist: real, LLM-backed test-coverage review (M10). See module docstring."""
+    return _specialist_node(AgentType.TESTS, state, config)
+
+
+def docs_node(state: GraphState, config: RunnableConfig) -> dict[str, Any]:
+    """Specialist: real, LLM-backed documentation review (M10). See module docstring."""
+    return _specialist_node(AgentType.DOCS, state, config)
+
+
+# Canned, deterministic findings -- one per specialist. No longer used by
+# any *production* node (all four now delegate to a real agent -- see
+# module docstring), but kept as a shared fixture for tests that need a
+# stub-equivalent BaseAgent double reproducing M4's exact original
+# behavior (e.g. tests/integration/test_orchestrator_fanout.py's autouse
+# fixture) without depending on a real LLM call.
 _CANNED_FINDINGS: dict[AgentType, Finding] = {
     AgentType.SECURITY: Finding(
         agent_type=AgentType.SECURITY,
@@ -363,130 +446,30 @@ _CANNED_FINDINGS: dict[AgentType, Finding] = {
 }
 
 
-# M8 L2 DEBUG (post-L4-VERIFY): the specific "the security analysis could
-# not even be attempted or completed" exceptions security_node must turn
-# into a forced-HITL fallback Finding, never an empty findings list --see
-# security_node's docstring below for the full defect this fixes. Deliberately
-# narrow (mirroring how M7's own events-failure-policy swallow was narrowed
-# from bare `(psycopg.Error, OSError)` down to exactly the availability
-# exceptions that mean "the dependency, not our code, failed" -- see
-# `tests/unit/test_events_failure_policy.py`): a genuine programming bug in
-# our own code (a TypeError, a KeyError from a real defect) is NOT in this
-# tuple, so it propagates out of this node uncaught, exactly like
-# SimulatedNodeCrashError already does, instead of being silently
-# reinterpreted as "the security specialist is unavailable".
-_SECURITY_INFRASTRUCTURE_FAILURE_EXCEPTIONS: tuple[type[Exception], ...] = (
-    BudgetExceededError,
-    LLMConfigurationError,
-    LLMCallFailedError,
-)
-
-
-def security_node(state: GraphState, config: RunnableConfig) -> dict[str, Any]:
-    """Specialist: real, LLM-backed security review (M8). See module docstring.
-
-    M8 L2 DEBUG addition (post-L4-VERIFY): a BudgetGuard block (or any other
-    infrastructure/availability failure this specialist can hit --
-    ``LLMConfigurationError``, ``LLMCallFailedError``) used to be caught by
-    a bare ``except Exception`` and turned into ``{"findings": [], ...}`` --
-    an EMPTY findings list, indistinguishable from "the model ran and
-    genuinely found nothing to flag". That is a real defect, not a
-    theoretical one: today it's masked only because the three remaining
-    stub specialists keep ``overall_confidence`` below the HITL threshold
-    regardless, but once M10 makes them real, a budget block would silently
-    read as a clean security review and could auto-post. The fix narrows
-    the catch to ``_SECURITY_INFRASTRUCTURE_FAILURE_EXCEPTIONS`` (the exact
-    set ``SecurityAgent.analyze``'s own docstring names as "unable to even
-    attempt an analysis") and, on any of them, returns ONE synthetic
-    CRITICAL/confidence-0.000 Finding
-    (``backend.agents.security_agent.infrastructure_failure_fallback_finding``)
-    instead of an empty list -- reusing the exact mechanism
-    ``SecurityAgent``'s own total-parse-failure fallback already uses to
-    force human review (``backend.hitl.queue.has_critical_finding``'s
-    unconditional CRITICAL-forces-HITL routing), rather than inventing a
-    second one. The failure is still recorded in ``node_errors`` either way,
-    so it stays visible in the aggregated result. A genuine programming bug
-    (anything NOT in that tuple) is deliberately not caught here at all and
-    propagates, consistent with how M7 narrowed the events failure policy
-    to stop swallowing ``IntegrityError`` alongside real outages.
-    """
-    with traced_span(get_event_repository(), state["review_id"], "security"):
-        try:
-            findings = _run_security(state, config)
-        except SimulatedNodeCrashError:
-            raise
-        except AgentExecutionError as exc:
-            return {"findings": [], "node_errors": {"security": str(exc)}}
-        except _SECURITY_INFRASTRUCTURE_FAILURE_EXCEPTIONS as exc:
-            fallback = infrastructure_failure_fallback_finding(exc)
-            return {"findings": [fallback], "node_errors": {"security": str(exc)}}
-    return {"findings": findings, "node_errors": {}}
-
-
-def quality_node(state: GraphState, config: RunnableConfig) -> dict[str, Any]:
-    """Specialist stub: code quality review. See module docstring for M4 scope + M7 tracing."""
-    with traced_span(get_event_repository(), state["review_id"], "quality"):
-        try:
-            finding = _run_stub("quality", AgentType.QUALITY, config)
-        except SimulatedNodeCrashError:
-            raise
-        except AgentExecutionError as exc:
-            return {"findings": [], "node_errors": {"quality": str(exc)}}
-    return {"findings": [finding], "node_errors": {}}
-
-
-def tests_node(state: GraphState, config: RunnableConfig) -> dict[str, Any]:
-    """Specialist stub: test-coverage review. See module docstring for M4 scope + M7 tracing."""
-    with traced_span(get_event_repository(), state["review_id"], "tests"):
-        try:
-            finding = _run_stub("tests", AgentType.TESTS, config)
-        except SimulatedNodeCrashError:
-            raise
-        except AgentExecutionError as exc:
-            return {"findings": [], "node_errors": {"tests": str(exc)}}
-    return {"findings": [finding], "node_errors": {}}
-
-
-def docs_node(state: GraphState, config: RunnableConfig) -> dict[str, Any]:
-    """Specialist stub: documentation review. See module docstring for M4 scope + M7 tracing."""
-    with traced_span(get_event_repository(), state["review_id"], "docs"):
-        try:
-            finding = _run_stub("docs", AgentType.DOCS, config)
-        except SimulatedNodeCrashError:
-            raise
-        except AgentExecutionError as exc:
-            return {"findings": [], "node_errors": {"docs": str(exc)}}
-    return {"findings": [finding], "node_errors": {}}
-
-
 def aggregate_node(state: GraphState, config: RunnableConfig) -> dict[str, Any]:
     """Join point the four specialists converge on: the real M5 aggregator.
 
-    Fed by ``GraphState.findings`` — every specialist's contribution already
-    merged by the ``operator.add`` reducer (see ``state.py``), in whatever
-    order the parallel branches happened to finish. This node:
+    Fed by ``GraphState.findings`` -- every specialist's contribution
+    already merged by the ``operator.add`` reducer (see ``state.py``), in
+    whatever order the parallel branches happened to finish. This node:
 
     1. Dedupes same-``(file_path, line_start)`` findings, keeping the one
        that matters most: higher severity wins first, confidence only
        breaks a tie *within* the same severity
-       (``backend.agents.contracts.dedupe_findings`` — see that module for
-       the full deterministic tie-break rule and why severity must come
-       first).
+       (``backend.agents.contracts.dedupe_findings``).
     2. Computes ``overall_confidence`` from the *surviving* (deduped)
        findings via the one formula ``Review`` itself enforces
-       (``backend.models.review.compute_overall_confidence``) — using
-       anything else here would immediately fail ``Review``'s own
-       consistency check below.
+       (``backend.models.review.compute_overall_confidence``).
     3. Runs the HITL gate (``backend.hitl.queue.route_review``) against the
        configured threshold to decide POSTED vs. QUEUED_FOR_HITL, and builds
        the reason string explaining why.
     4. Constructs the ``Review`` and returns it (plus the reason) as a
-       partial state update — LangGraph merges this into ``GraphState`` on
-       ``review``/``routing_reason`` since neither has a reducer and this is
-       the only node that ever writes them (see ``state.py``).
+       partial state update.
 
-    No LLM call, no GitHub post, no queue write: those are M8/M10/M11's
-    scope. This node's whole job ends at "here is the Review and why it was
+    No LLM call, no GitHub post, no queue write: those live in each real
+    agent's own ``analyze`` and in ``backend.integrations.github_client`` /
+    ``backend.cli.review_local`` / ``backend.job_queue.arq_worker`` (M10).
+    This node's whole job ends at "here is the Review and why it was
     routed that way".
     """
     deduped = dedupe_findings(state["findings"])
@@ -507,15 +490,15 @@ def aggregate_node(state: GraphState, config: RunnableConfig) -> dict[str, Any]:
         # error_message defaults to None on Review, but mypy --strict's
         # dataclass_transform-based reading of `Field(None, ...)` (as
         # opposed to a plain `= None` class-body default) does not detect
-        # that as optional, so it must be passed explicitly here — the one
+        # that as optional, so it must be passed explicitly here -- the one
         # call site in backend/ that actually constructs a Review.
         error_message=None,
     )
     # M7: the events spine's live call site for the aggregator's routing
-    # decision -- see module docstring. A failure to write this event (the
-    # events Postgres unreachable) is caught and logged inside
-    # emit_decision itself; it never raises here and never prevents the
-    # Review above from being returned.
+    # decision. A failure to write this event (the events Postgres
+    # unreachable) is caught and logged inside emit_decision itself; it
+    # never raises here and never prevents the Review above from being
+    # returned.
     emit_decision(
         get_event_repository(),
         state["review_id"],
