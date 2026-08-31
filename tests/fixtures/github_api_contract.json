@@ -1,0 +1,44 @@
+{
+  "_captured_from": "https://github.com/vladimir-mawla/pr-review-agent-testbed/pull/1 (real, live GitHub API calls, 2026-08-31)",
+  "_note": "Trimmed to only the fields backend/integrations/github_models.py depends on, plus a couple of adjacent fields for context. No token/key material -- 'token' is redacted.",
+  "pull_request_metadata": {
+    "number": 1,
+    "state": "open",
+    "head": {
+      "sha": "d9a4c36d920142297b08be096d346dee6803320f",
+      "ref": "feature/username-lookup"
+    },
+    "base": {
+      "sha": "0acbc5f71f395216d6ab2f2393fadba4e49a3929",
+      "ref": "main"
+    }
+  },
+  "changed_files": [
+    {
+      "filename": "app.py",
+      "status": "modified",
+      "patch": "@@ -21,6 +21,16 @@ def get_user_by_id(conn: sqlite3.Connection, user_id: int) -> dict | None:\n     return {\"id\": row[0], \"username\": row[1], \"email\": row[2]}\n \n \n+def get_user_by_username(conn: sqlite3.Connection, username: str) -> dict | None:\n+    \"\"\"Look up one user by username.\"\"\"\n+    query = f\"SELECT id, username, email FROM users WHERE username = '{username}'\"\n+    cursor = conn.execute(query)\n+    row = cursor.fetchone()\n+    if row is None:\n+        return None\n+    return {\"id\": row[0], \"username\": row[1], \"email\": row[2]}\n+\n+\n def format_balance_cents(cents: int) -> str:\n     \"\"\"Render an integer cents amount as a dollar string, e.g. 1050 -> '$10.50'.\"\"\"\n     dollars, remainder = divmod(cents, 100)",
+      "additions": 10,
+      "deletions": 0
+    }
+  ],
+  "existing_reviews": [
+    {
+      "id": 5067537460,
+      "body": "## pr-review-agent review\n\n**2** finding(s), overall confidence **0.975** -- 2 posted inline, 0 below.\n\n<!-- pr-review-agent:review_id=m11-live-demo-1 -->"
+    }
+  ],
+  "installation": {
+    "id": 157972840,
+    "repository_selection": "selected"
+  },
+  "installation_token": {
+    "token": "REDACTED",
+    "expires_at": "2026-08-31T15:16:03Z"
+  },
+  "create_review_response": {
+    "id": 5067537460,
+    "html_url": "https://github.com/vladimir-mawla/pr-review-agent-testbed/pull/1#pullrequestreview-5067537460",
+    "state": "COMMENTED"
+  }
+}
