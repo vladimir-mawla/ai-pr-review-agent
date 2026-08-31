@@ -1,98 +1,82 @@
 # CURRENT
-- active_loop: L1 BUILD complete on M10, awaiting L4 VERIFY (separate session)
-- target: M10
-- iteration: 1
-- last_gate: L1 BUILD on M10 (2026-08-31, this session) -- all four gates
-  green (`ruff check .`, `mypy --strict backend/`, `pytest -v` run twice
-  with identical 317-passed results, `lint-imports`); PLAN.md's exact demo
-  command run for real (`ANTHROPIC_API_KEY` configured, real 4-call cost
-  $0.026943) -- see "M10 L1 BUILD" below for the full honest summary. NOT
-  independently verified yet -- do not treat as APPROVEd.
-- next_action: L4 VERIFY on M10 (separate session). Read "M10 L1 BUILD"
-  below first, then `.genesis/PLAN.md`'s M10 section for the freeze
-  boundary/demo command/success criteria, then judge the demo output's
-  actual finding quality honestly (this session's own final report flags
-  one real, disclosed remit-bleed imperfection to check).
+- active_loop: none -- M10 closed out, M11 not yet started
+- target: M11
+- iteration: 0
+- last_gate: L4 VERIFY APPROVE on M10 (independent session, 2026-08-31)
+- next_action: run G0 existence pre-flight on M11
 - model: claude-sonnet-5
 - tokens_used: not tracked this session
 - tokens_budget: 50000
 - skills_loaded: []
 
-## M10 L1 BUILD (this session, 2026-08-31) -- summary for a cold L4 VERIFY session
+## M10 final state (Full Local Dry-Run Review) -- DONE
+
+Condensed; see `.genesis/PLAN.md`'s M10 entries in "## Progress" for the
+full narrative (L1 BUILD, then a separate L4 VERIFY APPROVE entry) and
+`.genesis/explanations/2026-08-31-explanation-m10.html` for the full
+teaching walkthrough.
 
 **Built:** all four specialists real (`backend/agents/{security_agent,
-quality_agent,test_agent,docs_agent}.py`, sharing orchestration logic via
-new `backend.agents.base_agent.run_specialist_analysis` -- prompt load,
-retrieval grounding, LLM call, parse, forced-HITL fallback on parse
-failure); retrieval wired into all four prompts (query = changed-symbol
-names, falling back to truncated diff text; top_k=5, ≤6000 chars injected,
-a retrieval failure degrades to diff-only rather than blocking); M8's
+quality_agent,test_agent,docs_agent}.py`), sharing one orchestration path
+(`backend.agents.base_agent.run_specialist_analysis`); retrieval grounding
+wired into all four prompts (changed-symbol-name query, top_k=5, ≤6000
+chars injected, diff-only fallback on a retrieval failure); M8's
 SECURITY-only infrastructure-failure-forces-HITL fix generalized to all
-four nodes (`backend/orchestrator/nodes.py`'s `_specialist_node`, one
-shared body); `backend/integrations/github_client.py` (mock-backed,
-`post_or_queue` guarantees exactly one of post/queue never both);
-`backend/cli/review_local.py` (PLAN.md's named demo command);
-`backend/job_queue/arq_worker.py` wired into the orchestrator, closing the
-gap deferred since M4 (offloaded via `asyncio.to_thread`, same fix applied
-three times before in this project for the identical event-loop-blocking
-defect class); `tests/fixtures/sample_pr_diff.patch` (3 files, genuinely
-targets all four remits).
+four specialist nodes; the ARQ worker wired into the orchestrator, closing
+the queue→orchestrator gap deferred since M4 (`asyncio.to_thread` offload,
+the same event-loop-blocking fix applied three times before in this
+project); a mock-backed `github_client` guaranteeing exactly one of
+post/queue_for_hitl; `backend/cli/review_local.py` (PLAN.md's named demo
+command).
 
-**BudgetGuard across four agents:** each of the 4 calls independently
-calls `BudgetGuard.check_and_raise()` (unchanged M8 mechanism, no
-review-scoped fast path) -- proven per-call, and a mid-review exhaustion
-(2 of 4 blocked) forces `QUEUED_FOR_HITL` via the same CRITICAL-fallback
-mechanism, never a review that silently looks complete
-(`tests/integration/test_budget_guard_across_four_agents.py`).
+**L4 VERIFY APPROVEd**, having independently reproduced the real demo run
+(14 findings, `overall_confidence=0.896`, `QUEUED_FOR_HITL`, real cost
+$0.026943 for 12,843 in / 2,820 out tokens) and disclosed three findings,
+none blocking APPROVE: two cross-agent duplicate clusters at adjacent (not
+identical) lines that `dedupe_findings`' exact-match key cannot catch; no
+`Review` field distinguishing a grounded review from one that silently
+fell back to diff-only; and `test_all_agents_live.py`'s four real calls
+passing no `review_id`, leaving that spend structurally invisible to
+`BudgetGuard` -- which, together with an un-opt-in real OpenAI re-embed,
+meant a plain `pytest` run spent real money by default with both API keys
+configured.
+
+**The third finding was fixed in a same-session follow-up:** every
+real-money test (`test_all_agents_live.py`'s 4,
+`test_security_agent_live.py`'s 1, `test_hybrid_retrieval.py`'s
+`TestRecallOnRealOpenAIEmbeddings`/`TestFusionVsVectorAloneOnHeldOutQueries`,
+4 more) is now `@pytest.mark.live`-marked and deselected by default
+(`pyproject.toml`'s `addopts = "-ra -m 'not live'"`), each still carrying
+its pre-existing key-based `skipif` (belt and braces). A plain `pytest -v`
+run is now proven free (222→223, two consecutive runs, both increments a
+pre-existing zero-cost fake-client unit-test row; zero `live-test-`
+prefixed rows; the OpenAI seed marker's `backend` field never leaves
+`"fixture"`); `pytest -m live -v` runs all 9 live tests for real on
+request ($0.020912 for the 5 real Anthropic calls, each now carrying an
+identifiable `live-test-`-prefixed `review_id` and landing in
+`agent_events`, visible to `BudgetGuard` for the first time, plus one real
+OpenAI re-embed). The re-embed churn (the fixture-backend class
+invalidating the OpenAI seed marker mid-run, forcing a second real re-embed
+on every full run) is closed by the same marker split -- the unmarked,
+zero-cost `TestRecallOnRealSeededCorpus` class never runs in the same
+invocation as the `live`-marked OpenAI classes either way; the
+`(backend, source-signature, row-count)` contamination guard itself is
+unchanged.
+
+**Non-determinism confirmed:** the verifier's own independent demo run
+against the identical fixture diff produced 15 findings, not 14 -- the
+same real defects plus one additional real finding from the model's own
+run-to-run variance, not a regression.
 
 **Two real, disclosed regressions found and fixed in pre-existing,
-out-of-M10-freeze-boundary test files** (both caused by M10 legitimately
-making QUALITY/TESTS/DOCS real by default): (1)
-`tests/integration/test_events_spine.py`'s M7 orchestrator-spans test was
-about to silently quadruple its real, unbudgeted Anthropic spend on every
-ordinary `pytest` run with a key configured -- confirmed via `agent_events`
-before the fix, fixed by installing fake LLM clients for all four
-specialists. (2) `tests/integration/test_hybrid_retrieval.py`'s held-out
-vector-alone recall@5 baseline shifted by one query (id 16,
-`reconstruct_review_trace`) because M10's own new source files grew the
-real-OpenAI-embedded corpus from 382 to 471/473 chunks -- the same
-single-occurrence-identifier dilution-at-scale limitation M9 already
-measured, re-confirmed by a second corpus-growth event; re-baselined with
-full dated reasoning in place, per that test class's own stated
-amendment discipline. See `git log` (both fixes are their own commits)
-for the full reasoning; neither is a silent loosening.
-
-**Demo output, judged honestly:** 14 real, schema-valid findings
-(SECURITY 5, QUALITY 2, TESTS 4, DOCS 3), `status=QUEUED_FOR_HITL`,
-`overall_confidence=0.896` (forced HITL by two CRITICAL findings despite
-high average confidence -- gate working correctly). All 14 land on real,
-correctly-identified defects in the fixture diff (SQL injection, hardcoded
-secret, missing authz, bare-except swallowing an `UnboundLocalError`,
-three genuine test-coverage gaps, the `is_member` signature/docstring
-drift, plus two reasonable unplanted DOCS observations) -- not generic
-filler. One real imperfection worth L4 VERIFY's attention: TESTS flagged
-the hardcoded-credential issue too (a mild remit bleed into SECURITY's
-territory, framed through a "this should be validated by a test" angle);
-and SECURITY/QUALITY both separately flagged the same bare-except/
-uninitialized-variable bug from their own angles (defensible -- it is
-genuinely both a security-relevant and a quality-relevant defect -- but
-real overlap, not zero). Full per-finding list and reasoning in this
-session's final report.
-
-**API spend (real, this session):** demo command four calls, measured
-exactly via `agent_events`: $0.026943 (haiku-4-5, 12,843 in / 2,820 out
-tokens). `tests/integration/test_all_agents_live.py`'s 4 calls ran twice
-(once per full-suite `pytest` run) since `ANTHROPIC_API_KEY` was
-configured -- not measured exactly (no `review_id` passed, matching
-`test_security_agent_live.py`'s own pre-existing pattern), estimated small
-(haiku-tier, ~1-2K tokens each). `test_hybrid_retrieval.py`'s real-OpenAI
-corpus re-embed (473 chunks) ran once per full traversal of that file's
-two test classes in the same process (~5 times across this session's
-debugging) at an estimated ~$0.024 each -- unavoidable by that fixture's
-own documented design (the fixture-backend class always runs first within
-one process and contaminates the marker), not something this session
-could have prevented without touching M9's own file more invasively. See
-final report's API_SPEND section for the full breakdown.
+out-of-freeze-boundary test files during the L1 BUILD** (both caused by
+M10 legitimately making QUALITY/TESTS/DOCS real by default):
+`test_events_spine.py`'s M7 orchestrator-spans test was about to quadruple
+its real, unbudgeted spend on every `pytest` run (fixed with fake LLM
+clients); `test_hybrid_retrieval.py`'s held-out vector-alone recall@5
+baseline shifted by one query as the real-embedded corpus grew from 382 to
+471/473 chunks (the same single-occurrence-identifier dilution M9 already
+measured; re-baselined with dated reasoning, not silently loosened).
 
 ## Housekeeping note (2026-08-31 POST-APPROVE CLOSEOUT)
 
@@ -248,6 +232,46 @@ query embeds at negligible additional cost).
   account.
 
 ## Deferred
+
+New from M10 (L4 VERIFY), non-blocking except where noted:
+- **Adjacent-line cross-agent duplicates escape dedupe.** `dedupe_findings`'
+  key is exact-match `(file_path, line_start)` (a gap M5 already deferred
+  for wide-span same-agent findings); L4 VERIFY's independent demo run
+  confirmed the same class also lets two DIFFERENT agents' findings on
+  adjacent-but-not-identical lines both survive as separate findings
+  instead of colliding. Real interval-overlap detection (not just a wider
+  exact key) would be needed to close this properly -- left as a known,
+  tracked gap, same discipline as M5's version of this item.
+- **No `Review` field records whether a specialist's prompt was actually
+  grounded by retrieval, or silently fell back to the diff alone.**
+  `backend.agents.base_agent.build_user_message` degrades to diff-only on
+  a retrieval failure (a deliberate availability/thoroughness trade-off,
+  not a bug), but nothing downstream can tell the two cases apart after
+  the fact -- a fully-grounded review and a fully-ungrounded one produce
+  structurally identical `Review` JSON. Worth a `grounded: bool` (or
+  per-finding) field on a future milestone that needs to reason about
+  review quality/confidence in light of whether grounding actually ran.
+- **ARQ's default job-level retry could double-post once M11 makes
+  `github_client` real.** `backend/job_queue/arq_worker.py`'s
+  `WorkerSettings`/`process_webhook_event` set no explicit `max_tries`, so
+  ARQ's own default retry-on-exception applies at the whole-job-function
+  level. M10's mocked `github_client.post_or_queue` guarantees exactly one
+  of post/queue per *execution*, verified in both directions -- but a job
+  that successfully posts and then fails on a LATER step would be retried
+  by ARQ from the top, calling `post_or_queue` a second time. Harmless
+  today (the mock has no real side effect to double); becomes a real
+  double-post risk the moment M11 swaps in the real REST client. Flag for
+  M11 to address (e.g. an idempotency check before posting, or disabling
+  job-level retry for this job function) rather than assuming the M10
+  mock's "exactly one" guarantee alone will still hold once GitHub is real.
+- **No dead-letter visibility for a permanently-failed ARQ job until
+  M13.** A job that exhausts ARQ's retry budget just stops -- there is no
+  dead-letter queue, alert, or dashboard surface recording that it
+  happened; only application logs. Acceptable for M10's local-dry-run
+  scope (nothing yet depends on a job actually completing for an external
+  party to see), but should not still be true once M11 makes a failure
+  mean "a real PR never got its real review" -- M13's dashboard work is
+  the natural place to close this.
 
 New from M9 POST-APPROVE CLOSEOUT (2026-08-31), non-blocking:
 - **A larger, blind query set (30+ queries) would be needed to establish

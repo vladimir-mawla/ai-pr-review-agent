@@ -581,3 +581,80 @@ bug from their own distinct angles. All four gates green: `ruff check .`,
 results, `lint-imports`. See `checkpoints/CURRENT.md` for the full
 account and this session's final report for the complete per-finding
 breakdown.
+
+- **2026-08-31 — M10 (Full Local Dry-Run Review) — L4 VERIFY APPROVE.** An
+  independent L4 VERIFY session re-ran the M10 L1 BUILD above and
+  **APPROVEd** it: all four specialists (SECURITY, QUALITY, TESTS, DOCS)
+  are real, LLM-backed implementations sharing one orchestration path
+  (`backend.agents.base_agent.run_specialist_analysis`); retrieval grounding
+  (M9's `HybridRetriever`) is wired into every specialist's prompt; and the
+  queue→orchestrator gap deferred since M4 is finally closed (the ARQ
+  worker drives the real compiled graph, the blocking `engine.run` call
+  offloaded via `asyncio.to_thread` off the worker's event loop). The
+  verifier independently re-ran PLAN.md's own demo command for real and
+  reproduced the builder's own numbers: 14 schema-valid findings
+  (SECURITY 5, QUALITY 2, TESTS 4, DOCS 3), `status=QUEUED_FOR_HITL`,
+  `overall_confidence=0.896`, real cost $0.026943 across the four calls
+  (12,843 tokens in / 2,820 tokens out) — routed to human review correctly,
+  by two genuine CRITICAL findings, not a false trigger.
+
+  L4 VERIFY's own disclosed findings, none blocking APPROVE: (1) two of
+  the real demo run's 14 findings form cross-agent duplicate clusters at
+  **adjacent, not identical, lines** (the SECURITY/QUALITY bare-except
+  overlap and the TESTS/SECURITY hardcoded-credential overlap the builder
+  session already flagged) — `dedupe_findings`' exact-match key
+  (`file_path`, `line_start`) cannot catch these, the same class of gap M5
+  already deferred for wide-span findings, now confirmed to also bite
+  adjacent-but-not-identical lines from different agents; (2) `Review` has
+  no field recording whether a specialist's prompt was actually grounded by
+  retrieval or silently fell back to the diff alone (`build_user_message`
+  degrades to diff-only on a retrieval failure, per
+  `backend.agents.base_agent`'s own documented availability/thoroughness
+  trade-off) — a grounded and an ungrounded review are indistinguishable
+  after the fact; (3) `tests/integration/test_all_agents_live.py` passed no
+  `review_id` to any of its four real calls, so per
+  `AnthropicLLMClient.complete`'s `if review_id is not None: emit_llm_call(...)`
+  gate, that real spend never reached `agent_events` — `BudgetGuard` was
+  structurally blind to it, and a plain `pytest` run (with both API keys
+  configured) made ~5 real Anthropic calls and exactly one real,
+  unbudgeted OpenAI re-embed of the whole corpus with no opt-in at all,
+  every single run.
+
+  **Finding (3) above is fixed in this same session's follow-up work**,
+  disclosed here rather than left for a separate entry: every test that
+  makes a real, billable call (`test_all_agents_live.py`'s 4,
+  `test_security_agent_live.py`'s 1, and
+  `test_hybrid_retrieval.py`'s `TestRecallOnRealOpenAIEmbeddings`/
+  `TestFusionVsVectorAloneOnHeldOutQueries`, 4 more) is now marked
+  `@pytest.mark.live`, a marker registered in `pyproject.toml` and
+  deselected by default (`addopts = "-ra -m 'not live'"`), so a plain
+  `pytest` run makes zero real API calls regardless of what is configured
+  in `.env` — proven by querying `agent_events` for `llm.call` rows before
+  and after two consecutive plain runs (222 total real-money-attributable
+  rows added: zero, both increments accounted for by a pre-existing,
+  network-free fake-client unit test) and by the OpenAI seed marker's
+  `backend` field never leaving `"fixture"`. `pytest -m live -v` now runs
+  all 9 live tests for real on request, at a measured cost of $0.020912 for
+  the five real Anthropic calls (each now passing an identifiable
+  `live-test-`-prefixed `review_id`, landing in `agent_events` and visible
+  to `BudgetGuard` for the first time) plus one real OpenAI re-embed of the
+  473-chunk corpus. The re-embed churn L4 VERIFY's own investigation
+  independently confirmed (`TestRecallOnRealSeededCorpus`'s fixture-backend
+  reseed invalidating the OpenAI seed marker mid-run, forcing a second real
+  re-embed on every full run) is also closed by the same marker split:
+  `TestRecallOnRealSeededCorpus` needs no key and makes no billable call,
+  so it is deliberately left unmarked and stays in the default suite,
+  where it never runs alongside the now-`live`-marked OpenAI classes in the
+  same invocation either way — the `(backend, source-signature, row-count)`
+  contamination guard itself is unchanged and unweakened.
+
+  The pipeline is now confirmed **non-deterministic**: the verifier's own
+  independent run of the identical demo command against the identical
+  fixture diff produced **15** findings, not 14 (the same real defects,
+  plus one additional real finding an LLM's own run-to-run variance
+  surfaced) — expected of a real model call, not a regression, and now
+  explicitly recorded rather than treated as a fluke. See
+  `checkpoints/CURRENT.md`'s M10 final-state section for the condensed
+  account and its Deferred list for the L4 VERIFY findings above that
+  remain open (the adjacent-line dedupe gap and the missing `grounded`
+  flag), plus two new forward-looking items the verifier flagged for M11/M13.
