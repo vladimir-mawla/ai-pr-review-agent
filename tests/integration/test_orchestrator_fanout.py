@@ -32,9 +32,9 @@ delegates to a real ``backend.agents.security_agent.SecurityAgent`` by
 default. Every test ABOVE this milestone's own new test class predates that
 change and asserts on the exact M4 canned ``Finding`` (file path, severity,
 confidence) the security stub used to return; the module-scoped
-``_stub_security_agent_for_pre_existing_tests`` autouse fixture below
-installs a small fake agent that reproduces that exact canned behavior
-(same ``Finding``, same simulated work duration) via
+``_stub_all_specialist_agents_for_pre_existing_tests`` autouse fixture below
+installs a small fake agent that reproduces that exact canned behavior for
+SECURITY (same ``Finding``, same simulated work duration) via
 ``backend.orchestrator.nodes.set_security_agent_for_testing``, so those
 tests keep proving what they always proved (fan-out parallelism,
 crash-resume, error isolation, aggregation wiring) without requiring
@@ -42,7 +42,18 @@ crash-resume, error isolation, aggregation wiring) without requiring
 something different. ``TestRealSecurityAgentSlotsIntoTheGraph`` is the one
 new test class that installs an actual ``SecurityAgent`` (with a fake LLM
 client, still no API key) to prove the real M8 agent's own findings flow
-through the compiled graph alongside the three unchanged stubs.
+through the compiled graph alongside the three (at the time) unchanged
+stubs.
+
+M10 addition: QUALITY/TESTS/DOCS are no longer M4's canned stubs in
+production either (``backend.agents.{quality_agent,test_agent,docs_agent}``)
+-- the autouse fixture below now installs the SAME kind of stub-equivalent
+fake for all four agent types (not just SECURITY), via
+``backend.orchestrator.nodes.set_<agent>_agent_for_testing``, so every test
+in this file that predates M10 (asserting on ``nodes._CANNED_FINDINGS``'
+exact confidences/severities/file-paths) keeps passing completely
+unchanged, and no test in this file needs ``ANTHROPIC_API_KEY`` or a real
+pgvector connection.
 
 Every test uses a fresh ``tmp_path``-backed checkpoint database and a unique
 ``thread_id`` (a fresh UUID), so tests never share state and can run in any
@@ -98,39 +109,57 @@ def _initial_state(review_id: str, *, diff: str = "") -> GraphState:
     )
 
 
-class _StubSecurityAgentForPreExistingTests(BaseAgent):
-    """Reproduces M4's exact canned security stub, for tests written before M8.
+class _StubAgentForPreExistingTests(BaseAgent):
+    """Reproduces M4's exact canned stub for ONE agent type, for tests written before M8/M10.
 
-    Same ``Finding`` (``nodes._CANNED_FINDINGS[AgentType.SECURITY]``), same
-    simulated work duration (``NODE_WORK_SECONDS``) -- installed via the
-    autouse fixture below so every pre-M8 test in this module keeps
-    exercising fan-out/crash-resume/aggregation mechanics without depending
-    on a real (or even fake-but-different) LLM-backed agent's specific
-    output.
+    Same ``Finding`` (``nodes._CANNED_FINDINGS[agent_type]``), same
+    simulated work duration (``NODE_WORK_SECONDS``) -- installed (one
+    instance per agent type) via the autouse fixture below so every
+    pre-M8/pre-M10 test in this module keeps exercising fan-out/
+    crash-resume/aggregation mechanics without depending on a real (or even
+    fake-but-different) LLM-backed agent's specific output.
     """
 
-    agent_type = AgentType.SECURITY
+    def __init__(self, agent_type: AgentType) -> None:
+        self.agent_type = agent_type
 
     def analyze(self, diff: str, *, review_id: str | None = None) -> list[Finding]:
         time.sleep(NODE_WORK_SECONDS)
-        return [nodes._CANNED_FINDINGS[AgentType.SECURITY]]
+        return [nodes._CANNED_FINDINGS[self.agent_type]]
+
+
+# Maps each AgentType to the test-only override setter
+# backend.orchestrator.nodes exposes for it -- used by the autouse fixture
+# below to install a stub-equivalent fake for all four, generically.
+_SET_AGENT_OVERRIDE = {
+    AgentType.SECURITY: nodes.set_security_agent_for_testing,
+    AgentType.QUALITY: nodes.set_quality_agent_for_testing,
+    AgentType.TESTS: nodes.set_tests_agent_for_testing,
+    AgentType.DOCS: nodes.set_docs_agent_for_testing,
+}
 
 
 @pytest.fixture(autouse=True)
-def _stub_security_agent_for_pre_existing_tests() -> Iterator[None]:
-    """Install the M4-equivalent stub for every test, unless a test overrides it itself.
+def _stub_all_specialist_agents_for_pre_existing_tests() -> Iterator[None]:
+    """Install the M4-equivalent stub for all four agents, unless a test overrides one itself.
 
-    ``TestRealSecurityAgentSlotsIntoTheGraph`` below installs its OWN
-    override (a real ``SecurityAgent``) after this fixture runs, which
-    simply replaces this one for the duration of that test -- see
+    ``TestRealSecurityAgentSlotsIntoTheGraph`` and
+    ``TestRealSecurityAgentAuthenticationFailureForcesHITL`` below install
+    their OWN override for SECURITY specifically (a real ``SecurityAgent``)
+    after this fixture runs, which simply replaces this one for the
+    duration of that test -- see
     ``backend.orchestrator.nodes.set_security_agent_for_testing``'s
-    docstring ("replaces the previous entry").
+    docstring ("replaces the previous entry"). QUALITY/TESTS/DOCS keep
+    their stub-equivalent fakes in every test in this file, since none of
+    them install their own override.
     """
-    nodes.set_security_agent_for_testing(_StubSecurityAgentForPreExistingTests())
+    for agent_type, setter in _SET_AGENT_OVERRIDE.items():
+        setter(_StubAgentForPreExistingTests(agent_type))
     try:
         yield
     finally:
-        nodes.set_security_agent_for_testing(None)
+        for setter in _SET_AGENT_OVERRIDE.values():
+            setter(None)
 
 
 def _new_engine(tmp_path: Path, name: str = "checkpoints.sqlite3") -> LangGraphWorkflowEngine:
