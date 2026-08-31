@@ -1,45 +1,31 @@
 # CURRENT
-- active_loop: none -- M12 (Tiger Cloud Migration) L1 BUILD is complete,
-  all gates green, pushed, CI green. M12 was the last unbuilt milestone --
-  every milestone M1-M13 is now built at L1. Awaiting L4 VERIFY.
-- target: M12
+- active_loop: none -- M12 (Tiger Cloud Migration) L4 VERIFY APPROVEd.
+  All 13 of 13 planned milestones (M1-M13) are now built and independently
+  verified. No M14 exists; no further milestone is planned.
+- target: none -- the planned milestone list is complete. Remaining work
+  is the Deferred list below, picked up ad hoc, not a new numbered
+  milestone.
 - iteration: 0
-- last_gate: **L1 BUILD complete for M12 (this session)** -- not yet L4
-  VERIFYd. Built and proved LIVE against the real, paid Tiger Cloud
-  instance (user-provided PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE/
-  PGSSLMODE): Stage A (vector+vectorscale extensions), Stage B
-  (agent_events as a real 1-day-chunked hypertable, append-only enforcement
-  proven on the hypertable AND a real physical chunk, including a CRITICAL
-  finding -- a statement-level TRUNCATE trigger does NOT propagate to
-  chunks, closed instead by the restricted agent_events_writer role, which
-  IS load-bearing on Tiger, not merely defense in depth -- plus the
-  agent_health_1m/pr_cost_hourly continuous aggregates, exclusion filter
-  baked into each view), Stage C (code_chunks with a real DiskANN index,
-  planner-verified at 2000-row scale). Also closed the M13 loop: the
-  disclosed "narrow swap" of `aggregate_llm_calls_by_agent` to
-  `agent_health_1m` on `events_backend='tiger'`, verified to need slightly
-  more than "FROM/GROUP BY only" (see PLAN.md's M12 amendment). All gates
-  green (ruff, mypy --strict, pytest -- 396 passed/29 deselected, proven
-  green with `.env` entirely absent -- lint-imports, npm build), plus 16
-  new live Tiger tests (`pytest -m live tests/integration/test_tiger_migration.py`,
-  all passing against the real instance). Pushed to `origin/main`; CI green
-  (5/5 jobs, Tiger tests correctly deselected with no PG* config in CI).
-  See this session's final build report for the full transcript.
-- last_action: M12 L1 BUILD -- 8 granular commits (settings/config,
-  migration file + init_tiger_schema, a real regression fix in
-  tiger_client.py, the M13 repository swap, wiring in
-  main.py/workflow_context.py/nodes.py, the live test suite, PLAN.md's
-  dated amendment, context-graph regeneration), pushed, CI verified green,
-  this checkpoint updated.
-- next_action: **L4 VERIFY on M12 (separate session)**. Every milestone is
-  now built at L1 -- no more "needs a credential this project lacks"
-  blockers remain. Otherwise work the Deferred list below.
+- last_gate: **L4 VERIFY APPROVE on M12** (this milestone's final
+  disposition -- M12 is DONE). See `.genesis/PLAN.md`'s 2026-08-31 M12
+  Progress entry for the full account (Stage A/B/C, the chunk-TRUNCATE
+  finding independently reproduced, the DiskANN and weighted-average
+  re-verification, the apply_migrations glob regression, and the
+  free-suite-with-no-.env proof) and
+  `.genesis/explanations/2026-08-31-explanation-m12.html` for a full
+  walkthrough.
+- last_action: M12 post-APPROVE closeout (this session) -- bookkeeping
+  (DONE.html all 13 pills flipped to done, PLAN.md Progress + closing
+  summary, implementation-notes.html M12 row, this checkpoint), the
+  explain-diff page, gates re-run, granular commits, push.
+- next_action: **Work the Deferred list below.** Every milestone in the
+  plan is built and verified; there is no next milestone to target.
 - model: claude-sonnet-5
 - tokens_used: not tracked this session
 - tokens_budget: 50000
 - skills_loaded: []
 
-## M12 final state (Tiger Cloud Migration) -- L1 BUILD complete, NOT YET L4 VERIFYd
+## M12 final state (Tiger Cloud Migration) -- DONE, L4 VERIFY APPROVE
 
 See `.genesis/PLAN.md`'s M12 AMENDED demo command/success criteria and its
 L1 BUILD DISCLOSURE note for the full account. Condensed:
@@ -77,6 +63,18 @@ L1 BUILD DISCLOSURE note for the full account. Condensed:
 - **`reviews` (M13's HITL-queue table) deliberately NOT migrated** --
   outside ADR-003's Stage A-C scope; stays on local regardless of
   `events_backend`.
+
+**L4 VERIFY APPROVE (2026-08-31):** an independent session re-ran the
+amended demo command against the real Tiger instance, independently
+reproduced Real finding #2 above inside a rolled-back transaction
+(34 seeded rows -> 0 after a direct-chunk `TRUNCATE`, root-caused via
+`pg_trigger`, reconfirmed on a newly-created chunk), independently
+re-verified the M13 weighted-average swap (182ms measured vs. 181.8ms
+true weighted average, vs. 550ms a naive average-of-bucket-averages would
+have given), and confirmed no Tiger-only DDL leaked into either local
+database. See `.genesis/PLAN.md`'s dated Progress entry for the full
+account and this section's own "New from M12 (L4 VERIFY...)" Deferred
+entries below for what it left open.
 
 ## M13 final state (Dashboard + Evaluation/CI Gate) -- DONE, L4 VERIFY APPROVE (after REJECT/fix)
 
@@ -457,6 +455,32 @@ New from M12 (L1 BUILD, 2026-08-31), non-blocking except where noted:
   (`TIGER_EVENTS_WRITER_PASSWORD`) has no rotation mechanism** -- set once
   via `ALTER ROLE`, stored only in the local `.env` (gitignored). A real
   deployment would need a secrets manager, not a local dotfile.
+
+New from M12 (L4 VERIFY, 2026-08-31), non-blocking, all disclosed by the
+verifier itself rather than found later:
+- **The Tiger ADMIN role can still `TRUNCATE` an individual chunk.**
+  Re-confirmed, not newly found (see the L1 BUILD item above for the full
+  mechanism) -- production never connects as admin (grep-confirmed:
+  every real write path uses `agent_events_writer`), so this is
+  structurally unreachable in practice, but the residual privilege itself
+  is real and not eliminated by anything this milestone built.
+- **L4 VERIFY's own probes left 32 permanent, non-excluded, $0-cost rows**
+  in the append-only `agent_events` table, under `review_id`s
+  `l4-verify-avgtest`, `l4-verify-p95-test`, and
+  `l4-verify-real-shaped-probe` -- none of these prefixes match
+  `_TEST_FIXTURE_REVIEW_ID_PREFIXES` (`backend/database/repository.py`),
+  so they are not excluded from `aggregate_llm_calls_by_agent`'s totals.
+  Zero dollar impact (all three were zero-cost probe rows), but they will
+  render as three zero-cost agents on any real `/costs`-equivalent Tiger
+  view forever, the same class of permanent artifact as the L1 BUILD
+  item above.
+- **`code_chunks` on Tiger is empty** and must be re-seeded (there is no
+  Tiger equivalent of `scripts/seed_code_chunks.py` run yet) before
+  retrieval works against the Tiger backend.
+- **`reviews` (the HITL queue table) was deliberately NOT migrated to
+  Tiger**, consistent with ADR-003's Stage A-C scope -- re-confirmed by
+  L4 VERIFY, not a gap it found; see the L1 BUILD item above for the full
+  reasoning.
 
 New from M13 (L1 BUILD), non-blocking except where noted:
 - ~~**M12 (Tiger Cloud Migration) is still not built.** The cost/latency
