@@ -1,0 +1,163 @@
+{
+  "_comment": [
+    "HELD-OUT validation set for the M9 fusion-vs-vector-alone investigation",
+    "(see .genesis/checkpoints/CURRENT.md and PLAN.md's M9 entry for the",
+    "session that created this file). tests/fixtures/retrieval_queries.json",
+    "(the ORIGINAL 10) is used for ALL tuning/variant-selection; THIS file",
+    "is touched exactly once, after a single winning fusion variant has",
+    "already been chosen against the original 10 and frozen. The",
+    "methodological point: trying N fusion variants and keeping whichever",
+    "scores best on a small query set is fitting noise, not measuring",
+    "improvement -- this file exists so the chosen winner can be checked",
+    "against queries it was never tuned against, not selected among.",
+    "",
+    "These 15 queries were written by reading backend/ source directly --",
+    "grepping for top-level def/class declarations not already used by the",
+    "original 10 (backend/memory/context_retriever.py::reciprocal_rank_fusion,",
+    "backend/webhook_receiver/validator.py::verify_signature,",
+    "backend/reliability/circuit_breaker.py::CircuitBreaker,",
+    "backend/webhook_receiver/parser.py::parse_pull_request_payload,",
+    "backend/agents/contracts.py::dedupe_findings,",
+    "backend/economics/budget.py::BudgetGuard,",
+    "backend/hitl/queue.py::route_review,",
+    "backend/economics/pricing.py::compute_cost_usd,",
+    "backend/memory/tiger_client.py::apply_migrations) -- and reading each",
+    "target's own docstring to write a faithful natural-language paraphrase",
+    "where the category calls for one. Chosen and committed BEFORE this",
+    "session ran hybrid_search against a single one of them: no query here",
+    "was picked, adjusted, or dropped because of how it scored. Coverage",
+    "mirrors the original set's mix (exact-identifier, natural-language,",
+    "and cases where a sibling chunk in the same file shares enough",
+    "vocabulary to make correct disambiguation a real test, mirroring the",
+    "original's id-6 BudgetGuard/BudgetExceededError pattern) rather than",
+    "reusing the same three category labels as decoration.",
+    "",
+    "ids start at 11 (not 1) purely so a (query id) pair is never ambiguous",
+    "between the two files when both are referenced in the same report.",
+    "Same identity scheme as the original file: a target is (expected_path,",
+    "expected_symbol), not a row id, because ids are reassigned on every",
+    "TRUNCATE-and-reload re-seed."
+  ],
+  "queries": [
+    {
+      "id": 11,
+      "query": "RetryPolicy",
+      "expected_path": "backend/reliability/retry.py",
+      "expected_symbol": "RetryPolicy",
+      "category": "exact-identifier",
+      "rationale": "Literal class name, unique token in the corpus. (An earlier draft of this set used call_with_retry for ids 11/12, but that function's signature uses PEP 695 generic syntax -- def call_with_retry[T](... -- which _symbol_declaration_pattern's regex (\\s*[(:] immediately after the name) cannot match through the [T]. Swapped to RetryPolicy, a plain dataclass declaration, before this file was committed or run against -- a fixture-authoring correctness fix, not a result-driven substitution.)"
+    },
+    {
+      "id": 12,
+      "query": "tunable knobs for one retry loop: max attempts, backoff delay bounds, and jitter",
+      "expected_path": "backend/reliability/retry.py",
+      "expected_symbol": "RetryPolicy",
+      "category": "natural-language",
+      "rationale": "Same target as id 11, phrased as a natural-language paraphrase of RetryPolicy's own docstring ('Tunable knobs for one retry loop') instead of the identifier -- the exact-identifier/natural-language controlled-pair pattern the original set uses for ids 4/10, applied to a new target."
+    },
+    {
+      "id": 13,
+      "query": "TimeoutPolicy",
+      "expected_path": "backend/reliability/timeout.py",
+      "expected_symbol": "TimeoutPolicy",
+      "category": "exact-identifier",
+      "rationale": "Literal class name, unique token in the corpus."
+    },
+    {
+      "id": 14,
+      "query": "lazily construct a shared background thread pool for running blocking calls under a timeout",
+      "expected_path": "backend/reliability/timeout.py",
+      "expected_symbol": "_get_executor",
+      "category": "natural-language",
+      "rationale": "Paraphrase of _get_executor's own inline comment ('Lazily constructed ... guarded by a lock since multiple JobQueue instances ... may call run_with_timeout concurrently'), targeting a short private helper in the same file as ids 13/15 so all three compete for the same vocabulary."
+    },
+    {
+      "id": 15,
+      "query": "the exception raised when a wrapped call does not finish within its allotted time",
+      "expected_path": "backend/reliability/timeout.py",
+      "expected_symbol": "CallTimedOutError",
+      "category": "natural-language-ambiguous",
+      "rationale": "Paraphrase of CallTimedOutError's one-line docstring, deliberately in the same file as TimeoutPolicy and run_with_timeout (ids 13/14) which share heavy vocabulary overlap ('timeout', 'seconds', 'call', 'bounded') -- mirrors the original set's id-6 BudgetGuard/BudgetExceededError sibling-disambiguation pattern with a different file."
+    },
+    {
+      "id": 16,
+      "query": "reconstruct_review_trace",
+      "expected_path": "backend/observability/audit.py",
+      "expected_symbol": "reconstruct_review_trace",
+      "category": "exact-identifier",
+      "rationale": "Literal function name, unique token in the corpus."
+    },
+    {
+      "id": 17,
+      "query": "record a completed LLM call's token counts and cost",
+      "expected_path": "backend/observability/events.py",
+      "expected_symbol": "emit_llm_call",
+      "category": "natural-language",
+      "rationale": "Paraphrase of emit_llm_call's own docstring ('Record a real LLM call's model/token/cost accounting') without the identifier. backend/observability/events.py defines several other emit_* functions (emit_tool_call, emit_decision, emit_span_start/end) sharing 'record'/'event'/'call' vocabulary, a genuine disambiguation test."
+    },
+    {
+      "id": 18,
+      "query": "InMemoryJobQueue",
+      "expected_path": "backend/job_queue/in_memory.py",
+      "expected_symbol": "InMemoryJobQueue",
+      "category": "exact-identifier",
+      "rationale": "Literal class name, unique token in the corpus."
+    },
+    {
+      "id": 19,
+      "query": "WebhookEvent",
+      "expected_path": "backend/models/webhook.py",
+      "expected_symbol": "WebhookEvent",
+      "category": "exact-identifier",
+      "rationale": "Literal class name, but a real stress test: 'webhook' is heavily repeated vocabulary across backend/webhook_receiver/{parser,router,validator}.py's docstrings and code, all of which are also indexed, so the exact model class (not the handling logic that talks about it) has real decoys to beat."
+    },
+    {
+      "id": 20,
+      "query": "parse a model's raw text response into validated findings, skipping any bad entries",
+      "expected_path": "backend/agents/response_parsing.py",
+      "expected_symbol": "parse_findings_from_llm_response",
+      "category": "natural-language",
+      "rationale": "Paraphrase of parse_findings_from_llm_response's own docstring ('An individual item that fails Finding validation ... is logged and skipped rather than failing the whole batch') without the identifier."
+    },
+    {
+      "id": 21,
+      "query": "AnthropicLLMClient",
+      "expected_path": "backend/tools/llm_client.py",
+      "expected_symbol": "AnthropicLLMClient",
+      "category": "exact-identifier",
+      "rationale": "Literal class name, unique token in the corpus."
+    },
+    {
+      "id": 22,
+      "query": "load_prompt",
+      "expected_path": "backend/prompts/registry.py",
+      "expected_symbol": "load_prompt",
+      "category": "exact-identifier",
+      "rationale": "Literal function name, unique token in the corpus."
+    },
+    {
+      "id": 23,
+      "query": "union two branches' error maps together in a shared graph state",
+      "expected_path": "backend/orchestrator/state.py",
+      "expected_symbol": "_merge_dicts",
+      "category": "natural-language-ambiguous",
+      "rationale": "Paraphrase of _merge_dicts's own docstring ('Reducer for node_errors: union two branches' error maps') without the identifier. Targets a short, private (leading-underscore) helper function -- a real test of whether a short chunk with modest vocabulary overlap against the rest of backend/orchestrator/state.py's own GraphState-heavy docstring still surfaces."
+    },
+    {
+      "id": 24,
+      "query": "WorkflowEngine",
+      "expected_path": "backend/core/workflow_engine.py",
+      "expected_symbol": "WorkflowEngine",
+      "category": "exact-identifier",
+      "rationale": "Literal class/Protocol name, unique token in the corpus."
+    },
+    {
+      "id": 25,
+      "query": "get_job_queue",
+      "expected_path": "backend/webhook_receiver/router.py",
+      "expected_symbol": "get_job_queue",
+      "category": "exact-identifier",
+      "rationale": "Literal function name; a FastAPI dependency-injection helper, structurally different code shape (short, decorator-adjacent) from most other targets in this set."
+    }
+  ]
+}
