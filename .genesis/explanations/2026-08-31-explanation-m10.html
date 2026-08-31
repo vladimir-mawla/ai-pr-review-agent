@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>M10 Explained — Full Local Dry-Run Review</title>
+<style>
+  :root {
+    --bg: #f7f7f5;
+    --bg-card: #ffffff;
+    --ink: #1b1f23;
+    --mut: #5b6472;
+    --line: #e2e4e8;
+    --accent: #2f6feb;
+    --accent-ink: #ffffff;
+    --ok: #1a7f37;
+    --warn: #9a6700;
+    --bad: #cf222e;
+    --code-bg: #f0f1f3;
+    --pill-bg: #eef2ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1117;
+      --bg-card: #161b22;
+      --ink: #e6edf3;
+      --mut: #9aa4b2;
+      --line: #2d333b;
+      --accent: #6ea8fe;
+      --accent-ink: #0d1117;
+      --ok: #3fb950;
+      --warn: #d29922;
+      --bad: #f85149;
+      --code-bg: #1c2128;
+      --pill-bg: #1c2440;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1117;
+    --bg-card: #161b22;
+    --ink: #e6edf3;
+    --mut: #9aa4b2;
+    --line: #2d333b;
+    --accent: #6ea8fe;
+    --accent-ink: #0d1117;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --bad: #f85149;
+    --code-bg: #1c2128;
+    --pill-bg: #1c2440;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    font-size: 16px;
+  }
+  .page { max-width: 880px; margin: 0 auto; padding: 40px 20px 100px; }
+  header.hero { margin-bottom: 32px; }
+  header.hero .kicker {
+    color: var(--accent);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-size: 12.5px;
+    margin: 0 0 10px;
+  }
+  h1 { font-size: clamp(26px, 4vw, 36px); margin: 0 0 12px; line-height: 1.2; }
+  .lede { color: var(--mut); font-size: 17px; max-width: 70ch; }
+  nav.toc {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin: 28px 0 40px;
+  }
+  nav.toc h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--mut);
+    margin: 0 0 10px;
+  }
+  nav.toc ol { margin: 0; padding-left: 20px; columns: 2; column-gap: 24px; }
+  nav.toc li { margin: 4px 0; break-inside: avoid; }
+  nav.toc a { color: var(--ink); text-decoration: none; border-bottom: 1px dashed var(--line); }
+  nav.toc a:hover { border-bottom-color: var(--accent); color: var(--accent); }
+
+  section { margin: 56px 0; }
+  section > h2 {
+    font-size: 22px;
+    margin: 0 0 16px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--line);
+  }
+  section > h2 .num { color: var(--accent); font-variant-numeric: tabular-nums; margin-right: 10px; }
+  h3 { font-size: 17px; margin: 26px 0 10px; }
+  p { margin: 12px 0; }
+  a { color: var(--accent); }
+  a:focus-visible, button:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .card { background: var(--bg-card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 22px; margin: 16px 0; }
+  .callout { border-left: 4px solid var(--accent); background: var(--pill-bg); border-radius: 8px; padding: 14px 18px; margin: 18px 0; }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.ok { border-left-color: var(--ok); }
+  .callout.bad { border-left-color: var(--bad); }
+  .callout .label {
+    font-weight: 700;
+    font-size: 12.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--mut);
+    margin-bottom: 6px;
+  }
+
+  code {
+    background: var(--code-bg);
+    padding: 1px 6px;
+    border-radius: 5px;
+    font-size: 0.9em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    white-space: pre;
+    font-size: 13.5px;
+    line-height: 1.55;
+  }
+  pre code { background: none; padding: 0; border-radius: 0; }
+
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14.5px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--mut); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .tablewrap { overflow-x: auto; }
+
+  .pill {
+    display: inline-block;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 2px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    color: var(--mut);
+    white-space: nowrap;
+  }
+  .pill.ok { color: var(--ok); border-color: var(--ok); }
+  .pill.bad { color: var(--bad); border-color: var(--bad); }
+  .pill.warn { color: var(--warn); border-color: var(--warn); }
+
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 18px 0; }
+  .flow .node {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 13.5px;
+    min-width: 120px;
+    text-align: center;
+  }
+  .flow .node.core { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .flow .node.bad { border-color: var(--bad); color: var(--bad); font-weight: 600; }
+  .flow .node.ok { border-color: var(--ok); color: var(--ok); font-weight: 600; }
+  .flow .node.warn { border-color: var(--warn); color: var(--warn); font-weight: 600; }
+  .flow .arrow { color: var(--mut); font-size: 18px; }
+  .flow.vertical { flex-direction: column; align-items: stretch; }
+  .flow.vertical .node { text-align: left; }
+  .flow.vertical .arrow { text-align: center; }
+
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+  @media (max-width: 640px) { .compare { grid-template-columns: 1fr; } }
+  .compare .col { border-radius: 12px; padding: 16px 18px; border: 1px solid var(--line); }
+  .compare .col.before { background: color-mix(in srgb, var(--bad) 6%, var(--bg-card)); }
+  .compare .col.after { background: color-mix(in srgb, var(--ok) 6%, var(--bg-card)); }
+  .compare h4 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .compare.before-after .before h4 { color: var(--bad); }
+  .compare.before-after .after h4 { color: var(--ok); }
+
+  .module-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin: 18px 0; }
+  .module-card { background: var(--bg-card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .module-card h4 {
+    margin: 0 0 6px;
+    font-size: 15px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: var(--accent);
+  }
+  .module-card p { margin: 6px 0 0; font-size: 14px; color: var(--mut); }
+
+  .lane-grid { display: flex; flex-wrap: wrap; gap: 12px; margin: 18px 0; align-items: stretch; }
+  .lane {
+    flex: 1 1 220px;
+    border-radius: 12px;
+    border: 2px solid var(--line);
+    padding: 14px 16px;
+    background: var(--bg-card);
+  }
+  .lane .lane-tag {
+    font-size: 11.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--mut);
+    margin-bottom: 6px;
+  }
+  .lane.busy { border-color: var(--bad); }
+  .lane.busy .lane-tag { color: var(--bad); }
+  .lane p { font-size: 13.5px; margin: 6px 0 0; }
+
+  .finding-card { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 10px 0; background: var(--bg-card); }
+  .finding-card .sev { color: var(--bad); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .finding-card .loc { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; color: var(--mut); }
+  .finding-card .conf { float: right; color: var(--mut); font-size: 13px; }
+  .finding-card .rationale { margin-top: 8px; font-size: 14px; }
+
+  ol.gaps li, ul.plain li { margin: 8px 0; }
+
+  .timeline { margin: 20px 0; padding: 0; list-style: none; }
+  .timeline li {
+    position: relative;
+    padding: 4px 0 18px 26px;
+    border-left: 2px solid var(--line);
+    margin-left: 6px;
+  }
+  .timeline li:last-child { border-left-color: transparent; padding-bottom: 0; }
+  .timeline li::before {
+    content: "";
+    position: absolute;
+    left: -7px;
+    top: 6px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--bg-card);
+    border: 2px solid var(--accent);
+  }
+  .timeline li.reject::before { border-color: var(--bad); }
+  .timeline li.approve::before { border-color: var(--ok); }
+  .timeline li .when { font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .timeline li.reject .when { color: var(--bad); }
+  .timeline li.approve .when { color: var(--ok); }
+
+  details.quiz {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 18px;
+    margin: 16px 0;
+  }
+  details.quiz summary { cursor: pointer; font-weight: 600; list-style: none; }
+  details.quiz summary::-webkit-details-marker { display: none; }
+  details.quiz summary::before { content: "▸ "; color: var(--accent); }
+  details.quiz[open] summary::before { content: "▾ "; }
+  details.quiz .q { font-weight: 600; margin-bottom: 4px; }
+  details.quiz .answer { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
+  details.quiz .answer .verdict { font-weight: 700; color: var(--ok); }
+
+  footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--mut); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <p class="kicker">Genesis L4 · Explain Diff · Milestone M10</p>
+    <h1>Full Local Dry-Run Review</h1>
+    <p class="lede">
+      M10 is where this project stops being four separate pieces of
+      machinery and becomes one pipeline: four real LLM-backed specialists,
+      retrieval grounding, the ARQ worker finally driving the orchestrator
+      graph it has been queueing jobs for since M4, a mocked GitHub
+      dispatch with a structural "never both" guarantee, and a CLI that
+      writes one schema-valid <code>Review</code> to disk. This page covers
+      why four narrow specialists cost 4x a single broad one and what that
+      buys (and doesn't); why grounding uses symbol names instead of the
+      raw diff; why a blocked or failed specialist must produce a forced
+      CRITICAL finding instead of an empty list, and why that stopped being
+      a hypothetical the moment three stub agents became real; how a
+      mid-review budget cutoff stays visibly different from a clean pass;
+      the M4 gap this milestone finally closes and why the fix runs off
+      the worker's event loop; and the honest limits an independent L4
+      VERIFY found and a same-session follow-up partially closed. Diff
+      range <code>e3d14bd</code>&nbsp;&hellip;&nbsp;<code>ef2bae8</code> on
+      <code>main</code> (M10's own 13 commits plus this session's 2 follow-up
+      fixes) — 15 commits, 32 files changed, 4685 insertions(+), 494
+      deletions(-).
+    </p>
+  </header>
+
+  <nav class="toc">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#background">Background: what existed before M10</a></li>
+      <li><a href="#four-specialists">Four specialists, not one broader prompt</a></li>
+      <li><a href="#remit-separation">Remit separation is prompt-only, not structural</a></li>
+      <li><a href="#grounding">Grounding by symbol name, not raw diff text</a></li>
+      <li><a href="#infra-failure">The shared infrastructure-failure path</a></li>
+      <li><a href="#budget">Mid-review budget exhaustion</a></li>
+      <li><a href="#m4-gap">Closing the M4 gap: the queue finally drives the graph</a></li>
+      <li><a href="#post-or-queue">Exactly one of post or queue</a></li>
+      <li><a href="#limits">Honest limits</a></li>
+      <li><a href="#quiz">Quiz</a></li>
+    </ol>
+  </nav>
+
+  <section id="background">
+    <h2><span class="num">1</span>Background: what existed before M10</h2>
+    <p>
+      By M9, this project had every piece except the piece that connects
+      them. M8 gave it one real specialist (SECURITY) calling a real
+      Anthropic model; QUALITY, TESTS, and DOCS were still M4's canned,
+      no-network stub findings. M9 gave it a local retrieval store
+      (<code>HybridRetriever</code>, pgvector + full-text search fused by
+      reciprocal rank fusion) that nothing yet queried from inside a real
+      agent call. And the orchestrator itself — a real LangGraph
+      <code>StateGraph</code> that fans out to four nodes concurrently,
+      checkpoints to disk, and resumes across a process boundary — had
+      been sitting unwired since M4: the ARQ worker dequeued a verified
+      webhook event and did nothing more than record that it arrived.
+    </p>
+    <p>
+      M10's job was not to invent new capability so much as to finish
+      wiring the capability that already existed: make the other three
+      specialists real, ground all four in retrieval, and — the item every
+      milestone since M4 had deferred and re-deferred — make the queue
+      actually drive the graph.
+    </p>
+  </section>
+
+  <section id="four-specialists">
+    <h2><span class="num">2</span>Four specialists, not one broader prompt</h2>
+    <p>
+      A single prompt asking one model call to check security, code
+      quality, test coverage, and documentation all at once would cost a
+      quarter of what four separate calls cost, and it would never produce
+      two agents flagging the same line from different angles. M10 chose
+      four narrow specialists anyway, and the honest cost showed up
+      immediately in the real numbers: PLAN.md's own M10 demo run
+      (<code>backend/cli/review_local.py</code> against
+      <code>tests/fixtures/sample_pr_diff.patch</code>) made <b>four</b>
+      real, billable Anthropic calls for <b>one</b> review, and its 14
+      findings contained <b>two confirmed cross-agent duplicate
+      clusters</b> — TESTS separately flagging the same hardcoded-credential
+      issue SECURITY already covered (through a "this should be validated
+      by a test" framing, a mild bleed into SECURITY's own territory), and
+      SECURITY and QUALITY each independently flagging the same
+      bare-except/uninitialized-variable bug from their own distinct
+      angles.
+    </p>
+    <div class="compare before-after">
+      <div class="col before">
+        <h4>One broad prompt</h4>
+        <p>1 call, 1 bill. No cross-agent duplicates, because there is
+        only one agent. But nothing separates a security concern from a
+        docs concern in the model's own reasoning — a single pass has to
+        divide its attention across four different kinds of scrutiny in
+        one shot, with no way to give any one of them a dedicated system
+        prompt tuned to what THAT kind of review actually looks for.</p>
+      </div>
+      <div class="col after">
+        <h4>Four narrow specialists (M10's choice)</h4>
+        <p>4 calls, 4x the bill. Each agent gets a system prompt written
+        for exactly one remit, run independently and concurrently
+        (LangGraph's <code>Send</code> API, unchanged since M4). The real
+        cost: two of the real demo's 14 findings are duplicates from
+        different agents converging on the same real defect — not a
+        hypothetical, a directly measured consequence, disclosed rather
+        than hidden.</p>
+      </div>
+    </div>
+    <p>
+      Neither of the two duplicate clusters is actually wrong — SECURITY
+      and QUALITY flagging the same bare-except bug are both right, from
+      genuinely different angles (it is both a defensive-programming
+      problem and a data-integrity problem) — but it is real, disclosed
+      overlap, not zero, and it is the direct, honest price of specialist
+      narrowness over one broad prompt. See
+      <a href="#limits">Honest limits</a> for why the current dedupe pass
+      does not catch it.
+    </p>
+  </section>
+
+  <section id="remit-separation">
+    <h2><span class="num">3</span>Remit separation is prompt-only, not structural</h2>
+    <p>
+      All four specialists share one implementation
+      (<code>backend/agents/base_agent.py</code>'s
+      <code>run_specialist_analysis</code>): load a versioned prompt, ground
+      it with retrieval, call the LLM, parse the response, fall back to a
+      forced-HITL finding on a parse failure. Nothing in that shared body
+      — or anywhere else in the pipeline — prevents SECURITY's prompt from
+      answering a documentation question, or DOCS's prompt from flagging a
+      SQL injection. The only thing keeping <code>SecurityAgent</code>
+      on-topic is the text of its own system prompt
+      (<code>backend/prompts/templates/security/v1.md</code>) and the fact
+      that <code>agent_type=AgentType.SECURITY</code> is what the response
+      parser attaches to every finding it returns, not a claim the model
+      itself is forced to justify.
+    </p>
+    <div class="module-grid">
+      <div class="module-card">
+        <h4>SecurityAgent</h4>
+        <p>Own system prompt, own <code>AgentType.SECURITY</code> tag.
+        Nothing stops it from noticing a docs gap; nothing routes that
+        observation anywhere special if it does.</p>
+      </div>
+      <div class="module-card">
+        <h4>QualityAgent</h4>
+        <p>Same shared plumbing, different prompt file, different tag.</p>
+      </div>
+      <div class="module-card">
+        <h4>TestsAgent</h4>
+        <p>Same shared plumbing, different prompt file, different tag.</p>
+      </div>
+      <div class="module-card">
+        <h4>DocsAgent</h4>
+        <p>Same shared plumbing, different prompt file, different tag.</p>
+      </div>
+    </div>
+    <p class="callout warn">
+      <span class="label">Consequence</span>
+      "Remit" is a convention each prompt is written to follow, enforced by
+      how well the model follows instructions on a given call — not a
+      constraint the code checks or enforces. The real demo run's two
+      duplicate clusters are exactly what this looks like in practice: two
+      agents each doing their own job correctly, converging on the same
+      line because nothing structurally scoped either of them away from
+      it.
+    </p>
+  </section>
+
+  <section id="grounding">
+    <h2><span class="num">4</span>Grounding by symbol name, not raw diff text</h2>
+    <p>
+      Every specialist's prompt is grounded in retrieved repository
+      context via M9's <code>HybridRetriever</code> — but the retrieval
+      query is not the diff itself. <code>extract_retrieval_query</code>
+      (<code>backend/agents/base_agent.py</code>) pulls the names of
+      symbols the diff actually <em>defines</em> on an added line (a
+      <code>def</code>/<code>class</code>/<code>const</code> declaration,
+      matched by a small set of simple regexes) and joins up to 12 of
+      them into the query, falling back to the first 500 characters of raw
+      diff text only when no declaration is found at all.
+    </p>
+    <pre><code>def extract_retrieval_query(diff: str) -&gt; str:
+    symbols: list[str] = []
+    for line in diff.splitlines():
+        if not line.startswith("+") or line.startswith("+++"):
+            continue
+        for pattern in _DEFINITION_PATTERNS:
+            match = pattern.search(line)
+            if match:
+                name = match.group(1)
+                if name not in symbols:
+                    symbols.append(name)
+                break
+    if symbols:
+        return " ".join(symbols[:_MAX_QUERY_SYMBOLS])
+    return diff[:500]</code></pre>
+    <p>
+      This is a direct, learned consequence of M9's own investigation, not
+      a fresh design guess. M9's checkpoint measured directly that a
+      single occurrence of even an exact, corpus-unique identifier gets
+      diluted below the corpus's own incidental noise floor once the
+      corpus has hundreds of chunks — a real function's true vector rank
+      landed 117th of 378 candidates, at a cosine similarity <em>below</em>
+      the magnitude two unrelated random vectors correlate at by pure
+      chance. A long, free-text query (the whole diff, hundreds of tokens
+      of prose and code mixed together) makes this worse, not better: it
+      dilutes a distinctive identifier's vector weight even further and
+      gives full-text search a weaker, noisier match too. A short query
+      built from the actual symbol names the diff introduces is both a
+      stronger full-text match (the compound identifier, as written) and a
+      less-diluted vector query — fewer, more distinctive tokens, closer to
+      the shape of query M9's own <code>test_known_function_name_in_top_
+      three_fused_results</code> already proved works well.
+    </p>
+    <p>
+      The retrieval call is bounded on both ends: <code>top_k=5</code>
+      results, and <code>format_retrieved_context</code> caps the injected
+      text at 6000 characters total, adding whole chunks only — never a
+      chunk cut mid-way, which would inject a misleadingly truncated
+      fragment. And a retrieval failure (the pgvector store briefly
+      unreachable, a malformed query) is swallowed, not propagated: the
+      call proceeds on the diff alone rather than treating a grounding
+      hiccup as if the LLM provider itself were down. See
+      <a href="#limits">Honest limits</a> for the consequence of that
+      choice.
+    </p>
+  </section>
+
+  <section id="infra-failure">
+    <h2><span class="num">5</span>The shared infrastructure-failure path</h2>
+    <p>
+      M8 built this mechanism for SECURITY alone: when a specialist cannot
+      even attempt its analysis — a budget block, a missing or rejected
+      credential, a provider that stayed unreachable after retries — the
+      right response is not an empty findings list. An empty list is
+      indistinguishable from "I looked, and found nothing" — exactly the
+      shape a clean, confident review has. M10 generalizes that fix
+      (previously only <code>security_node</code>'s own bespoke handling)
+      into one shared body every specialist node now shares,
+      <code>backend/orchestrator/nodes.py</code>'s
+      <code>_specialist_node</code>:
+    </p>
+    <pre><code>_INFRASTRUCTURE_FAILURE_EXCEPTIONS = (
+    BudgetExceededError,
+    LLMConfigurationError,
+    LLMCallFailedError,
+)
+
+def _specialist_node(agent_type, state, config):
+    ...
+    try:
+        findings = _run_specialist(node_name, agent_type, config, diff)
+    except SimulatedNodeCrashError:
+        raise
+    except AgentExecutionError as exc:
+        return {"findings": [], "node_errors": {node_name: str(exc)}}
+    except _INFRASTRUCTURE_FAILURE_EXCEPTIONS as exc:
+        fallback = infrastructure_failure_fallback_finding(agent_type, exc)
+        return {"findings": [fallback], "node_errors": {node_name: str(exc)}}
+    return {"findings": findings, "node_errors": {}}</code></pre>
+    <p>
+      The fallback is one synthetic <code>Finding</code>: severity
+      <code>CRITICAL</code>, confidence <code>0.000</code>, a rationale
+      naming the real exception. That specific combination is what makes
+      it work — <code>backend.hitl.queue.has_critical_finding</code> forces
+      <code>QUEUED_FOR_HITL</code> unconditionally the moment any
+      <code>CRITICAL</code> finding exists, regardless of what the other
+      three specialists reported. A merely-low-confidence finding would not
+      guarantee that; a bare empty list guarantees the opposite of what is
+      needed.
+    </p>
+    <p class="callout bad">
+      <span class="label">Why this mattered more at M10 than at M8</span>
+      Before M10, only SECURITY was real — QUALITY, TESTS, and DOCS were
+      M4's stub nodes, which never call an LLM and so could never hit a
+      budget block or a provider outage in the first place. A budget block
+      on one of those three stubs was structurally impossible, so the gap
+      in their infrastructure-failure handling was invisible — there was
+      nothing yet that could trigger it. The moment M10 made all four real,
+      every one of them gained the exact same failure surface SECURITY
+      already had, and M8's own L4 VERIFY had already flagged this exact
+      gap as something that would bite "once M10 wires up the other three
+      real agents" (<code>checkpoints/CURRENT.md</code>'s M9 Deferred
+      entry, written before M10 started). Generalizing the fix here closes
+      it before it was ever exploitable, not after.
+    </p>
+    <p>
+      Note the narrower <code>except AgentExecutionError</code> branch
+      above returns a genuinely empty list, not a fallback finding — that
+      path is reserved for this test suite's own simulated-crash
+      machinery, a deliberately different case from a real infrastructure
+      failure. And anything outside that named tuple — a real
+      <code>TypeError</code>, a real bug in this project's own code —
+      is not caught here at all; it propagates out of the node uncaught,
+      the same way it always did, because silently reinterpreting a
+      genuine programming bug as "the specialist is unavailable" would
+      hide it rather than surface it.
+    </p>
+  </section>
+
+  <section id="budget">
+    <h2><span class="num">6</span>Mid-review budget exhaustion</h2>
+    <p>
+      There is no review-scoped "budget already spent this review" fast
+      path. Each of the four specialist calls independently starts with
+      <code>AnthropicLLMClient.complete</code> calling
+      <code>BudgetGuard.check_and_raise()</code> — the same M8 mechanism,
+      unchanged — and each one reads the same real, shared spend from
+      <code>agent_events</code> and decides for itself whether today's cap
+      is already exceeded. That means a cap crossed partway through one
+      review (say, by the first two agents' own real spend) blocks
+      whichever of the remaining calls happen to run afterward, and
+      leaves the review "2 of 4 successful, 2 of 4 budget-blocked."
+    </p>
+    <div class="lane-grid">
+      <div class="lane">
+        <div class="lane-tag">Agent 1 — SECURITY</div>
+        <p>Calls succeed. Real findings returned.</p>
+      </div>
+      <div class="lane">
+        <div class="lane-tag">Agent 2 — QUALITY</div>
+        <p>Calls succeed. Real findings returned.</p>
+      </div>
+      <div class="lane busy">
+        <div class="lane-tag">Agent 3 — TESTS</div>
+        <p><code>BudgetExceededError</code> — cap already crossed.
+        Forced-HITL CRITICAL fallback finding instead.</p>
+      </div>
+      <div class="lane busy">
+        <div class="lane-tag">Agent 4 — DOCS</div>
+        <p><code>BudgetExceededError</code> — same cap, same fallback.</p>
+      </div>
+    </div>
+    <p>
+      Because each blocked agent contributes its own forced
+      CRITICAL/confidence-0.000 finding (the same mechanism the previous
+      section describes) rather than an empty list, and because a single
+      CRITICAL finding forces <code>QUEUED_FOR_HITL</code> unconditionally,
+      a half-blocked review can never silently look like a complete,
+      confident, auto-postable one — the gate routes it to a human exactly
+      as it would a review with two real CRITICAL security findings.
+      <code>tests/integration/test_budget_guard_across_four_agents.py</code>
+      proves this through the real compiled graph (a shared fake LLM
+      client that deterministically blocks calls after the first
+      <code>allow_count</code> succeed, independently counting how many
+      calls were actually attempted — proving the guard is hit per call,
+      not merely configured to be).
+    </p>
+  </section>
+
+  <section id="m4-gap">
+    <h2><span class="num">7</span>Closing the M4 gap: the queue finally drives the graph</h2>
+    <p>
+      Since M4, this project's own Deferred list carried the same item
+      forward, milestone after milestone: "the orchestrator built at M4 is
+      not yet wired into the webhook/queue path." M3 built the ARQ worker;
+      M4 built the compiled LangGraph; from M5 through M9, the worker's job
+      handler did nothing but record that a webhook job had arrived. M10
+      is the milestone that finally connects them —
+      <code>backend/job_queue/arq_worker.py</code>'s
+      <code>process_webhook_event</code> now runs a real review through
+      the same <code>LangGraphWorkflowEngine</code> instance
+      <code>backend.cli.review_local</code> drives, then dispatches the
+      resulting <code>Review</code> through the same
+      <code>post_or_queue</code> function the CLI uses.
+    </p>
+    <p>
+      The interesting part is not that it calls <code>engine.run</code> —
+      it's <em>how</em> it calls it. <code>graph.invoke</code> makes four
+      real, synchronous, network-bound LLM calls; that is a long, blocking
+      operation. ARQ's worker process is itself asyncio-based (so it can
+      run many jobs concurrently within one process), so calling that
+      blocking review directly inside the <code>async def</code> job
+      handler would stall the worker's own event loop for the whole
+      review's duration — serializing every other concurrently-queued job
+      behind it. This is the identical defect class this project has now
+      fixed three times before, on three different event loops:
+    </p>
+    <table>
+      <thead><tr><th>Milestone</th><th>What blocked the loop</th><th>Fix</th></tr></thead>
+      <tbody>
+        <tr><td>M6/M7 follow-up</td><td>A synchronous Redis enqueue call on uvicorn's webhook-ingress loop</td><td><code>enqueue_async</code> via <code>asyncio.to_thread</code></td></tr>
+        <tr><td>M7</td><td>A synchronous Postgres events write on the same uvicorn loop</td><td><code>emit_decision_async</code> via <code>asyncio.to_thread</code></td></tr>
+        <tr><td>M8</td><td>(Forward-looking) a real Anthropic call from an async caller</td><td><code>complete_async</code> via <code>asyncio.to_thread</code>, built ahead of its first real caller</td></tr>
+        <tr><td>M10</td><td>The blocking <code>graph.invoke</code> review on ARQ's own worker event loop</td><td><code>asyncio.to_thread</code>, same pattern</td></tr>
+      </tbody>
+    </table>
+    <pre><code>def _run_review_blocking(engine, review_id, initial_state):
+    return engine.run(thread_id=review_id, initial_state=initial_state)
+
+async def process_webhook_event(ctx, event):
+    ...
+    result = await asyncio.to_thread(
+        _run_review_blocking, engine, review_id, initial_state
+    )</code></pre>
+    <p>
+      The webhook ingress itself is untouched — <code>receive_webhook</code>
+      still only enqueues and returns immediately, exactly as it has since
+      M3/M6/M7. The review runs entirely inside the ARQ worker's own
+      separate OS process, offloaded onto that process's own thread pool so
+      one slow review does not stall the worker's ability to pick up other
+      queued jobs concurrently.
+    </p>
+  </section>
+
+  <section id="post-or-queue">
+    <h2><span class="num">8</span>Exactly one of post or queue</h2>
+    <p>
+      PLAN.md's own M10 success criteria name this directly: "the mocked
+      GitHub client records exactly one 'post' or one 'queue_for_hitl'
+      call, never both." The guarantee is structural, not merely tested —
+      <code>backend/integrations/github_client.py</code>'s
+      <code>post_or_queue</code> is the single, shared decision point both
+      real call sites (<code>backend.cli.review_local</code> and
+      <code>backend.job_queue.arq_worker</code>) use instead of each
+      re-implementing its own status check:
+    </p>
+    <pre><code>def post_or_queue(client: GitHubClient, review: Review) -&gt; None:
+    if review.status == ReviewStatus.POSTED:
+        client.post_review_comment(review)
+    else:
+        client.queue_for_hitl(review)</code></pre>
+    <p>
+      A plain <code>if</code>/<code>else</code> over one method call each
+      makes "both" unreachable by construction — there is no code path
+      through this function that calls both, or neither. The
+      <code>MockGitHubClient</code>'s own <code>dispatch_count()</code>
+      helper (posted + queued call counts summed) exists specifically so a
+      test can assert this as one number rather than checking two list
+      lengths separately.
+    </p>
+    <p>
+      "Verified in both directions" means verified at both of the two real
+      call sites that route through this shared function, not just one:
+      <code>tests/e2e/test_full_local_review.py</code>'s
+      <code>test_the_mock_github_client_records_exactly_one_call_never_both</code>
+      proves it through the CLI path end to end, and
+      <code>tests/integration/test_queue_to_orchestrator.py</code>'s
+      <code>test_enqueued_event_is_processed_into_a_review</code> proves
+      the identical invariant through the ARQ worker path — a real
+      enqueued webhook event, processed by a real worker job handler,
+      through the real graph, to a real dispatch decision.
+    </p>
+  </section>
+
+  <section id="limits">
+    <h2><span class="num">9</span>Honest limits</h2>
+    <div class="callout bad">
+      <span class="label">Adjacent-line duplicates escape dedupe</span>
+      <code>dedupe_findings</code>' key is an exact match on
+      <code>(file_path, line_start)</code> — a gap M5 already deferred for
+      one agent's own wide-span findings, and now confirmed to also let
+      two DIFFERENT agents' findings on adjacent-but-not-identical lines
+      both survive as separate findings instead of colliding. The real
+      demo run's two duplicate clusters (see
+      <a href="#four-specialists">Four specialists</a>) are exactly this:
+      real, correctly-identified defects, reported twice, that a wider or
+      interval-aware key would need to actually catch — not something this
+      milestone attempted to fix.
+    </div>
+    <div class="callout warn">
+      <span class="label">An ungrounded review looks identical to a grounded one</span>
+      <code>build_user_message</code> silently falls back to the diff alone
+      when retrieval fails — a deliberate availability/thoroughness
+      trade-off (see <a href="#grounding">Grounding</a>), not a bug. But
+      nothing in the resulting <code>Review</code> records which case
+      happened. A review whose four specialists were all genuinely grounded
+      in real repository context and one whose grounding silently failed
+      four times over produce structurally identical output — there is no
+      <code>grounded</code> flag, per finding or per review, to tell them
+      apart after the fact.
+    </div>
+    <div class="callout">
+      <span class="label">The pipeline is now non-deterministic</span>
+      The builder session's own real demo run produced 14 findings at
+      <code>overall_confidence=0.896</code>. An independent L4 VERIFY
+      session's own real run of the identical demo command against the
+      identical fixture diff produced <b>15</b> findings, not 14 — the
+      same real defects, plus one additional real finding surfaced by the
+      model's own run-to-run variance. This is the first milestone whose
+      real, headline output number cannot be reproduced exactly twice —
+      expected of a genuine LLM call, and now explicitly recorded rather
+      than treated as a fluke to chase down.
+    </div>
+  </section>
+
+  <section id="quiz">
+    <h2><span class="num">10</span>Quiz</h2>
+    <p>Three questions. Click each one to reveal the answer.</p>
+
+    <details class="quiz">
+      <summary class="q">1. A specialist agent hits a `BudgetExceededError` mid-review. Why must `_specialist_node` return one synthetic CRITICAL/confidence-0.000 finding instead of an empty findings list — and what would actually break if it returned `[]` instead?</summary>
+      <div class="answer">
+        <p class="verdict">Because an empty findings list is indistinguishable from a clean, confident "I looked and found nothing" review. If a budget-blocked agent returned `[]`, a review where 2 of 4 specialists never even ran could still pass `route_review`'s confidence/CRITICAL checks and auto-post as if it were a genuinely thorough pass.</p>
+        <p>
+          The forced CRITICAL/confidence-0.000 fallback works specifically
+          because <code>backend.hitl.queue.has_critical_finding</code>
+          forces <code>QUEUED_FOR_HITL</code> unconditionally the moment
+          ANY CRITICAL finding exists — so a half-blocked review is
+          guaranteed to route to a human, the same way a review with two
+          real CRITICAL security findings would. This was M8's original
+          fix for SECURITY alone; M10 generalizes it to all four
+          specialists specifically because M8's own L4 VERIFY had already
+          predicted the gap would bite once QUALITY/TESTS/DOCS stopped
+          being no-op stubs that could never hit this exception in the
+          first place.
+        </p>
+      </div>
+    </details>
+
+    <details class="quiz">
+      <summary class="q">2. `extract_retrieval_query` builds a specialist's retrieval query from the diff's own changed symbol names, falling back to the first 500 characters of raw diff text only when no declaration is found. Why not just always use the raw diff text as the query — it contains strictly more information?</summary>
+      <div class="answer">
+        <p class="verdict">Because more text is not more signal here — M9's own investigation measured directly that a single occurrence of even an exact, corpus-unique identifier gets diluted below the corpus's own incidental noise floor once the corpus reaches real scale (one real function's true vector rank landed 117th of 378, at a cosine similarity BELOW what two unrelated random vectors correlate at by chance).</p>
+        <p>
+          A long, free-text query made of the whole diff's prose and code
+          mixed together dilutes a distinctive identifier's vector weight
+          even further than a single mention already does, and gives
+          full-text search a noisier match too. A short query built from
+          the actual symbol names the diff introduces is both a stronger
+          full-text match (the exact compound identifier, as written) and
+          a less-diluted vector query — fewer, more distinctive tokens.
+          This is a direct, learned consequence of M9's own findings, not
+          a fresh guess made at M10.
+        </p>
+      </div>
+    </details>
+
+    <details class="quiz">
+      <summary class="q">3. `post_or_queue` is a plain `if review.status == ReviewStatus.POSTED: ... else: ...` — no locking, no transaction, no retry. Why is this enough to structurally guarantee "exactly one of post or queue, never both," and what would a test actually need to prove to falsify that guarantee?</summary>
+      <div class="answer">
+        <p class="verdict">Because a single, unconditional if/else over two method calls makes "both" or "neither" unreachable by construction, for any single `Review` passed through it — every possible value of `review.status` takes exactly one of the two branches, not zero and not two. There is no code path through this function that calls both `post_review_comment` and `queue_for_hitl`.</p>
+        <p>
+          A test could only falsify this by finding a `Review` value that
+          takes neither branch (impossible, since `if`/`else` is
+          exhaustive) or by finding a caller that invokes
+          <code>post_review_comment</code>/<code>queue_for_hitl</code>
+          directly instead of going through <code>post_or_queue</code> —
+          which is exactly why both real call sites
+          (<code>backend.cli.review_local</code> and
+          <code>backend.job_queue.arq_worker</code>) route through this
+          one shared function rather than each re-implementing its own
+          status check. The tests
+          (<code>test_the_mock_github_client_records_exactly_one_call_
+          never_both</code> for the CLI path,
+          <code>test_enqueued_event_is_processed_into_a_review</code> for
+          the ARQ worker path) exist to confirm both real call sites
+          actually go through it, not to prove the if/else logic itself,
+          which is exhaustive by construction.
+        </p>
+      </div>
+    </details>
+  </section>
+
+  <footer>
+    Generated by the <code>explain-diff-html</code> skill for milestone M10
+    of the <code>pr-review-agent</code> genesis-kit project, on the same
+    session that fixed the cost gap L4 VERIFY flagged. Diff range:
+    <code>e3d14bd</code> (start of M10's own commits) through
+    <code>ef2bae8</code> (this session's M10 close-out documentation) — 15
+    commits, 32 files changed, 4685 insertions(+), 494 deletions(-).
+    Self-contained: no external stylesheets, fonts, scripts, or images
+    (verify with <code>grep -E "https?://|&lt;link|&lt;script src"</code>
+    against this file — no matches). No API key material of any kind
+    appears anywhere on this page.
+  </footer>
+
+</div>
+</body>
+</html>
