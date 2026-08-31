@@ -1,7 +1,7 @@
 {
   "$comment": "nodes=modules, edges=[cause,effect] where cause is imported-by effect. ADD invariants by hand.",
   "project": ".",
-  "generated": "2026-08-31T15:36:39.063Z",
+  "generated": "2026-08-31T19:10:49.189Z",
   "nodes": [
     "StatusViews",
     "__future__",
@@ -22,6 +22,7 @@
     "circuit_breaker",
     "conftest",
     "connections",
+    "conninfo",
     "constants",
     "context_retriever",
     "contextlib",
@@ -149,6 +150,7 @@
     "test_security_agent_schema",
     "test_security_node_infrastructure_failures",
     "test_specialist_agents",
+    "test_tiger_migration",
     "test_webhook_validator",
     "testclient",
     "threading",
@@ -487,6 +489,10 @@
     [
       "__future__",
       "test_specialist_agents"
+    ],
+    [
+      "__future__",
+      "test_tiger_migration"
     ],
     [
       "__future__",
@@ -841,6 +847,10 @@
       "test_queue_to_orchestrator"
     ],
     [
+      "conninfo",
+      "settings"
+    ],
+    [
       "constants",
       "redis_arq"
     ],
@@ -855,6 +865,10 @@
     [
       "context_retriever",
       "test_hybrid_retrieval"
+    ],
+    [
+      "context_retriever",
+      "test_tiger_migration"
     ],
     [
       "contextlib",
@@ -1038,10 +1052,6 @@
     ],
     [
       "datetime",
-      "test_hitl_gate"
-    ],
-    [
-      "datetime",
       "test_judge"
     ],
     [
@@ -1063,6 +1073,10 @@
     [
       "datetime",
       "test_review_store"
+    ],
+    [
+      "datetime",
+      "test_tiger_migration"
     ],
     [
       "decimal",
@@ -1225,6 +1239,10 @@
       "test_specialist_agents"
     ],
     [
+      "decimal",
+      "test_tiger_migration"
+    ],
+    [
       "diff_mapping",
       "github_client"
     ],
@@ -1283,6 +1301,10 @@
     [
       "embedder",
       "test_hybrid_retrieval"
+    ],
+    [
+      "embedder",
+      "test_tiger_migration"
     ],
     [
       "enum",
@@ -2265,6 +2287,10 @@
       "test_hybrid_retrieval"
     ],
     [
+      "pgvector",
+      "test_tiger_migration"
+    ],
+    [
       "postgres",
       "__init__"
     ],
@@ -2287,6 +2313,10 @@
     [
       "postgres",
       "test_review_store"
+    ],
+    [
+      "postgres",
+      "test_tiger_migration"
     ],
     [
       "pricing",
@@ -2343,6 +2373,10 @@
     [
       "psycopg",
       "test_review_store"
+    ],
+    [
+      "psycopg",
+      "test_tiger_migration"
     ],
     [
       "psycopg",
@@ -2523,6 +2557,10 @@
     [
       "pytest",
       "test_specialist_agents"
+    ],
+    [
+      "pytest",
+      "test_tiger_migration"
     ],
     [
       "pytest",
@@ -2707,6 +2745,10 @@
     [
       "repository",
       "test_queue_roundtrip"
+    ],
+    [
+      "repository",
+      "test_tiger_migration"
     ],
     [
       "repository",
@@ -2982,6 +3024,10 @@
     ],
     [
       "settings",
+      "test_tiger_migration"
+    ],
+    [
+      "settings",
       "test_webhook_validator"
     ],
     [
@@ -3169,6 +3215,10 @@
       "test_hybrid_retrieval"
     ],
     [
+      "tiger_client",
+      "test_tiger_migration"
+    ],
+    [
       "time",
       "circuit_breaker"
     ],
@@ -3306,6 +3356,10 @@
     ],
     [
       "typing",
+      "repository"
+    ],
+    [
+      "typing",
       "response_parsing"
     ],
     [
@@ -3391,6 +3445,10 @@
     [
       "uuid",
       "test_review_store"
+    ],
+    [
+      "uuid",
+      "test_tiger_migration"
     ],
     [
       "validator",
