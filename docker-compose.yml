@@ -175,6 +175,23 @@ services:
     # indexes the migration creates) are recreated from scratch on every
     # fresh boot. `scripts/seed_code_chunks.py` re-applies the migration
     # and re-seeds on every run for exactly this reason (see that script).
+    #
+    # OPERATOR TRAP (confirmed to have actually happened, twice, to two
+    # separate M9 verification sessions -- see checkpoints/CURRENT.md's M9
+    # history): `var/retrieval_seed_marker.json` is host-side, gitignored
+    # local state that survives a container recreate even though the
+    # container's own data does not -- so it is entirely possible for the
+    # marker to claim "already seeded, N rows" while this service's
+    # `code_chunks` table is genuinely empty (0 rows). The test fixtures
+    # guard against this correctly (they check the marker's claimed count
+    # against a live `SELECT count(*)` before trusting it, and re-seed on a
+    # mismatch), but a human running `docker compose up -d pgvector` by hand
+    # and trusting the marker file is not protected by that check. Re-seed
+    # explicitly after any recreate: `python scripts/seed_code_chunks.py
+    # --repo .`. Re-seeding with the real OpenAI backend
+    # (`EMBEDDER_BACKEND=openai`) costs roughly $0.02 per full run (~150k
+    # tokens of text-embedding-3-large at $0.13/M, measured directly); the
+    # default fixture backend costs nothing.
     image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: postgres

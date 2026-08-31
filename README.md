@@ -147,6 +147,27 @@ rather than silently accepting a well-known secret.
   `tests/integration/test_orchestrator_fanout.py`, which needs no Docker and
   no external services (its checkpoint database is a plain local SQLite
   file).
+- **The `pgvector` service (M9) has no volume, by design, and its corpus
+  vanishes on every container recreate.** `docker compose down && up` (or
+  any event that recreates the container — a host reboot, a Docker prune,
+  simply never having started it before) leaves `code_chunks` at zero rows,
+  even though `var/retrieval_seed_marker.json` (gitignored local state) may
+  still claim a corpus is already seeded — the marker file is host-side and
+  outlives the container, so a stale marker plus an empty table is a real,
+  observed trap, not a hypothetical one: it has cost two separate
+  verification sessions a surprise re-seed and real API spend already. The
+  test fixtures handle this correctly on their own (they compare the
+  marker's claimed row count against a live `SELECT count(*)` before
+  trusting it, and re-seed if they disagree), so a `pytest -v` run is always
+  safe — but a human running `docker compose up -d pgvector` by hand and
+  trusting the marker file is not protected by that check. If you've
+  recreated the container, re-seed explicitly before relying on retrieval
+  results: `python scripts/seed_code_chunks.py --repo .`. Re-seeding with
+  the real OpenAI backend (`EMBEDDER_BACKEND=openai`) costs roughly **$0.02**
+  per full run (~150k tokens of `text-embedding-3-large` at $0.13/M,
+  measured directly — see `checkpoints/CURRENT.md`'s M9 history); the
+  fixture backend (`DeterministicFixtureEmbedder`, the default) costs
+  nothing.
 
 ## Running the checks
 
