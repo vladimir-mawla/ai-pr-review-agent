@@ -1169,3 +1169,100 @@ number with dated reasoning, don't just loosen the assertion").
   probe rows, `code_chunks` needing a re-seed on Tiger, and the `reviews`
   table's deliberate non-migration).
 
+---
+
+## Project Summary (Closing) — all 13 milestones
+
+This section is a factual close-out of the whole genesis plan, written
+after M12's L4 VERIFY APPROVE (the plan's last milestone). It is not a
+new milestone and adds no new claims beyond what the Progress log above
+already records — it is an index into that record.
+
+**13 of 13 milestones built and independently verified.** Every milestone
+M1 through M13 has an L1 BUILD and at least one independent L4 VERIFY
+APPROVE recorded in the Progress log above; `.genesis/DONE.html` section
+3 shows all 13 rows as `done`.
+
+**Milestones an independent L4 VERIFY session REJECTED at least once**
+(all subsequently fixed in an L2 DEBUG loop and re-APPROVEd by a second
+independent session — none of these are still open):
+
+- **M5 (Aggregator + HITL Gate):** the original confidence-only dedupe
+  tie-break let a lower-confidence CRITICAL finding lose to a
+  higher-confidence, lower-severity finding at the same collision key —
+  meaning a CRITICAL finding could be silently dropped and the review
+  auto-posted instead of routed to a human. Fixed by making dedupe
+  severity-first (a higher-severity finding always wins the collision;
+  confidence only breaks a tie within the same severity).
+- **M7 (Events Spine):** the original events write was synchronous and
+  ran on uvicorn's own event-loop thread, so a webhook request under a
+  locked events table serialised every other concurrent request behind
+  it (~4.4s each, observed). Fixed by offloading the write via
+  `asyncio.to_thread` (`emit_decision_async`); the same defect class was
+  later found to also apply to the M6-scope Redis enqueue call
+  (downstream, below).
+- **M9 (Hybrid Retrieval):** PLAN.md's own named-fixture recall criterion
+  had never actually been built, and the milestone's demo used a test
+  fixture that truncated the very corpus the demo had just seeded, so the
+  demo was not genuinely end-to-end. Fixed by building the named 10-query
+  fixture and a non-truncating test class, and honestly reporting the
+  resulting recall (4/10 on the deterministic fixture embedder, 7/10 with
+  real OpenAI embeddings) rather than the 100% the original text implied.
+- **M13 (Dashboard + Evaluation/CI Gate):** `/costs` summed 2030-dated and
+  other synthetic `budget-guard-*` fixture rows into "real" spend with no
+  date filter, no test-prefix exclusion, and no provenance flag —
+  rendering $97,468.71 where genuine spend was $0.076917 — while the
+  homepage claimed "Nothing on these pages is fabricated". Separately,
+  `.github/workflows/eval-gate.yml` never triggered on a `pull_request`,
+  so it could not block a quality-degrading merge no matter how it
+  scored. Fixed by a combined date + review_id-prefix exclusion filter
+  with a visible "Exclusions" disclosure card (not a silent drop), a
+  corrected homepage claim, and a `pull_request` trigger on the eval
+  gate.
+
+**Two further defects found downstream of their own milestone's original
+L4 VERIFY APPROVE**, each in a later L2 DEBUG pass:
+
+- **M8 (First Real Specialist Agent):** an invalid Anthropic API key
+  crashed the orchestrator outright (an unwrapped
+  `anthropic.AuthenticationError` propagating past the client boundary),
+  while a *missing* key correctly triggered the forced-HITL fallback —
+  an inconsistency only exposed once a real credential was rotated in.
+  Fixed by wrapping the entire `anthropic.AnthropicError` family into
+  this project's own `LLMCallFailedError` at the client boundary.
+- **M6/M7 (Reliability Layer / Events Spine):** the M6-scope Redis
+  enqueue call in the webhook router made a synchronous, un-awaited
+  `queue.enqueue(event)` call on uvicorn's single event-loop thread — the
+  exact same event-loop-blocking defect class M7's own L4 VERIFY had just
+  caught and fixed on the events-write path, missed by M6's own L4
+  VERIFY because it tested the retry/breaker/timeout primitives
+  thoroughly but never asked whether the call site *using* them blocked
+  the loop. Fixed the same way: `await enqueue_async(queue, event)`,
+  offloading the existing synchronous call via `asyncio.to_thread`.
+
+M12 itself was never rejected — a single independent L4 VERIFY session
+approved it directly (see this file's 2026-08-31 M12 Progress entry
+above for the centerpiece chunk-TRUNCATE finding and its independent
+reproduction).
+
+**Current gate state** (re-run for this close-out, 2026-08-31, against
+local Docker Redis 6380 / Postgres 5433 / pgvector 5434, all up):
+
+| Gate | Command | Result |
+|---|---|---|
+| Lint | `ruff check .` | All checks passed (exit 0) |
+| Types | `mypy --strict backend/` | Success: no issues found in 74 source files (exit 0) |
+| Tests | `pytest -v` | 396 passed, 29 deselected (exit 0) |
+| Imports | `lint-imports --config .importlinter` | 2 contracts kept, 0 broken (exit 0) |
+| Frontend build | `npm --prefix frontend run build` | 7/7 static pages generated (exit 0) |
+
+**What remains:** no further milestone is planned — M12 was the last
+item in this plan's original 13-milestone slice, and `checkpoints/
+CURRENT.md`'s `target` field now reads "none" rather than naming an M14.
+Remaining work lives entirely in `checkpoints/CURRENT.md`'s Deferred
+list — accumulated, disclosed, non-blocking items spanning every
+milestone (e.g. the Tiger admin TRUNCATE residual, L4 VERIFY's own
+leftover probe rows, `code_chunks` needing a Tiger re-seed, no branch
+protection on `main`, `test_events_spine.py` still writing fixtures into
+the production `agent_events` table) — picked up ad hoc by whoever works
+this project next, not tracked as a numbered milestone.
