@@ -1,0 +1,137 @@
+:root {
+  --bg: #f7f7f8;
+  --surface: #ffffff;
+  --border: #e2e2e6;
+  --text: #17181c;
+  --text-muted: #5c5f6a;
+  --accent: #2f5ee0;
+  --critical: #b3261e;
+  --high: #b3541e;
+  --medium: #9a7d0a;
+  --low: #3b6e3b;
+  --info: #4a5568;
+  --danger-bg: #fdecea;
+  --danger-text: #7a1c14;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101114;
+    --surface: #17181c;
+    --border: #2b2d33;
+    --text: #edeef0;
+    --text-muted: #9ba0ab;
+    --accent: #6f93ff;
+    --critical: #ff8a80;
+    --high: #ffb066;
+    --medium: #f0d264;
+    --low: #7fd08a;
+    --info: #a3aab8;
+    --danger-bg: #3a1e1c;
+    --danger-text: #ffb4ab;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+main {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 24px 20px 64px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+th {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+code,
+.mono {
+  font-family: var(--mono);
+  font-size: 0.92em;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  margin-bottom: 20px;
+  overflow-x: auto;
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.error-box {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-size: 14px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 1px solid currentColor;
+}
+
+.badge-CRITICAL {
+  color: var(--critical);
+}
+.badge-HIGH {
+  color: var(--high);
+}
+.badge-MEDIUM {
+  color: var(--medium);
+}
+.badge-LOW {
+  color: var(--low);
+}
+.badge-INFO {
+  color: var(--info);
+}
