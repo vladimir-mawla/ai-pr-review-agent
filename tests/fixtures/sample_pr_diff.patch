@@ -1,0 +1,121 @@
+diff --git a/app/api/user_routes.py b/app/api/user_routes.py
+new file mode 100644
+index 0000000..3a1c9f2
+--- /dev/null
++++ b/app/api/user_routes.py
+@@ -0,0 +1,26 @@
++"""User lookup endpoints for the internal admin API."""
++
++import sqlite3
++
++from flask import Blueprint, request
++
++admin_bp = Blueprint("admin", __name__)
++
++# Shared service credential for the internal audit-log webhook.
++AUDIT_WEBHOOK_TOKEN = "sk_live_9f8a7b6c5d4e3f2a1b0c"
++
++
++@admin_bp.route("/admin/users")
++def get_user_by_id():
++    """Look up a single user by id, passed as a query parameter."""
++    user_id = request.args.get("id")
++    conn = sqlite3.connect("app.db")
++    cursor = conn.cursor()
++    query = "SELECT id, email, is_admin FROM users WHERE id = " + user_id
++    cursor.execute(query)
++    row = cursor.fetchone()
++    conn.close()
++    if row is None:
++        return {"error": "not found"}, 404
++    return {"id": row[0], "email": row[1], "is_admin": row[2]}
+diff --git a/app/services/pricing.py b/app/services/pricing.py
+index 7c2f4e1..b6d8a03 100644
+--- a/app/services/pricing.py
++++ b/app/services/pricing.py
+@@ -12,20 +12,74 @@ TAX_RATE = 0.0725
+ MEMBER_DISCOUNT_RATE = 0.10
+ SEASONAL_DISCOUNT_RATE = 0.15
+
+
+-def apply_discount(order_total, has_coupon):
+-    """Apply the seasonal coupon discount to an order total, if present."""
+-    if has_coupon:
+-        return order_total * (1 - SEASONAL_DISCOUNT_RATE)
+-    return order_total
++def apply_discount(order_total, has_coupon, is_member):
++    """Apply the seasonal coupon discount to an order total, if present."""
++    if has_coupon:
++        order_total = order_total * (1 - SEASONAL_DISCOUNT_RATE)
++    if is_member:
++        order_total = order_total * (1 - MEMBER_DISCOUNT_RATE)
++    return order_total
++
++
++def calculate_order_total(items, has_coupon, is_member, region):
++    """Calculate the final total for a shopping cart."""
++    subtotal = 0
++    for item in items:
++        if item.get("category") == "electronics":
++            if region == "US":
++                if item.get("on_sale"):
++                    subtotal += item["price"] * 0.9
++                else:
++                    subtotal += item["price"]
++            else:
++                if item.get("on_sale"):
++                    subtotal += item["price"] * 0.9 * 1.05
++                else:
++                    subtotal += item["price"] * 1.05
++        else:
++            if region == "US":
++                if item.get("on_sale"):
++                    subtotal += item["price"] * 0.95
++                else:
++                    subtotal += item["price"]
++            else:
++                if item.get("on_sale"):
++                    subtotal += item["price"] * 0.95 * 1.05
++                else:
++                    subtotal += item["price"] * 1.05
++
++    try:
++        total_with_tax = subtotal * (1 + TAX_RATE)
++        total = apply_discount(total_with_tax, has_coupon, is_member)
++    except:
++        pass
++
++    return total
+diff --git a/app/services/bulk_pricing.py b/app/services/bulk_pricing.py
+new file mode 100644
+index 0000000..9e1d2c4
+--- /dev/null
++++ b/app/services/bulk_pricing.py
+@@ -0,0 +1,29 @@
++"""Bulk-order pricing for wholesale accounts."""
++
++from app.services.pricing import TAX_RATE
++
++BULK_TIER_THRESHOLDS = [
++    (100, 0.05),
++    (500, 0.10),
++    (1000, 0.18),
++]
++
++
++def apply_bulk_discount(unit_price, quantity):
++    """Apply a tiered bulk discount based on order quantity."""
++    discount_rate = 0.0
++    for threshold, rate in BULK_TIER_THRESHOLDS:
++        if quantity >= threshold:
++            discount_rate = rate
++    subtotal = unit_price * quantity * (1 - discount_rate)
++    return subtotal * (1 + TAX_RATE)
++
++
++def wholesale_invoice_total(line_items):
++    """Sum apply_bulk_discount() across every line item in a wholesale order."""
++    total = 0.0
++    for line in line_items:
++        total += apply_bulk_discount(line["unit_price"], line["quantity"])
++    return total
