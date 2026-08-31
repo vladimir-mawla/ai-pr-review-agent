@@ -1,22 +1,31 @@
 """The HITL confidence gate: routes a completed Review to auto-post or human review.
 
-Owns two things:
+Owns ``route_review`` -- the pure decision function. Given a Review's
+deduplicated findings and its ``overall_confidence``, decide whether it
+auto-posts or is queued for human review, and produce the human-readable
+reason string explaining the decision. No I/O, no side effects, fully
+deterministic -- this is the "L7 gate" M5's outcome text refers to
+("routes to 'post' or 'human_approval_queue'").
 
-1. ``route_review`` -- the pure decision function. Given a Review's
-   deduplicated findings and its ``overall_confidence``, decide whether it
-   auto-posts or is queued for human review, and produce the human-readable
-   reason string explaining the decision. No I/O, no side effects, fully
-   deterministic -- this is the "L7 gate" M5's outcome text refers to
-   ("routes to 'post' or 'human_approval_queue'").
-
-2. ``InMemoryHitlQueue`` -- the concrete "human_approval_queue" a
-   ``QUEUED_FOR_HITL`` review lands in. Mirrors the existing
-   ``backend.job_queue.InMemoryJobQueue`` pattern (M2/M3): a process-local
-   stand-in, not durable, not shared across processes. A real persistent
-   queue (Postgres-backed, surfaced through a dashboard) is out of scope
-   here -- M5 only has to prove the routing *decision* is correct and
-   testable without an LLM; a durable queue implementation is future work,
-   same as M2's ``InMemoryJobQueue`` was a stand-in until M3's Redis queue.
+REMOVED (L2 DEBUG, 2026-08-31, dead-code cleanup): this module used to also
+own ``InMemoryHitlQueue``, the concrete "human_approval_queue" a
+``QUEUED_FOR_HITL`` review landed in -- a process-local stand-in mirroring
+``backend.job_queue.InMemoryJobQueue`` (M2/M3), explicitly documented from
+M5 onward as deferring "a real persistent queue (Postgres-backed, surfaced
+through a dashboard)" to future work. M13 built exactly that
+(``backend.database.review_store.ReviewRepository``, backing
+``/api/hitl-queue``), and by M10's own Deferred notes ``InMemoryHitlQueue``
+already had "no live call site" -- confirmed still true by grep across this
+entire repository as of this cleanup (only its own now-removed unit test
+referenced it; ``backend.integrations.github_client`` and
+``backend.observability.events`` only ever *mentioned* it in docstring
+prose, never imported or called it). This project has a standing gate
+against modules nothing calls, so it -- and its one test,
+``tests/unit/test_hitl_gate.py::TestInMemoryHitlQueue`` -- were deleted
+rather than kept as unreachable weight. ``route_review`` itself is
+unaffected: every ``QUEUED_FOR_HITL`` review it decides on lands in
+``ReviewRepository`` via ``backend.orchestrator.nodes``, same as a
+``POSTED`` one does.
 
 Decision rule (the DoD gate this module exists to satisfy):
     auto-post   iff  overall_confidence >= threshold  AND  no CRITICAL finding
@@ -46,7 +55,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from backend.models import Finding, Review, ReviewStatus, Severity
+from backend.models import Finding, ReviewStatus, Severity
 
 
 def has_critical_finding(findings: list[Finding]) -> bool:
@@ -100,34 +109,3 @@ def route_review(
         "CRITICAL finding is present"
     )
     return ReviewStatus.POSTED, reason
-
-
-class InMemoryHitlQueue:
-    """Process-local human approval queue holding reviews routed to HITL.
-
-    Not thread-safe under real concurrent writers and not durable across
-    process restarts -- the same accepted limitation ``InMemoryJobQueue``
-    (M2) has, for the same reason: it exists to give the routing decision
-    somewhere real to land, not to be M5's final production queue.
-    """
-
-    def __init__(self) -> None:
-        self._pending: list[Review] = []
-
-    def enqueue(self, review: Review) -> None:
-        """Add ``review`` to the human approval queue.
-
-        Callers are expected to only enqueue a review whose ``status`` is
-        already ``QUEUED_FOR_HITL`` (i.e. after calling ``route_review``);
-        this method does not re-derive or check that itself, since deciding
-        *whether* to enqueue is ``route_review``'s job, not this queue's.
-        """
-        self._pending.append(review)
-
-    def list_pending(self) -> list[Review]:
-        """All reviews currently waiting for human approval, oldest first."""
-        return list(self._pending)
-
-    def size(self) -> int:
-        """Number of reviews currently waiting for human approval."""
-        return len(self._pending)

@@ -12,16 +12,20 @@ Covers:
   drift test from DONE.html's gate: "aggregator threshold in code matches
   the threshold in its user-facing message")
 - empty findings list handled sanely
-- InMemoryHitlQueue actually holds what gets routed to it
+
+(``InMemoryHitlQueue`` was covered here too until this session's L2 DEBUG
+dead-code removal -- see ``backend.hitl.queue``'s module docstring for why
+it was removed rather than kept: zero production call sites, confirmed by
+grep, with M13's Postgres-backed ``backend.database.review_store.
+ReviewRepository`` as its durable replacement.)
 """
 
 from __future__ import annotations
 
-from datetime import datetime
 from decimal import Decimal
 
-from backend.hitl.queue import InMemoryHitlQueue, has_critical_finding, route_review
-from backend.models import AgentType, Finding, Review, ReviewStatus, Severity
+from backend.hitl.queue import has_critical_finding, route_review
+from backend.models import AgentType, Finding, ReviewStatus, Severity
 
 _DEFAULT_THRESHOLD = Decimal("0.750")
 
@@ -174,29 +178,3 @@ class TestReasonMessageAgreesWithConfiguredThreshold:
         _status, reason = route_review(Decimal("1.000"), findings, threshold=threshold)
 
         assert str(threshold) in reason
-
-
-class TestInMemoryHitlQueue:
-    def test_enqueue_and_list_pending(self) -> None:
-        queue = InMemoryHitlQueue()
-        assert queue.size() == 0
-        assert queue.list_pending() == []
-
-        findings = [_finding(severity=Severity.CRITICAL, confidence="0.800")]
-
-        review = Review(
-            review_id="r1",
-            pr_number=1,
-            repository_owner="acme",
-            repository_name="widgets",
-            head_sha="a" * 40,
-            findings=findings,
-            overall_confidence=Decimal("0.800"),
-            status=ReviewStatus.QUEUED_FOR_HITL,
-            created_at=datetime.now(),
-        )
-
-        queue.enqueue(review)
-
-        assert queue.size() == 1
-        assert queue.list_pending() == [review]
