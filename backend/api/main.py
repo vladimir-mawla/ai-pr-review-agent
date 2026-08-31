@@ -60,12 +60,19 @@ def _default_event_repository(settings: Settings) -> EventRepository:
     them at ``EventRepository``'s bare constructor defaults, so a real
     deployment's behavior is actually controlled by ``.env`` /
     environment configuration like every other tunable in this file.
+
+    M12: uses ``settings.effective_database_url``, so
+    ``EVENTS_BACKEND=tiger`` routes this at the real Tiger Cloud
+    hypertable's restricted writer role instead of local Postgres -- see
+    ``Settings.effective_database_url``'s docstring. Unchanged behavior
+    when ``events_backend='local'`` (the default).
     """
     return EventRepository(
-        settings.database_url,
+        settings.effective_database_url,
         statement_timeout_ms=settings.events_statement_timeout_ms,
         circuit_breaker_failure_threshold=settings.events_circuit_breaker_failure_threshold,
         circuit_breaker_reset_timeout_seconds=settings.events_circuit_breaker_reset_timeout_seconds,
+        events_backend=settings.events_backend,
     )
 
 
@@ -77,6 +84,17 @@ def _default_review_repository(settings: Settings) -> ReviewRepository:
     above (``reviews`` lives in the same Postgres database as
     ``agent_events``) -- see ``backend.database.review_store``'s module
     docstring for why this table exists.
+
+    M12 DISCLOSED SCOPE BOUNDARY: deliberately still ``settings.
+    database_url`` (the LOCAL connection), not ``effective_database_url``
+    -- ``reviews`` is outside M12's stated Stage A-C scope (ADR-003 names
+    only agent_events and code_chunks), migrations/scripts/
+    2026-06-tiger-init.sql does not create it on Tiger, and this repository
+    has no code path there yet. When ``events_backend='tiger'``, the HITL
+    queue/trace dashboard views therefore still read ``reviews`` from local
+    Postgres even though agent-cost metrics read from Tiger -- a real,
+    disclosed split, not a silent one. A future milestone would need to
+    decide whether ``reviews`` also migrates.
     """
     return ReviewRepository(settings.database_url)
 

@@ -40,11 +40,18 @@ def get_event_repository() -> EventRepository:
     threads through the M7 L2 DEBUG fix's dedicated reliability knobs
     (``events_statement_timeout_ms`` and its own circuit breaker
     thresholds), mirroring ``backend.api.main._default_event_repository``.
+
+    M12: uses ``settings.effective_database_url``, not the raw
+    ``database_url`` field, so ``EVENTS_BACKEND=tiger`` routes this
+    singleton at the real Tiger Cloud hypertable's restricted writer role
+    -- see ``Settings.effective_database_url``'s docstring. Unchanged
+    behavior when ``events_backend='local'`` (the default).
     """
     settings = get_settings()
     return EventRepository(
-        settings.database_url,
+        settings.effective_database_url,
         statement_timeout_ms=settings.events_statement_timeout_ms,
         circuit_breaker_failure_threshold=settings.events_circuit_breaker_failure_threshold,
         circuit_breaker_reset_timeout_seconds=settings.events_circuit_breaker_reset_timeout_seconds,
+        events_backend=settings.events_backend,
     )

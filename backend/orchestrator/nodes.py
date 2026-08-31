@@ -266,7 +266,11 @@ def _get_retriever() -> RetrieverProtocol:
     global _real_retriever
     if _real_retriever is None:
         settings = get_settings()
-        _real_retriever = HybridRetriever(settings.pgvector_url, get_embedder(settings))
+        # M12: settings.effective_pgvector_url routes at the real Tiger
+        # Cloud DiskANN-backed code_chunks when MEMORY_BACKEND=tiger,
+        # unchanged (local pgvector) behavior otherwise -- see that
+        # property's docstring.
+        _real_retriever = HybridRetriever(settings.effective_pgvector_url, get_embedder(settings))
     return _real_retriever
 
 
