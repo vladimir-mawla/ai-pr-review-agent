@@ -456,3 +456,77 @@ milestones needing a paid/external credential (M8, M10, M11, M12, M13) are order
   entered this system; see `checkpoints/CURRENT.md` and
   `.genesis/explanations/2026-08-30-explanation-m8.html` for the full
   account.
+
+- **2026-08-31 — M9 (Hybrid Retrieval / Local Vector Memory):** L1 BUILD
+  resumed an M9 build a prior session had left interrupted mid-way (the
+  pgvector service, schema/migration, `Embedder` protocol, and
+  `HybridRetriever`/RRF were already written but uncommitted) and completed
+  it. A first, independent L4 VERIFY session **REJECTED** the completed
+  build for two connected defects, not a nitpick: PLAN.md's own success
+  criteria literally named "recall@5 on a 10-query fixture set is 100%,"
+  and no such named, version-controlled fixture existed — only several
+  small, disposable, hand-built corpora proving a weaker claim; and the
+  demo command was not actually end-to-end — `test_hybrid_retrieval.py`'s
+  own test fixture truncated `code_chunks` before every DB-touching test,
+  so the demo's own seed step was wiped before its own test step ever
+  queried it, meaning all three demo steps exited 0 without a single
+  assertion ever touching what the seed step had inserted. An L2 DEBUG
+  loop closed both: built `tests/fixtures/retrieval_queries.json`, the
+  named 10-query fixture PLAN.md's criteria describe (real function/class
+  names and natural-language paraphrases of this repo's own code, chosen
+  before ever being run against the live corpus), and a new test class
+  placed first in the file, before any truncating class, with a
+  self-seeding fixture that never truncates. Honest result on that
+  fixture, against the `DeterministicFixtureEmbedder` (no credential was
+  available yet): **4/10 (40%)**, not the 100% PLAN.md asked for — root
+  cause investigated and reported, not massaged (the fixture embedder's
+  summed-then-normalized bag-of-tokens design dilutes a single-occurrence
+  identifier below the corpus noise floor at real corpus scale). A second,
+  independent L4 VERIFY session re-ran everything and **APPROVEd** M9
+  against this honestly-reported 40%, since PLAN.md's own criteria had by
+  then been corrected to record the measured result rather than the
+  aspirational one.
+
+  A follow-up session obtained a funded OpenAI credential and re-measured
+  the same 10 queries against real `text-embedding-3-large` embeddings:
+  **7/10 (70%)** — real embeddings rescued 3 of the fixture embedder's 6
+  misses and lost none of its 4 hits, still short of the literal 100% bar.
+  This tied fusion and vector-alone at 7/10 each on this small set and left
+  open the sharper question PLAN.md's criteria were then amended to ask
+  instead: does RRF fusion, as configured, actually earn its complexity
+  over plain vector search? A dedicated investigation answered it
+  properly: a held-out 15-query set (`tests/fixtures/retrieval_queries_
+  holdout.json`) was written and git-committed *before* it was ever
+  queried; 13 fusion variants (weighted RRF at several vector:fts ratios,
+  larger candidate pools, several `k` values, score-based fusion) were
+  tuned using ONLY the original 10, and a single winner was pre-registered
+  by a rule stated before the held-out set was touched. That winner scored
+  8/10 on the tuning set — and then **FAILED to generalize**: on the
+  held-out 15 it only tied the untuned default at recall@5 (11/15 each)
+  and was worse at recall@10 (12/15 vs 13/15), confirming it had fit noise
+  in the 10-query tuning set. It was rejected and never shipped; no
+  retriever code changed (`HybridRetriever`/`reciprocal_rank_fusion` are
+  unchanged from the first APPROVE). The held-out measurement did answer
+  the real question, honestly bounded: the current, untuned RRF
+  configuration beat vector-alone on the held-out 15 (73% vs 60%
+  recall@5, 87% vs 67% recall@10) — but a POST-APPROVE closeout session's
+  independent McNemar test on those same discordant pairs found neither
+  gap statistically significant (recall@5: 2 discordant pairs, both
+  favoring RRF, p = 0.5; recall@10: 3 discordant pairs, all favoring RRF,
+  p = 0.25) — the direction is one-sided everywhere it was formally
+  tested, but n=15 is too small for that to be more than suggestive; see
+  PLAN.md's own M9 success-criteria section for the full, dated correction
+  and `checkpoints/CURRENT.md` for the McNemar arithmetic. A second,
+  independent L4 VERIFY session **APPROVEd** this investigation, having
+  independently re-seeded the corpus itself from scratch (rather than
+  trusting the maker's own seeded state) and reproduced every recall
+  number and every individual miss-id reported above. Demo command
+  `docker compose up -d pgvector && python scripts/seed_code_chunks.py
+  --repo . && pytest tests/integration/test_hybrid_retrieval.py -v` exits
+  0; the full suite (`pytest -v`) exits 0 with 262 passed (both times it
+  was run this session), Redis (6380), Postgres (5433), and pgvector
+  (5434) all up. See `checkpoints/CURRENT.md` for the complete
+  REJECT→fix→APPROVE and investigation→APPROVE histories and
+  `.genesis/explanations/2026-08-31-explanation-m9.html` for the full
+  account, including the RRF magnitude-discarding cost and the fixture
+  embedder's real-corpus-scale collapse.
