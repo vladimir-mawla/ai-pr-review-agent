@@ -983,3 +983,59 @@ number with dated reasoning, don't just loosen the assertion").
 
   L4 VERIFY on M13 (this session's fixes) has not yet re-run — see
   `checkpoints/CURRENT.md`.
+
+- **2026-08-31 — M13 (Dashboard + Evaluation/CI Gate) — L4 VERIFY APPROVE
+  (final).** A second, independent L4 VERIFY session re-ran M13 against the
+  L2 DEBUG fixes above and **APPROVEd** it — this is the milestone's final
+  disposition; M13 is DONE. The full arc, recorded honestly and completely:
+
+  L1 BUILD shipped the Next.js 15 operator dashboard (`frontend/`, three
+  Client-Component views — the HITL queue, per-agent cost/latency, and
+  review trace reconstruction), the golden dataset (4 cases), a
+  claude-sonnet-5 LLM-as-judge, a regression gate, and the first CI in this
+  repo's history (`.github/workflows/ci.yml`) — green 5/5 on its first
+  push, finally satisfying `.genesis/DONE.html` section 2's "every CI job
+  references test files that exist; CI is green on a clean checkout" gate,
+  which had sat N/A since M1 because the reference implementation this
+  project studies shipped a CI workflow pointing at two nonexistent test
+  files.
+
+  A first, independent L4 VERIFY session then **REJECTED** that build for
+  two blocking defects: `/costs` presented `$97,468.71` as real spend, with
+  ~$40k of it 2030-dated synthetic budget-guard fixture rows summed into
+  the exact same `(agent, model)` bucket as genuine calls, while the
+  homepage claimed "Nothing on these pages is fabricated"; and
+  `eval-gate.yml` never triggered on a `pull_request`, so it could not
+  block a merge no matter what it scored.
+
+  An L2 DEBUG loop fixed both: a combined date + review_id-prefix exclusion
+  filter on `EventRepository.aggregate_llm_calls_by_agent` — both
+  mechanisms genuinely required, since of the 170 `budget-guard-*` rows in
+  the real database only 19 were future-dated, the other 151 were
+  past-dated from before M8's schema-isolation fix, so either filter alone
+  would have missed real cases the other one catches — with every
+  exclusion still surfaced in a visible "Exclusions (transparency, not
+  silence)" disclosure card rather than silently dropped; the false
+  homepage claim replaced with an accurate one; `eval-gate.yml` given a
+  `pull_request` trigger that fails loudly (not silently, not vacuously) on
+  a fork PR or a missing secret; and the dead `InMemoryHitlQueue` removed
+  as an unrelated cleanup.
+
+  The second, independent L4 VERIFY session did not take the fix session's
+  report on faith: it independently reproduced the arithmetic itself
+  (genuine spend $0.076917), classified every distinct `review_id` prefix
+  in the real database on its own and found no false negatives in the
+  exclusion list, and — the sharpest part of its review — ran a
+  rolled-back-transaction probe inserting a today-dated row under an
+  unlisted synthetic prefix and confirmed it still counts as real spend on
+  `/costs`. Its ruling: the exclusion mechanism is a denylist, not an
+  allowlist, and therefore not a guarantee — a structural fact about the
+  fix's honest limits, not a reason to withhold APPROVE, since the
+  alternative (a hard allowlist gating what counts as "real") would need a
+  schema-level provenance flag this milestone did not build. See this
+  session's own BOOKKEEPING/EXPLAIN_DIFF sections and
+  `.genesis/explanations/2026-08-31-explanation-m13.html` for the full
+  account, and `checkpoints/CURRENT.md` for the open items this final
+  APPROVE leaves for whoever picks up next (branch protection, the eval
+  gate's partial golden-case coverage, the denylist-not-allowlist limit,
+  and the `test_events_spine.py` production-table test-isolation gap).
