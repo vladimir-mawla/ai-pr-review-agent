@@ -69,6 +69,10 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+from backend.agents.docs_agent import DocsAgent
+from backend.agents.quality_agent import QualityAgent
+from backend.agents.security_agent import SecurityAgent
+from backend.agents.test_agent import TestsAgent
 from backend.api.main import create_app
 from backend.core.settings import Settings, get_settings
 from backend.database.models import AgentEvent, EventType
@@ -77,8 +81,10 @@ from backend.database.repository import EventRepository
 from backend.job_queue.in_memory import InMemoryJobQueue
 from backend.observability.audit import reconstruct_review_trace
 from backend.observability.workflow_context import run_id_for_delivery
+from backend.orchestrator import nodes
 from backend.orchestrator.langgraph_engine import LangGraphWorkflowEngine
 from backend.orchestrator.state import GraphState
+from backend.tools.llm_client import LLMResponse
 
 _BASE_SETTINGS = get_settings()
 _DATABASE_URL = _BASE_SETTINGS.database_url
@@ -581,7 +587,87 @@ class TestConcurrentWebhookWritesAreNotSerializedByALockedEventsTable:
 # ---------------------------------------------------------------------------
 
 
+class _FakeLLMClientForEventsSpineTest:
+    """A minimal fake satisfying ``LLMClientProtocol``, for the M10 fix below.
+
+    Not testing anything about LLM behavior itself (that is
+    ``tests/unit/test_specialist_agents.py`` and the key-gated
+    ``tests/integration/test_all_agents_live.py``'s job) -- this class
+    exists purely so ``TestOrchestratorProducesSpansAndDecision`` below can
+    prove real span/decision EVENTS fire for a real orchestrator run
+    through real node code, without also depending on (or paying for) a
+    real network call.
+
+    ``complete`` sleeps briefly (well under the real latency a genuine API
+    call would have) purely so this test's own pre-existing
+    ``event.latency_ms > 0`` assertion (proving a real measured duration
+    was recorded, not merely a placeholder) stays meaningful -- an
+    effectively-instant fake call can otherwise round down to 0ms
+    (``backend.observability.tracing.traced_span`` truncates to whole
+    milliseconds), which would make that assertion pass for the wrong
+    reason before this fix and fail outright after it.
+    """
+
+    _SIMULATED_LATENCY_SECONDS = 0.005
+
+    def complete(
+        self,
+        *,
+        system: str,
+        user: str,
+        agent: str,
+        review_id: str | None = None,
+    ) -> LLMResponse:
+        time.sleep(self._SIMULATED_LATENCY_SECONDS)
+        return LLMResponse(
+            text='{"findings": []}',
+            model="fake-model",
+            tokens_in=1,
+            tokens_out=1,
+            cost_usd=Decimal("0"),
+            latency_ms=1,
+        )
+
+
 class TestOrchestratorProducesSpansAndDecision:
+    """M10 fix, disclosed here (this file is outside M10's freeze boundary):
+    before M10, only the SECURITY node was a real, LLM-backed agent
+    (``backend.orchestrator.nodes._get_security_agent``'s default) -- the
+    other three were M4's canned, no-network stub findings, so this test
+    (written at M7, unmodified since) made at most ONE real, billable
+    Anthropic call whenever ``ANTHROPIC_API_KEY`` happened to be
+    configured, tolerated as cheap and incidental to what this test
+    actually proves (that real orchestrator nodes emit real span/decision
+    events -- not anything about a real LLM's behavior, which is a
+    different test's job). M10 made QUALITY/TESTS/DOCS real too
+    (``backend.orchestrator.nodes``'s ``_get_agent`` now defaults ALL
+    FOUR), which would have silently quadrupled this test's real,
+    unbudgeted API spend on every ordinary ``pytest`` run with a key
+    configured -- a direct violation of this project's own "a full pytest
+    run must not make real LLM calls except in explicitly key-gated tests"
+    rule. Fixed by installing a fake ``LLMClientProtocol`` for all four
+    specialists (the same test-only override mechanism
+    ``tests/integration/test_orchestrator_fanout.py``'s own autouse
+    fixture already uses) for the duration of this one test -- this test's
+    actual assertions are entirely about which events fired and their
+    ordering/latency, none of which depend on what the LLM actually said.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _fake_agents_for_all_four_specialists(self) -> Iterator[None]:
+        fake_client = _FakeLLMClientForEventsSpineTest()
+        nodes.set_security_agent_for_testing(SecurityAgent(fake_client))
+        nodes.set_quality_agent_for_testing(QualityAgent(fake_client))
+        nodes.set_tests_agent_for_testing(TestsAgent(fake_client))
+        nodes.set_docs_agent_for_testing(DocsAgent(fake_client))
+        try:
+            yield
+        finally:
+            nodes.set_security_agent_for_testing(None)
+            nodes.set_quality_agent_for_testing(None)
+            nodes.set_tests_agent_for_testing(None)
+            nodes.set_docs_agent_for_testing(None)
+
     def test_real_orchestrator_run_produces_spans_and_a_decision_event(
         self, repository: EventRepository, tmp_path: Path
     ) -> None:
@@ -615,8 +701,12 @@ class TestOrchestratorProducesSpansAndDecision:
         assert decisions[0].outcome in {"POSTED", "QUEUED_FOR_HITL"}
         assert decisions[0].confidence == result["review"].overall_confidence
 
-        # Every span.end recorded a real measured latency (specialists sleep
-        # NODE_WORK_SECONDS=0.2s, so this is never zero on a real run).
+        # Every span.end recorded a real measured latency. Pre-M10, this
+        # relied on the M4 stub nodes' fixed NODE_WORK_SECONDS=0.2s sleep;
+        # post-M10, all four agents are real (fake-LLM-backed in this
+        # test -- see _fake_agents_for_all_four_specialists), and
+        # _FakeLLMClientForEventsSpineTest.complete's own small sleep is
+        # what keeps this non-zero now (see that class's docstring).
         for event in events:
             if event.event_type is EventType.SPAN_END:
                 assert event.latency_ms is not None
