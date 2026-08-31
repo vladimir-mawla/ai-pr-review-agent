@@ -6,8 +6,17 @@ name: Eval Gate (LLM-as-judge regression)
 # backend/evaluation/judge.py's module docstring for why the judge is
 # deliberately a different, stronger model than the haiku-tier specialists.
 #
-# TRIGGER CHOICE -- workflow_dispatch (manual) + a weekly schedule, NOT
-# every push/PR:
+# TRIGGER (REVISED, L2 DEBUG, post-L4-REJECT): an independent L4 VERIFY
+# session rejected M13 because this workflow previously triggered ONLY on
+# workflow_dispatch and a Monday cron -- it never ran on a pull_request, so
+# it could never be registered as a required status check, and M13's own
+# outcome text ("blocks a merge that degrades review quality") was false as
+# written: nothing here could stop a quality-degrading PR from merging. The
+# reasoning below (originally written to justify NOT running on every PR)
+# is kept, struck through in spirit but not in text -- per this project's
+# own amendment-history discipline, the ORIGINAL reasoning is left in place
+# rather than deleted, with the correction appended after it:
+#
 #   - Every push/PR would mean every commit, including trivial
 #     documentation or CSS edits, spends real money on sonnet calls. This
 #     project's own cost-discipline rule (a plain `pytest` run must stay
@@ -30,13 +39,83 @@ name: Eval Gate (LLM-as-judge regression)
 #     logic) for no clear benefit over just dispatching it directly when
 #     it's actually wanted.
 #
+# CORRECTION (this session): the reasoning above optimizes for cost at the
+# expense of the one thing a "gate" is actually for -- being unable to be
+# bypassed. A check nobody is forced to run before merging is not a gate,
+# it is a dashboard. The user has explicitly decided the trade-off the
+# other way: run on every pull_request targeting `main`, and accept the
+# real per-PR dollar cost (see COST below) as the price of an actual gate.
+# workflow_dispatch and the weekly cron are KEPT as-is -- a manual run
+# before a release, and a low-cost drift tripwire, are still useful
+# independent of the new per-PR trigger.
+#
+# COST: exactly 3 real claude-sonnet-5 calls per PR run -- NOT the full
+# 4-case golden dataset scored live. `pytest -m live
+# tests/eval/test_regression_gate.py -v` collects exactly one live class,
+# ``TestLiveJudgeDistinguishesGoodFromBadReviews`` (see that class's own
+# docstring in the test file), which scores ONE golden case
+# ("sqli-basic") three times: a genuinely correct review, a deliberately
+# bad one, and a re-score of the correct one to measure the judge's
+# run-to-run variance. Every other golden case, and the gate's pass/fail
+# arithmetic itself, is already covered by the FREE (`Test*Free`) classes
+# in the same file, which run in ci.yml on every push with no credential
+# and no cost. Each of the 3 live calls is a short single-turn prompt
+# (one diff + expected findings + one candidate review, per
+# backend/evaluation/judge.py's system prompt) -- low-cents-per-run
+# territory for claude-sonnet-5, not dollars, though no exact historical
+# per-run dollar figure has been recorded in this project's own docs (this
+# session did not re-run `pytest -m live` to produce one, per this
+# project's own cost policy of not spending money on `-m live` unless a
+# fix specifically requires it -- this workflow fix does not).
+#
 # CREDENTIAL: requires the repository secret ANTHROPIC_API_KEY to be
 # configured. If it is not, the job fails fast and visibly at the "Check
 # for ANTHROPIC_API_KEY" step -- deliberately not silently skipped, since a
-# manually-dispatched or scheduled run that silently does nothing would be
-# worse than one that fails loudly and says why.
+# manually-dispatched, scheduled, or (now) PR-triggered run that silently
+# does nothing would be worse than one that fails loudly and says why. A
+# green check that never ran the judge at all is exactly the failure mode
+# this workflow was rejected for in the first place -- this project is not
+# going to reintroduce a different flavor of the same defect.
+#
+# FORKS: this is a PUBLIC repository. GitHub Actions deliberately withholds
+# repository secrets (including ANTHROPIC_API_KEY) from `pull_request`-
+# triggered runs whose head branch is on a FORK, not this repository --
+# see https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions#accessing-secrets
+# This is a real GitHub security control, not a bug or a misconfiguration:
+# a fork PR's workflow run does not receive the secret no matter how this
+# file is written, and there is no safe way to give it one --
+# `pull_request_target` (which DOES receive secrets) would require either
+# checking out the fork's own head ref while holding a real API key in
+# scope (the textbook "secrets exfiltration via a malicious PR" pattern
+# GitHub's own hardening guide warns against by name) or running the gate
+# against the BASE branch instead of the PR's actual changes (which would
+# not be evaluating this PR at all -- a vacuous pass wearing the gate's
+# name, the exact failure mode this workflow exists to eliminate).
+#
+# DECISION: a fork PR run FAILS this job, loudly, with a message distinct
+# from "the secret is missing" -- see the "Guard" step below. It does not
+# skip silently and does not pass vacuously; both would look, from a
+# branch-protection UI, indistinguishable from "the gate ran and found no
+# problem", which is false. The real-world consequence: a required-status-
+# check configuration built on this job will block every fork PR from
+# merging without a maintainer's manual action -- documented here rather
+# than discovered by a confused first-time contributor. A maintainer who
+# wants to actually run the live gate against a fork PR's changes has two
+# safe options: push the PR's branch to a branch on THIS repository (not a
+# fork) and re-open/re-target the PR, which makes secrets available same
+# as any other same-repo PR; or review the diff manually and merge with an
+# administrator override of this one required check. This project's own
+# established pattern (fail loud rather than silently pass, see the
+# CREDENTIAL note above and BudgetGuard's own "fail loud on an anomaly"
+# design in backend/economics/budget.py) is why FAIL was chosen here over
+# a "cannot run on forks, marked neutral/green" status: a neutral-but-green
+# check on a required-check gate is functionally a silent pass to anyone
+# reading the PR's merge-readiness UI, and this project has already
+# rejected that failure mode once this session.
 
 on:
+  pull_request:
+    branches: [main]
   workflow_dispatch: {}
   schedule:
     - cron: "0 6 * * 1" # every Monday at 06:00 UTC
@@ -55,10 +134,23 @@ jobs:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
 
-      - name: Check for ANTHROPIC_API_KEY
+      # Runs FIRST, before the generic secret check below, so a fork PR
+      # gets the specific "cannot run on forks" message instead of the
+      # generic "secret not configured" one -- the secret genuinely is
+      # absent either way, but the reason (and the fix) is completely
+      # different. See this file's header comment's FORKS section.
+      - name: Guard -- fork PRs never receive repository secrets (fails loudly, not silently)
+        if: >-
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository
+        run: |
+          echo "::error::This PR's head branch (${{ github.event.pull_request.head.repo.full_name }}) is on a FORK, not ${{ github.repository }}. GitHub Actions deliberately withholds repository secrets -- including ANTHROPIC_API_KEY -- from pull_request-triggered runs on forked PRs; this is not a misconfiguration and adding the secret again will not fix it. The live regression gate cannot run against a fork PR's changes without either exposing a real API key to untrusted code (not done here -- see this workflow's FORKS comment) or running against the base branch instead of the PR (which would not evaluate this PR at all). This job fails deliberately and loudly rather than silently skipping or passing. To actually gate this PR's changes: push its branch to a branch on this repository (not a fork) and re-target the PR, or have a maintainer review the diff and merge with an administrator override of this required check."
+          exit 1
+
+      - name: Check for ANTHROPIC_API_KEY (a genuine misconfiguration, not the fork restriction above)
         run: |
           if [ -z "$ANTHROPIC_API_KEY" ]; then
-            echo "::error::ANTHROPIC_API_KEY secret is not configured -- the eval gate cannot run without it. Set it under Settings > Secrets and variables > Actions."
+            echo "::error::ANTHROPIC_API_KEY secret is not configured -- the eval gate cannot run without it. Set it under Settings > Secrets and variables > Actions. (If this run IS a fork PR, the Guard step above should have already failed with a more specific message before this step ran at all.)"
             exit 1
           fi
 
