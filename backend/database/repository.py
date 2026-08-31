@@ -62,6 +62,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from math import ceil
+from typing import Literal
 
 import psycopg
 
@@ -128,18 +129,14 @@ _SUM_LLM_COST_FOR_DAY_SQL = """
 # M13 (L2 DEBUG on the M12 continuous-aggregates adaptation): the
 # dashboard's per-agent cost/latency view. PLAN.md's M13 outcome describes
 # this as reading "from the continuous aggregates" (a TimescaleDB feature
-# -- M12, which this build does NOT include; see the M13 build report's
-# CONTINUOUS_AGGREGATES_ADAPTATION section). This query does the same
-# aggregation with plain SQL over the real, unaggregated agent_events rows
-# instead. It is written so that swapping to a real continuous aggregate
-# later is a NARROW change: M12 would create a materialized
-# `agent_health_1m`-style view/hypertable pre-aggregated by (agent, model,
-# time bucket), and this query's FROM/GROUP BY would change from
-# `agent_events ... WHERE event_type = 'llm.call' GROUP BY agent, model` to
-# `agent_health_1m GROUP BY agent, model` (or a SUM-of-already-summed-
-# buckets query) -- the call site
-# (backend.api.dashboard.get_agent_metrics) and this method's return shape
-# (AgentMetrics) would not need to change at all.
+# -- M12, which this build did NOT include at the time M13 was built; see
+# the M13 build report's CONTINUOUS_AGGREGATES_ADAPTATION section). This
+# query does the same aggregation with plain SQL over the real,
+# unaggregated agent_events rows instead. It remains the LOCAL-backend
+# path (events_backend='local') -- see _AGGREGATE_LLM_CALLS_BY_AGENT_TIGER_SQL
+# below for the M12 swap this comment anticipated, now built, and its
+# docstring for the one respect in which "FROM/GROUP BY only" undersold
+# the actual change.
 #
 # M13 (L2 DEBUG, post-L4-REJECT -- synthetic spend counted as real spend):
 # an independent L4 VERIFY session found this query, unfiltered, summed 19
@@ -222,6 +219,57 @@ _EXCLUDED_LLM_CALLS_SUMMARY_SQL = """
     WHERE event_type = %(event_type)s
 """
 
+# M12: the Tiger-backend path -- reads the real `agent_health_1m`
+# continuous aggregate (migrations/scripts/2026-06-tiger-init.sql) instead
+# of raw agent_events. This is the swap the M13 comment above anticipated,
+# now built, and it is genuinely narrow in EFFECT (this one method's body,
+# nothing upstream/downstream of it changes) but NOT literally "FROM/GROUP
+# BY only" as originally described -- two things beyond FROM/GROUP BY also
+# had to change, and this comment says so plainly rather than silently
+# reproducing the original, now-inaccurate claim:
+#
+#   1. The SELECT list changes from directly-computed aggregates
+#      (COUNT(*), SUM(cost_usd), AVG(latency_ms)) to SUMS-OF-ALREADY-
+#      SUMMED per-minute buckets (SUM(call_count), SUM(cost_usd_sum),
+#      SUM(latency_ms_sum)) -- re-aggregating a continuous aggregate's own
+#      per-bucket partial sums is how you combine buckets, not a second
+#      AVG() over already-averaged rows (which would silently weight every
+#      *bucket* equally regardless of how many calls it contains, corrupting
+#      the true overall average). avg_latency_ms is finished in Python
+#      (total_latency_ms / call_count) rather than in this SQL, for the
+#      same reason -- see aggregate_llm_calls_by_agent's Tiger branch.
+#   2. The exclusion filter's SECOND clause (`NOT (review_id LIKE ANY(...))`)
+#      is NOT repeated here as a WHERE clause -- it is baked into
+#      agent_health_1m's own view definition instead (see that migration
+#      file's Stage B comment for why: pre-aggregating BEFORE the filter
+#      applies is exactly the class of defect that reintroduced the M13
+#      $97k-contamination bug if the filter is only applied at read time).
+#      This query's own WHERE clause below keeps ONLY the future-dated
+#      half of the filter (`bucket <= %(now)s`, structurally analogous to
+#      the local path's `ts <= %(now)s`) -- the test-fixture-prefix half
+#      never needs repeating here because it was never let INTO the
+#      bucket to begin with.
+#
+# _EXCLUDED_LLM_CALLS_SUMMARY_SQL above is UNCHANGED and still queries raw
+# agent_events directly on both backends -- a continuous aggregate that
+# has already excluded synthetic rows cannot also report what it excluded
+# and why, so the transparency half of aggregate_llm_calls_by_agent's
+# contract necessarily still reads the raw table regardless of backend.
+_AGGREGATE_LLM_CALLS_BY_AGENT_TIGER_SQL = """
+    SELECT
+        agent,
+        model,
+        COALESCE(SUM(call_count), 0) AS call_count,
+        COALESCE(SUM(cost_usd_sum), 0) AS total_cost_usd,
+        COALESCE(SUM(latency_ms_sum), 0) AS total_latency_ms,
+        COALESCE(SUM(tokens_in_sum), 0) AS total_tokens_in,
+        COALESCE(SUM(tokens_out_sum), 0) AS total_tokens_out
+    FROM agent_health_1m
+    WHERE bucket <= %(now)s
+    GROUP BY agent, model
+    ORDER BY agent, model
+"""
+
 # Grep-verified (2026-08-31, L2 DEBUG on L4 VERIFY's rejection of M13) test-
 # and-fixture-only ``review_id`` prefixes: every one of these strings is
 # generated ONLY by code under ``tests/`` in this repository, never by any
@@ -240,6 +288,23 @@ _EXCLUDED_LLM_CALLS_SUMMARY_SQL = """
 #   "append-only-"          tests/integration/test_events_spine.py (TestAppendOnlyEnforcement, 5 variants)
 #   "live-test-"            tests/integration/test_all_agents_live.py, test_security_agent_live.py (real, billable `-m live` spend)
 #   "m11-live-"             tests/integration/test_github_live_demo.py (real, billable `-m live` spend)
+#   "m12-"                  tests/integration/test_tiger_migration.py (M12 live Tiger Cloud
+#                            verification/fixture rows -- structural checks of hypertable
+#                            chunking, append-only enforcement, and continuous-aggregate
+#                            correctness against the real, paid Tiger instance, not real
+#                            LLM spend. ALSO the prefix this milestone's own live, ad hoc
+#                            verification queries used while building this migration --
+#                            see this milestone's build report). Deliberately a bare
+#                            prefix, not one variant per test class like the others above,
+#                            because this project has exactly one Tiger Cloud instance
+#                            (unlike the disposable per-test-schema pattern
+#                            EventRepository's search_path parameter enables for local
+#                            Postgres) -- every M12 Tiger test/verification row that ever
+#                            gets written directly into the shared, real, append-only
+#                            agent_events table must be excludable by this one prefix,
+#                            since it can never be deleted afterward (see this migration's
+#                            own build report's ANOMALIES section for the disclosed cost
+#                            of getting this prefix wrong even once).
 #
 # `live-test-`/`m11-live-` rows are genuine dollars (real Anthropic API
 # calls made by `-m live` tests), not fabricated numbers -- they are
@@ -261,6 +326,7 @@ _TEST_FIXTURE_REVIEW_ID_PREFIXES: tuple[str, ...] = (
     "append-only-",
     "live-test-",
     "m11-live-",
+    "m12-",
 )
 
 _TEST_FIXTURE_REVIEW_ID_LIKE_PATTERNS: list[str] = [
@@ -358,8 +424,17 @@ class EventRepository:
         circuit_breaker_failure_threshold: int = 5,
         circuit_breaker_reset_timeout_seconds: float = 30.0,
         search_path: str | None = None,
+        events_backend: Literal["local", "tiger"] = "local",
     ) -> None:
         self._dsn = dsn
+        # M12: which SQL aggregate_llm_calls_by_agent runs -- see
+        # _AGGREGATE_LLM_CALLS_BY_AGENT_TIGER_SQL's comment for what
+        # changes and why. Every other method on this class (insert_event,
+        # fetch_events_for_review, sum_llm_cost_for_day) is identical on
+        # either backend, since agent_events' own columns/shape are
+        # unchanged by the Tiger migration -- only this one method reads a
+        # different relation.
+        self._events_backend = events_backend
         # libpq's `connect_timeout` parameter is defined as a whole number of
         # seconds (psycopg's own type stub pins it to `str | int | None`, not
         # `float`); round up to the nearest second (minimum 1) rather than
@@ -546,17 +621,28 @@ class EventRepository:
     def aggregate_llm_calls_by_agent(self, *, now: datetime | None = None) -> AgentMetricsAggregate:
         """Cost/latency aggregated across every REAL ``llm.call`` event, grouped by ``(agent, model)``.
 
-        The dashboard's per-agent cost/latency view -- see
-        ``_AGGREGATE_LLM_CALLS_BY_AGENT_SQL``'s comment for the M12
-        continuous-aggregate adaptation this query stands in for, AND (L2
-        DEBUG, post-L4-REJECT) for why "REAL" above is load-bearing: this
-        method used to sum every ``llm.call`` row unconditionally,
+        The dashboard's per-agent cost/latency view. Two backends, selected
+        by ``events_backend`` at construction (mirrors this class's own
+        Tiger-vs-local DSN split):
+
+        - ``"local"`` (default): ``_AGGREGATE_LLM_CALLS_BY_AGENT_SQL``, a
+          direct aggregate over raw ``agent_events`` rows.
+        - ``"tiger"``: ``_AGGREGATE_LLM_CALLS_BY_AGENT_TIGER_SQL``, the M12
+          swap -- reads the real ``agent_health_1m`` continuous aggregate
+          instead. See that constant's comment for what changes beyond
+          FROM/GROUP BY (the SELECT list, and where the test-fixture-prefix
+          filter lives) and why.
+
+        Either way, "REAL" above is load-bearing (L2 DEBUG, post-L4-REJECT):
+        this method used to sum every ``llm.call`` row unconditionally,
         including synthetic future-dated and test-fixture rows that share
-        the same ``(agent, model)`` key as genuine calls -- see that
-        query's comment for the concrete 19-row, ~$40,261 defect an
-        independent L4 VERIFY session found. Every row excluded for either
-        reason is still counted and summed, in ``ExclusionSummary``, rather
-        than silently vanishing.
+        the same ``(agent, model)`` key as genuine calls -- see
+        ``_AGGREGATE_LLM_CALLS_BY_AGENT_SQL``'s comment for the concrete
+        19-row, ~$40,261 defect an independent L4 VERIFY session found.
+        Every row excluded for either reason is still counted and summed,
+        in ``ExclusionSummary``, rather than silently vanishing -- on
+        EITHER backend, since ``_EXCLUDED_LLM_CALLS_SUMMARY_SQL`` always
+        reads raw ``agent_events`` regardless of ``events_backend``.
 
         Returns an empty ``metrics`` list on a fresh/empty database rather
         than raising -- "no real llm.call events recorded yet" is a real,
@@ -583,20 +669,42 @@ class EventRepository:
             autocommit=True,
             options=self._connect_options,
         ) as conn:
-            rows = conn.execute(_AGGREGATE_LLM_CALLS_BY_AGENT_SQL, params).fetchall()
+            if self._events_backend == "tiger":
+                rows = conn.execute(_AGGREGATE_LLM_CALLS_BY_AGENT_TIGER_SQL, params).fetchall()
+                metrics = [
+                    AgentMetrics(
+                        agent=row[0] if row[0] is not None else "unknown",
+                        model=row[1] if row[1] is not None else "unknown",
+                        call_count=int(row[2]),
+                        total_cost_usd=Decimal(row[3]),
+                        # sum(latency_ms_sum) / sum(call_count): an EXACT
+                        # weighted average across buckets, not an
+                        # approximation -- see
+                        # _AGGREGATE_LLM_CALLS_BY_AGENT_TIGER_SQL's comment
+                        # point 1 for why this must be computed here
+                        # (sum-of-sums / sum-of-counts), not as a second
+                        # AVG() over already-averaged per-bucket rows.
+                        avg_latency_ms=round(int(row[4]) / int(row[2])) if int(row[2]) > 0 else 0,
+                        total_tokens_in=int(row[5]),
+                        total_tokens_out=int(row[6]),
+                    )
+                    for row in rows
+                ]
+            else:
+                rows = conn.execute(_AGGREGATE_LLM_CALLS_BY_AGENT_SQL, params).fetchall()
+                metrics = [
+                    AgentMetrics(
+                        agent=row[0] if row[0] is not None else "unknown",
+                        model=row[1] if row[1] is not None else "unknown",
+                        call_count=int(row[2]),
+                        total_cost_usd=Decimal(row[3]),
+                        avg_latency_ms=round(float(row[4])),
+                        total_tokens_in=int(row[5]),
+                        total_tokens_out=int(row[6]),
+                    )
+                    for row in rows
+                ]
             excluded_row = conn.execute(_EXCLUDED_LLM_CALLS_SUMMARY_SQL, params).fetchone()
-        metrics = [
-            AgentMetrics(
-                agent=row[0] if row[0] is not None else "unknown",
-                model=row[1] if row[1] is not None else "unknown",
-                call_count=int(row[2]),
-                total_cost_usd=Decimal(row[3]),
-                avg_latency_ms=round(float(row[4])),
-                total_tokens_in=int(row[5]),
-                total_tokens_out=int(row[6]),
-            )
-            for row in rows
-        ]
         assert excluded_row is not None  # a bare aggregate always returns exactly one row
         exclusions = ExclusionSummary(
             excluded_row_count=int(excluded_row[0]),
