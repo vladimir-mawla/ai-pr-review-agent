@@ -1,18 +1,37 @@
 # CURRENT
-- active_loop: none -- M13 L1 BUILD done, awaiting L4 VERIFY; M12 (Tiger
-  Cloud Migration) deliberately skipped/not built, per this session's
-  explicit instruction
+- active_loop: none -- M13 L2 DEBUG done (fixing an independent L4 VERIFY
+  REJECT), awaiting L4 VERIFY re-run; M12 (Tiger Cloud Migration)
+  deliberately skipped/not built, per an earlier session's explicit
+  instruction, unchanged this session
 - target: M13
-- iteration: 0
-- last_gate: all M13 gates green on a real, un-mocked run (ruff, mypy
-  --strict, pytest -v [394 passed, 13 deselected], lint-imports, npm
-  build/lint) plus a real push whose CI run was independently observed
-  green end-to-end (5/5 jobs) -- see this session's final report for full
-  command output and the CI run URL
-- last_action: M13 L1 BUILD (dashboard + golden dataset/judge/regression
-  gate + CI), 6 granular commits pushed to main (5a62cec..b5052cf),
-  context graph regenerated and invariants/freeze_boundary restored
-- next_action: L4 VERIFY on M13 (separate session)
+- iteration: 1 (L2 DEBUG round, following L4 VERIFY's REJECT of the L1
+  BUILD at iteration 0)
+- last_gate: **L4 VERIFY REJECTED M13 (2026-08-31)** for two blocking
+  defects: (1) `/costs` summed ~$40,261 of 2030-dated `budget-guard-*`
+  test-fixture rows into "real" spend with no date/prefix filter and no
+  disclosure, alongside a false "Nothing on these pages is fabricated"
+  homepage claim; (2) `.github/workflows/eval-gate.yml` never triggered on
+  a pull_request (only `workflow_dispatch` + a weekly cron), so nothing
+  could actually block a quality-degrading merge despite M13's outcome
+  text claiming it does. Both fixed this session (L2 DEBUG) -- see
+  `.genesis/PLAN.md`'s M13 AMENDED success-criteria line and its new
+  2026-08-31 Progress entry for the full account. Gates re-run green,
+  real services up: `ruff check .` (0 issues), `mypy --strict backend/`
+  (0 issues, 74 files), `pytest -v` (396 passed, 13 deselected -- FREE
+  confirmed directly: `agent_events` `llm.call` row count moved 268->269,
+  the one new row a synthetic `precision-*` fixture, not a real Anthropic
+  call), `lint-imports --config .importlinter` (2 contracts kept, 0
+  broken), `npm --prefix frontend run build` (7 routes, 0 errors).
+  `actionlint` ran clean on the edited workflow file. `pytest -m live` was
+  NOT re-run this session (not required by either fix; $0.00 spent this
+  session) -- see this session's final report's API_SPEND.
+- last_action: L2 DEBUG on M13's L4 REJECT -- both blocking defects fixed
+  (dashboard exclusion filter + disclosure + homepage copy; eval-gate.yml
+  pull_request trigger + loud-fail-on-missing-secret + fork handling),
+  plus two non-blocking cleanups (removed dead `InMemoryHitlQueue`;
+  dated PLAN.md amendment). Granular commits, pushed to main -- see this
+  session's final report's COMMITS/PUSH_RESULT for exact SHAs.
+- next_action: re-run L4 VERIFY on M13 (separate session)
 - model: claude-sonnet-5
 - tokens_used: not tracked this session
 - tokens_budget: 50000

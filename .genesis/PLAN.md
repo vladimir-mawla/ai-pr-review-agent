@@ -196,7 +196,8 @@ a paid/external credential (M8, M10–M13) come after, per the user-approved ord
 - **Phase:** Phase 02 — Frontend / Phase 09 — Evaluation / Phase 18 — CI/CD for AI
 - **Files / freeze boundary:** `frontend/src/app/**`, `frontend/components/**`, `frontend/package.json` (+ the Next.js/TypeScript project config it implies — `tsconfig.json`, `next.config.*` — none of which exists yet), `backend/evaluation/{golden_dataset,judge,regression_gate}.py`, `.github/workflows/eval-gate.yml`
 - **Demo command:** `npm --prefix frontend run build && npm --prefix frontend run dev & pytest tests/eval/test_regression_gate.py -v`
-- **Success criteria:** The dashboard's economics page renders non-zero cost figures sourced from `pr_cost_hourly`; the regression gate fails CI when run against a deliberately-degraded fixture judge score, and passes against the baseline.
+- **Success criteria (ORIGINAL, written before M12 was scoped out of this build — kept verbatim for history, clause 1 now marked ASPIRATIONAL/unmet as literally written, not the operative bar — see the AMENDED line below):** The dashboard's economics page renders non-zero cost figures sourced from `pr_cost_hourly`; the regression gate fails CI when run against a deliberately-degraded fixture judge score, and passes against the baseline.
+- **Success criteria (AMENDED 2026-08-31, L2 DEBUG on L4 VERIFY's REJECT of M13 — this line is added on top of, not instead of, the line above, so a future reader can see the bar's actual status without losing the original text):** Clause 1's literal "`pr_cost_hourly`" is a TimescaleDB continuous aggregate that belongs to M12 (Tiger Cloud Migration), which was disclosed as deliberately skipped/adapted at L1 BUILD time (see this section's own ADAPTATION note above) — it does not exist, and clause 1 as literally written is UNMET, not merely reinterpreted. The SUBSTANCE of clause 1 — the dashboard's economics page renders real, non-zero cost figures — IS met, via plain SQL over `agent_events` (`backend.database.repository.EventRepository.aggregate_llm_calls_by_agent`), grouped by `(agent, model)` exactly as a continuous aggregate would be, structured so a future M12 swap is a narrow change to that one method's SQL only. Clause 2 (the regression gate fails/passes correctly) was independently re-verified true, but an independent L4 VERIFY session separately REJECTED this milestone for two defects clause 2's wording does not cover: (a) `/costs` summed ~$40,261 of 2030-dated `budget-guard-*` fixture rows into "real" spend with no date filter, no test-prefix exclusion, and a false "Nothing on these pages is fabricated" homepage claim — fixed this session (date + review_id-prefix exclusion, both mechanisms, with the exclusions disclosed on the page rather than silently dropped; see this session's final report's DEFECT1_FIX); (b) `.github/workflows/eval-gate.yml` triggered only on `workflow_dispatch` and a weekly cron, never on a pull_request, so nothing could actually block a quality-degrading merge despite this milestone's outcome text saying it does — fixed this session by adding a `pull_request` trigger (targeting `main`), a loud, non-vacuous failure when `ANTHROPIC_API_KEY` is absent (both for a genuine misconfiguration and, distinctly, for the structural fork-PR secret restriction), while keeping `workflow_dispatch` and the weekly cron as-is (see DEFECT2_FIX). The eval gate now genuinely runs — and can genuinely block a merge — on every pull request targeting `main`, not only on a manual dispatch or a once-a-week schedule.
 - **Loops:** L1, L2, L3, L4
 - **Skills:** canon + tdd + **design-system skill (MANDATORY for frontend)** + llmops-ai-agents
 - **Token budget:** 50000
@@ -904,3 +905,81 @@ number with dated reasoning, don't just loosen the assertion").
   a regression gate.
 
   L4 VERIFY on M13 has not yet run — see `checkpoints/CURRENT.md`.
+
+- **2026-08-31 — M13 (Dashboard + Evaluation/CI Gate) — L4 VERIFY REJECT, then L2 DEBUG.** An
+  independent L4 VERIFY session rejected M13 for two blocking defects, neither
+  a false claim about work that was never done, but real bugs in work that
+  was: (1) `/costs`' "Total spend across every agent" summed every
+  `agent_events` `llm.call` row unconditionally, including ~19 2030-dated
+  `budget-guard-*` fixture rows (~$40,261, `$97468.709561` shown instead of
+  the real `$0.076917`) at the SAME `(agent='security',
+  model='claude-haiku-4-5')` key genuine calls use, with no date filter, no
+  test-prefix exclusion, and no provenance flag anywhere in
+  `_AGGREGATE_LLM_CALLS_BY_AGENT_SQL` or the API layer — while the frontend
+  homepage asserted "Nothing on these pages is fabricated", which was false
+  as written; (2) `.github/workflows/eval-gate.yml` triggered only on
+  `workflow_dispatch` and a Monday cron, never a `pull_request`, so nothing
+  could ever block a quality-degrading merge despite this milestone's own
+  outcome text claiming it does.
+
+  **Fixed, both, this session (L2 DEBUG):**
+  - `EventRepository.aggregate_llm_calls_by_agent` now excludes, from the
+    totals, any row future-dated (`ts > now()`) OR matching a grep-verified
+    known test/fixture `review_id` prefix (`budget-guard-`, `precision-`,
+    `trace-reconstruction-`, `orchestrator-run-`, `append-only-`,
+    `live-test-`, `m11-live-` — every one confirmed, by grep, to be
+    generated ONLY by code under `tests/`, never by any production call
+    path) — deliberately BOTH mechanisms, since the real production data
+    contained cases only one alone would have missed (151 of the 170
+    `budget-guard-*` rows were PAST-dated, from before this project's own
+    M8 schema-isolation fix landed, so a future-date-only filter would have
+    missed them; a prefix-only filter would miss a future-dated row with an
+    unrecognized prefix). Every excluded row is still counted: a new
+    `ExclusionSummary` (row count, dollar sum, broken down by which
+    mechanism excluded it) is returned alongside the honest totals and
+    rendered on `/costs` in its own "Exclusions (transparency, not
+    silence)" card, rather than silently dropped. The homepage's false
+    "Nothing on these pages is fabricated" claim was replaced with an
+    accurate one that also links to the exclusions disclosure. Verified
+    against the real, already-polluted production database: before the fix,
+    `/api/agent-metrics` returned `total_cost_usd: "97468.709561"`; after,
+    it returns `total_cost_usd: "0.076917"` (the genuine `local-*`/
+    `m8-closeout-demo2` operator spend) with `exclusions.excluded_row_count:
+    255` / `excluded_cost_usd: "97468.632644"` disclosed alongside it. Three
+    new integration tests in `tests/integration/test_dashboard_api.py`
+    (`TestSyntheticRowsExcludedFromTotals`) seed one real row + one
+    synthetic row (a future-dated case and, separately, a past-dated
+    test-prefixed case) each and assert only the real row is counted while
+    the synthetic one is reported as an exclusion.
+  - `.github/workflows/eval-gate.yml` gained a `pull_request` trigger
+    (targeting `main`), kept `workflow_dispatch` and the weekly cron
+    unchanged. A new "Guard" step fails loudly (not silently skips, not
+    vacuously passes) when this is a fork PR, with a message distinct from
+    the pre-existing "secret not configured" failure, since GitHub
+    Actions withholds repository secrets from fork-PR `pull_request` runs
+    structurally — not a misconfiguration a re-added secret would fix. See
+    that file's own header comment for the full trigger-choice history
+    (original reasoning kept, correction appended, per this project's own
+    amendment discipline) and the fork-handling justification.
+    `actionlint` and a real YAML parse both ran clean on the edited file;
+    every path it references (`tests/eval/test_regression_gate.py`, the
+    `dev` extra in `pyproject.toml`) was confirmed to exist. NOT verified
+    (no real push/PR can be simulated locally): that GitHub actually
+    withholds the secret on a real fork PR run, and that a real required-
+    status-check branch-protection rule wired to this job behaves as
+    described.
+
+  **Also this session (non-blocking, flagged in L4 VERIFY's report as
+  worth closing while here):** `backend.hitl.queue.InMemoryHitlQueue`
+  (confirmed, by grep, to have zero production call sites — only its own
+  now-deleted unit test referenced it) was removed as dead code, per this
+  project's standing gate against modules nothing calls;
+  `route_review` itself is untouched. See this session's final report for
+  the full account, including the ROOT_CAUSE_JUDGEMENT on whether the real
+  root cause was the missing filter or tests writing fixtures into the
+  production `agent_events` table at all (both, with the filter judged the
+  correct fix to land now and the test-isolation gap logged as follow-up,
+  not fixed here).
+
+  L4 VERIFY on M13 (this session's fixes) has not yet re-run — see
+  `checkpoints/CURRENT.md`.
