@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>M13 Explained — Operator Dashboard + Evaluation/CI Gate</title>
+<style>
+  :root {
+    --bg: #f7f7f5;
+    --bg-card: #ffffff;
+    --ink: #1b1f23;
+    --mut: #5b6472;
+    --line: #e2e4e8;
+    --accent: #2f6feb;
+    --accent-ink: #ffffff;
+    --ok: #1a7f37;
+    --warn: #9a6700;
+    --bad: #cf222e;
+    --code-bg: #f0f1f3;
+    --pill-bg: #eef2ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1117;
+      --bg-card: #161b22;
+      --ink: #e6edf3;
+      --mut: #9aa4b2;
+      --line: #2d333b;
+      --accent: #6ea8fe;
+      --accent-ink: #0d1117;
+      --ok: #3fb950;
+      --warn: #d29922;
+      --bad: #f85149;
+      --code-bg: #1c2128;
+      --pill-bg: #1c2440;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1117;
+    --bg-card: #161b22;
+    --ink: #e6edf3;
+    --mut: #9aa4b2;
+    --line: #2d333b;
+    --accent: #6ea8fe;
+    --accent-ink: #0d1117;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --bad: #f85149;
+    --code-bg: #1c2128;
+    --pill-bg: #1c2440;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    font-size: 16px;
+  }
+  .page { max-width: 880px; margin: 0 auto; padding: 40px 20px 100px; }
+  header.hero { margin-bottom: 32px; }
+  header.hero .kicker {
+    color: var(--accent);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-size: 12.5px;
+    margin: 0 0 10px;
+  }
+  h1 { font-size: clamp(26px, 4vw, 36px); margin: 0 0 12px; line-height: 1.2; }
+  .lede { color: var(--mut); font-size: 17px; max-width: 70ch; }
+  nav.toc {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin: 28px 0 40px;
+  }
+  nav.toc h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--mut);
+    margin: 0 0 10px;
+  }
+  nav.toc ol { margin: 0; padding-left: 20px; columns: 2; column-gap: 24px; }
+  nav.toc li { margin: 4px 0; break-inside: avoid; }
+  nav.toc a { color: var(--ink); text-decoration: none; border-bottom: 1px dashed var(--line); }
+  nav.toc a:hover { border-bottom-color: var(--accent); color: var(--accent); }
+
+  section { margin: 56px 0; }
+  section > h2 {
+    font-size: 22px;
+    margin: 0 0 16px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--line);
+  }
+  section > h2 .num { color: var(--accent); font-variant-numeric: tabular-nums; margin-right: 10px; }
+  h3 { font-size: 17px; margin: 26px 0 10px; }
+  p { margin: 12px 0; }
+  a { color: var(--accent); }
+  a:focus-visible, button:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .card { background: var(--bg-card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 22px; margin: 16px 0; }
+  .callout { border-left: 4px solid var(--accent); background: var(--pill-bg); border-radius: 8px; padding: 14px 18px; margin: 18px 0; }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.ok { border-left-color: var(--ok); }
+  .callout.bad { border-left-color: var(--bad); }
+  .callout .label {
+    font-weight: 700;
+    font-size: 12.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--mut);
+    margin-bottom: 6px;
+  }
+
+  code {
+    background: var(--code-bg);
+    padding: 1px 6px;
+    border-radius: 5px;
+    font-size: 0.9em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    white-space: pre;
+    font-size: 13.5px;
+    line-height: 1.55;
+  }
+  pre code { background: none; padding: 0; border-radius: 0; }
+
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14.5px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--mut); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .tablewrap { overflow-x: auto; }
+
+  .pill {
+    display: inline-block;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 2px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    color: var(--mut);
+    white-space: nowrap;
+  }
+  .pill.ok { color: var(--ok); border-color: var(--ok); }
+  .pill.bad { color: var(--bad); border-color: var(--bad); }
+  .pill.warn { color: var(--warn); border-color: var(--warn); }
+
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 18px 0; }
+  .flow .node {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 13.5px;
+    min-width: 120px;
+    text-align: center;
+  }
+  .flow .node.core { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .flow .node.bad { border-color: var(--bad); color: var(--bad); font-weight: 600; }
+  .flow .node.ok { border-color: var(--ok); color: var(--ok); font-weight: 600; }
+  .flow .node.warn { border-color: var(--warn); color: var(--warn); font-weight: 600; }
+  .flow .arrow { color: var(--mut); font-size: 18px; }
+  .flow.vertical { flex-direction: column; align-items: stretch; }
+  .flow.vertical .node { text-align: left; }
+  .flow.vertical .arrow { text-align: center; }
+
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+  @media (max-width: 640px) { .compare { grid-template-columns: 1fr; } }
+  .compare .col { border-radius: 12px; padding: 16px 18px; border: 1px solid var(--line); }
+  .compare .col.before { background: color-mix(in srgb, var(--bad) 6%, var(--bg-card)); }
+  .compare .col.after { background: color-mix(in srgb, var(--ok) 6%, var(--bg-card)); }
+  .compare h4 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .compare.before-after .before h4 { color: var(--bad); }
+  .compare.before-after .after h4 { color: var(--ok); }
+
+  .module-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin: 18px 0; }
+  .module-card { background: var(--bg-card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .module-card h4 {
+    margin: 0 0 6px;
+    font-size: 15px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: var(--accent);
+  }
+  .module-card p { margin: 6px 0 0; font-size: 14px; color: var(--mut); }
+
+  .lane-grid { display: flex; flex-wrap: wrap; gap: 12px; margin: 18px 0; align-items: stretch; }
+  .lane {
+    flex: 1 1 220px;
+    border-radius: 12px;
+    border: 2px solid var(--line);
+    padding: 14px 16px;
+    background: var(--bg-card);
+  }
+  .lane .lane-tag {
+    font-size: 11.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--mut);
+    margin-bottom: 6px;
+  }
+  .lane.busy { border-color: var(--bad); }
+  .lane.busy .lane-tag { color: var(--bad); }
+  .lane.ok { border-color: var(--ok); }
+  .lane.ok .lane-tag { color: var(--ok); }
+  .lane p { font-size: 13.5px; margin: 6px 0 0; }
+
+  ol.gaps li, ul.plain li { margin: 8px 0; }
+
+  .timeline { margin: 20px 0; padding: 0; list-style: none; }
+  .timeline li {
+    position: relative;
+    padding: 4px 0 18px 26px;
+    border-left: 2px solid var(--line);
+    margin-left: 6px;
+  }
+  .timeline li:last-child { border-left-color: transparent; padding-bottom: 0; }
+  .timeline li::before {
+    content: "";
+    position: absolute;
+    left: -7px;
+    top: 6px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--bg-card);
+    border: 2px solid var(--accent);
+  }
+  .timeline li.reject::before { border-color: var(--bad); }
+  .timeline li.approve::before { border-color: var(--ok); }
+  .timeline li .when { font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .timeline li.reject .when { color: var(--bad); }
+  .timeline li.approve .when { color: var(--ok); }
+
+  details.quiz {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 18px;
+    margin: 16px 0;
+  }
+  details.quiz summary { cursor: pointer; font-weight: 600; list-style: none; }
+  details.quiz summary::-webkit-details-marker { display: none; }
+  details.quiz summary::before { content: "▸ "; color: var(--accent); }
+  details.quiz[open] summary::before { content: "▾ "; }
+  details.quiz .q { font-weight: 600; margin-bottom: 4px; }
+  details.quiz .answer { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
+  details.quiz .answer .verdict { font-weight: 700; color: var(--ok); }
+
+  footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--mut); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <p class="kicker">Genesis L4 · Explain Diff · Milestone M13</p>
+    <h1>Operator Dashboard + Evaluation/CI Gate</h1>
+    <p class="lede">
+      M13 gives this project two things it never had before: eyes (a
+      dashboard an operator can actually look at) and a brake (CI that can
+      block a bad merge before it lands). Both arrived with a real,
+      instructive failure along the way — a cost page that briefly told an
+      operator they'd spent $97,468.71 they hadn't, and an eval gate that
+      ran on every push except the one moment it needed to: a pull request.
+      This page covers why the dashboard reads through a JSON API instead
+      of the database directly, why <code>pr_cost_hourly</code> doesn't
+      exist and what stands in for it, the centerpiece cost-dashboard
+      defect and its honest limits, the LLM-as-judge and what its own
+      numbers do and don't prove, and why a green CI check that runs
+      nothing is worse than no CI at all. Diff range
+      <code>5a62cec</code>&nbsp;&hellip;&nbsp;<code>0dc4dff</code> on
+      <code>main</code> — 11 commits, 43 files changed, 10,543
+      insertions(+), 92 deletions(-).
+    </p>
+  </header>
+
+  <nav class="toc">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#background">Background: what a dashboard is for</a></li>
+      <li><a href="#views-api">Three views, one JSON API</a></li>
+      <li><a href="#m12-standin">Why <code>pr_cost_hourly</code> doesn't exist</a></li>
+      <li><a href="#centerpiece">The centerpiece: $97,468.71</a></li>
+      <li><a href="#root-cause">The real root cause</a></li>
+      <li><a href="#judge">LLM-as-judge: who checks the checker</a></li>
+      <li><a href="#ci">CI: a green check that ran nothing</a></li>
+      <li><a href="#quiz">Quiz</a></li>
+    </ol>
+  </nav>
+
+  <section id="background">
+    <h2><span class="num">1</span>Background: what a dashboard is for</h2>
+    <p>
+      Every prior milestone in this project made the pipeline itself more
+      capable — a real specialist, real retrieval, a real GitHub round trip.
+      None of them gave a human operator anywhere to <em>look</em>. If a
+      review sat queued for human approval, the only way to find it was to
+      query Postgres by hand. If spend crept toward the daily cap, the only
+      warning was <code>BudgetGuard</code> throwing an exception mid-review.
+      If something went wrong three specialist calls deep into a review, the
+      only record was scattered log lines and whatever
+      <code>agent_events</code> rows happened to exist. An operator dashboard
+      exists to answer three concrete questions without a database client:
+      <em>what needs my attention right now, what is this costing me, and
+      what actually happened on this one review.</em>
+    </p>
+    <p>
+      None of that would be answerable without M7's events spine. Every
+      specialist call, every routing decision, every span this project's
+      orchestrator produces has been landing in the append-only
+      <code>agent_events</code> table since M7 — not because M7 anticipated
+      a dashboard, but because an audit trail was worth building on its own
+      merits (compliance, debugging, cost accounting). M13 is the first
+      milestone that actually reads that trail back out for a human, rather
+      than only writing to it. The durable <code>reviews</code> table this
+      milestone also added (outside its literal freeze boundary, disclosed
+      in the M13 build report) exists for the same reason in miniature:
+      <code>agent_events</code>' own <code>decision</code> event carries only
+      an outcome and a confidence number, never the findings or the routing
+      reason a human actually needs to see before approving or rejecting a
+      queued review.
+    </p>
+    <div class="callout">
+      <div class="label">Why this matters before the centerpiece defect</div>
+      Keep this in mind for later: a dashboard's entire value proposition is
+      that an operator can trust the numbers on the screen without going and
+      checking the database themselves. That trust is exactly what the
+      centerpiece defect below broke, and exactly what the fix had to
+      restore — not just quietly correct the number, but explain what got
+      excluded and why.
+    </div>
+  </section>
+
+  <section id="views-api">
+    <h2><span class="num">2</span>Three views, one JSON API</h2>
+    <p>
+      The dashboard (<code>frontend/</code>, Next.js 15) has three Client
+      Component views, each answering one of the questions above:
+    </p>
+    <div class="module-grid">
+      <div class="module-card">
+        <h4>/hitl</h4>
+        <p>The HITL queue — every review currently awaiting human approval,
+        with its findings, severities, confidence, and the exact reason
+        <code>route_review</code> queued it instead of auto-posting.</p>
+      </div>
+      <div class="module-card">
+        <h4>/costs</h4>
+        <p>Per-agent cost/latency — call count, total cost, average latency,
+        and token usage, grouped by <code>(agent, model)</code>. This is the
+        centerpiece view below.</p>
+      </div>
+      <div class="module-card">
+        <h4>/trace/[reviewId]</h4>
+        <p>Trace reconstruction — one review, end to end, in time order,
+        from <code>review_id</code> alone: every span, LLM call, and routing
+        decision recorded for it.</p>
+      </div>
+    </div>
+    <p>
+      All three fetch from a single new backend module,
+      <code>backend/api/dashboard.py</code>, rather than a Next.js server
+      component querying Postgres directly. That choice was deliberate, not
+      a default:
+    </p>
+    <div class="flow">
+      <div class="node bad">Next server component<br><span style="color:var(--mut);font-size:12px">would need its own SQL client</span></div>
+      <div class="arrow">&rarr;</div>
+      <div class="node bad">psycopg-equivalent in TS<br><span style="color:var(--mut);font-size:12px">duplicates schema knowledge</span></div>
+    </div>
+    <div class="flow" style="margin-top:6px">
+      <div class="node ok">Client Component<br><span style="color:var(--mut);font-size:12px">frontend/src/lib/api.ts</span></div>
+      <div class="arrow">&rarr;</div>
+      <div class="node core">backend/api/dashboard.py<br><span style="color:var(--mut);font-size:12px">JSON over HTTP</span></div>
+      <div class="arrow">&rarr;</div>
+      <div class="node">EventRepository / ReviewRepository<br><span style="color:var(--mut);font-size:12px">the SAME classes M7/M13 already own</span></div>
+    </div>
+    <p>
+      A Next server component reading Postgres directly would need a second,
+      independent SQL client speaking TypeScript, duplicating exactly the
+      schema knowledge <code>backend/database/{repository,review_store}.py</code>
+      already encode — the two would drift the moment one side changed a
+      column or a query without the other noticing. Every prior milestone in
+      this project has kept the architecture <b>inward-only</b>
+      (ADR-002: outer layers depend on inner ones, never the reverse, enforced
+      by <code>lint-imports</code>); a second database client living in
+      <code>frontend/</code> would be a load-bearing exception to that rule
+      for no real benefit, since a thin JSON API costs almost nothing to
+      add and keeps exactly one component (<code>EventRepository</code>)
+      responsible for knowing what a row in <code>agent_events</code> means.
+    </p>
+  </section>
+
+  <section id="m12-standin">
+    <h2><span class="num">3</span>Why <code>pr_cost_hourly</code> doesn't exist</h2>
+    <p>
+      PLAN.md's original M13 text described the cost view as reading "from
+      the continuous aggregates" — specifically a TimescaleDB materialized
+      view named <code>pr_cost_hourly</code>, alongside <code>agent_health_1m</code>.
+      Both are M12 (Tiger Cloud Migration) deliverables. M12 needs a real
+      Tiger Cloud account this project does not have, and was disclosed as
+      deliberately skipped when M13 was scoped — so <code>pr_cost_hourly</code>
+      was never going to exist for M13 to read from, continuous aggregate or
+      otherwise.
+    </p>
+    <p>
+      What stands in for it is plain SQL over the same rows a continuous
+      aggregate would eventually pre-summarize:
+      <code>EventRepository.aggregate_llm_calls_by_agent</code>, which groups
+      real, unaggregated <code>agent_events</code> rows by <code>(agent,
+      model)</code> — the same grouping key a TimescaleDB continuous
+      aggregate over this data would use. The method's own docstring names
+      this explicitly as an M12 swap point, and the swap really is narrow:
+    </p>
+    <div class="compare before-after">
+      <div class="col before">
+        <h4>Now (M13, plain SQL)</h4>
+        <pre><code>FROM agent_events
+WHERE event_type = 'llm.call'
+  ...
+GROUP BY agent, model</code></pre>
+      </div>
+      <div class="col after">
+        <h4>Later (M12, continuous aggregate)</h4>
+        <pre><code>FROM agent_health_1m   -- or
+                       -- pr_cost_hourly
+GROUP BY agent, model  -- (or SUM of
+                       -- pre-summed buckets)</code></pre>
+      </div>
+    </div>
+    <p>
+      Only this one method's <code>FROM</code>/<code>GROUP BY</code> would
+      change — the call site (<code>backend.api.dashboard.get_agent_metrics</code>)
+      and the method's own return shape (<code>AgentMetrics</code>) stay
+      exactly as they are, because a continuous aggregate grouped the same
+      way produces rows shaped identically to what this query already
+      returns. This is the same "structure the stand-in so the real swap is
+      narrow" discipline this project has used before — M9's fixture embedder
+      and M11's mock GitHub client were both built the same way, satisfying
+      the same Protocol/shape the real implementation would.
+    </p>
+  </section>
+
+  <section id="centerpiece">
+    <h2><span class="num">4</span>The centerpiece: $97,468.71</h2>
+    <p>
+      The plain-SQL query above is exactly correct at what it was written to
+      do: sum every <code>llm.call</code> row's <code>cost_usd</code>,
+      grouped by <code>(agent, model)</code>. The defect wasn't in the
+      arithmetic — it was in what the query was summing.
+    </p>
+    <p>
+      This project's own test suite has, since M8, occasionally written
+      fixture rows carrying deliberately far-future timestamps directly into
+      the real <code>agent_events</code> table — not a mistake, but a
+      genuine test-isolation technique: pin a row to 2030 so it can never
+      collide with "today"'s real spend window, prove
+      <code>BudgetGuard</code> correctly ignores it, done. That technique
+      works perfectly for the query it was designed against
+      (<code>sum_llm_cost_for_day</code>, bounded to
+      <code>[day_start, day_start + 1 day)</code>). Nobody had written a
+      query that summed <em>all time</em> before M13's cost view did — and
+      when they did, every one of those 2030-dated rows, still sitting in
+      the append-only table years later, landed in the same bucket as a
+      genuine call.
+    </p>
+    <div class="callout bad">
+      <div class="label">What an independent L4 VERIFY session actually found</div>
+      19 rows dated in 2030, ~$40,261, at the exact same
+      <code>(agent='security', model='claude-haiku-4-5')</code> key genuine
+      calls use — no date filter, no test-prefix exclusion, no provenance
+      flag anywhere in the query or the API layer. <code>/costs</code>
+      rendered <code>total_cost_usd: "97468.709561"</code>. The real number
+      was <code>$0.076917</code>.
+    </div>
+    <p>
+      The reason this cleared $97,468 and not merely $40,261 matters: those
+      19 future-dated rows were not the only synthetic rows in the table.
+      170 total rows carried the <code>budget-guard-</code> prefix from this
+      same fixture generator — only 19 of them future-dated (2030); the
+      other <b>151 were past-dated</b>, written to 2020-06-14/15 before this
+      project's own M8 schema-isolation fix landed. A filter that only
+      excluded future timestamps would have caught the 19 and silently
+      missed the 151 sitting right alongside them, still masquerading as
+      real spend from years ago:
+    </p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Mechanism alone</th><th>Catches</th><th>Misses</th></tr></thead>
+        <tbody>
+          <tr><td>Future-dated only (<code>ts &gt; now</code>)</td><td>19 rows (2030)</td><td>151 rows (2020, same prefix)</td></tr>
+          <tr><td>Known prefix only (<code>review_id LIKE ...</code>)</td><td>all 170 <code>budget-guard-*</code> rows</td><td>a future-dated row with an <em>unrecognized</em> prefix</td></tr>
+          <tr><td><b>Both, combined</b> (what shipped)</td><td>everything either alone catches</td><td>only an unlisted, non-future-dated synthetic prefix — see the honest limit below</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      That's why the fix runs both mechanisms deliberately, not either one
+      alone: the real production data contained cases only one alone would
+      have missed. Neither mechanism is redundant with the other.
+    </p>
+    <h3>Why "reads a real table" wasn't enough to be honest</h3>
+    <p>
+      Before the fix, the homepage's own copy claimed <em>"Nothing on these
+      pages is fabricated"</em> — and in one narrow, literal sense that was
+      even true: <code>/costs</code> never invented a number, never rendered
+      a placeholder, and every figure it showed came from a real SQL query
+      against a real table. But "sourced from a real table" and "honest"
+      are not the same claim. A query is only as honest as what it chooses
+      to include, and this one included test fixtures a human operator had
+      no way to distinguish from their own team's genuine Anthropic spend.
+      An operator reading $97,468.71 on a Sunday morning would have no
+      reason to doubt it — the page said, in as many words, that nothing on
+      it was fabricated.
+    </p>
+    <h3>Why silently dropping the rows would have been its own honesty problem</h3>
+    <p>
+      The obvious-looking fix is "just filter the synthetic rows out and
+      move on" — and the query-level filter is exactly what shipped. But a
+      dashboard that silently drops 255 rows and says nothing about it has
+      swapped one kind of dishonesty for another: an operator now sees a
+      small, clean number with no way to know that ~$97,468 of activity in
+      the underlying table was quietly excluded from what they're looking
+      at. That's a real difference from "there was never anything to
+      exclude." So the fix pairs the filter with an <code>ExclusionSummary</code>
+      — row count and dollar total, broken down by which mechanism excluded
+      each row — returned alongside the honest totals and rendered on
+      <code>/costs</code> in its own disclosure card:
+    </p>
+    <div class="card">
+      <b>Exclusions (transparency, not silence)</b>
+      <p class="muted" style="color:var(--mut);margin:6px 0 0;font-size:14px">
+        255 rows excluded, $97,468.632644 total &mdash; 19 future-dated
+        ($40,261-ish) + 151 past-dated test-fixture rows + overlap, broken
+        out by mechanism. Not hidden; not mixed in.
+      </p>
+    </div>
+    <p>
+      The homepage's claim was rewritten to match: it now says every figure
+      is a real query result while disclosing, in the same breath, that the
+      underlying tables can (and did) contain synthetic rows the Cost &amp;
+      Latency view filters out and discloses — rather than either silently
+      mixing them in (the original defect) or silently dropping them (the
+      failure mode the disclosure card exists to avoid).
+    </p>
+    <h3>The honest limit: a denylist, not an allowlist</h3>
+    <p>
+      The second, independent L4 VERIFY session that ultimately APPROVEd
+      M13 did not stop at re-checking the arithmetic. It classified every
+      distinct <code>review_id</code> prefix present in the real database
+      itself — not trusting the fix session's own list — and found no false
+      negatives in the seven prefixes the fix excludes. Then it went
+      further: it opened a transaction, inserted a <b>today-dated</b> row
+      under a prefix <em>not</em> on the exclusion list, queried
+      <code>/costs</code>, confirmed the row counted as real spend, and
+      rolled the transaction back rather than leaving a stray row in the
+      real database.
+    </p>
+    <div class="callout warn">
+      <div class="label">The ruling</div>
+      The exclusion mechanism is a <b>denylist</b> — a best-effort,
+      code-level list of known-synthetic prefixes — not an <b>allowlist</b>
+      that could prove a row real. A row can be wrong in a way this filter
+      cannot catch: today-dated, from a genuinely new (or renamed, or
+      buggy) fixture generator nobody has grep-verified yet. Nothing about
+      this makes the fix wrong to land now — the alternative, a hard
+      allowlist that only counts rows carrying an explicit provenance flag,
+      needs a schema change this milestone did not make. It is a real,
+      disclosed limit, not a hidden one.
+    </div>
+  </section>
+
+  <section id="root-cause">
+    <h2><span class="num">5</span>The real root cause</h2>
+    <p>
+      The exclusion filter is the correct fix to land in this milestone —
+      but it is a <b>compensating control</b>, not the fix for the actual
+      defect. The actual defect is that this project's own tests write
+      fixture rows directly into the real, production, append-only
+      <code>agent_events</code> table at all, rather than into a disposable
+      schema nothing downstream ever has to filter back out.
+    </p>
+    <p>
+      Two of this milestone's own test files already show what the correct
+      pattern looks like: <code>test_budget_guard_events.py</code> and the
+      new <code>test_dashboard_api.py</code> both use per-run disposable
+      schemas — a real Postgres connection, but to a schema created fresh
+      for that test run and torn down after, never the shared production
+      table. <code>test_events_spine.py</code>, an M7 test file, was never
+      migrated to that pattern: it still writes fixture rows (roughly 4 per
+      run) directly into production <code>agent_events</code> on every free
+      <code>pytest</code> run — and because the table is append-only by its
+      own design (a database-level trigger this project built specifically
+      to make deletion impossible even for a superuser), those rows are
+      permanent. Every additional session that runs the free suite adds a
+      few more rows a future query will need to know to exclude.
+    </p>
+    <p>
+      A filter that lists known-synthetic prefixes will always be chasing
+      whatever new prefix the next un-migrated test file happens to invent.
+      Migrating <code>test_events_spine.py</code> to a disposable schema
+      would stop the bleeding at the source — the filter would then be a
+      belt-and-braces safeguard against old, already-written rows rather
+      than the only thing standing between a new test fixture and a future
+      operator's real cost figure. This was judged correct to log as
+      follow-up, not to fix inside this same session — see
+      <code>checkpoints/CURRENT.md</code>'s Deferred list.
+    </p>
+  </section>
+
+  <section id="judge">
+    <h2><span class="num">6</span>LLM-as-judge: who checks the checker</h2>
+    <p>
+      The regression gate needs something that can read a produced
+      <code>Review</code> and decide, in the same way a human reviewer
+      would, whether it's actually good — a judgment call, not a
+      diffable assertion. <code>backend/evaluation/judge.py</code>'s
+      <code>AnthropicJudge</code> makes that call by asking a second LLM to
+      score the candidate review against a golden case's expected findings.
+    </p>
+    <div class="callout">
+      <div class="label">Why the judge can't be the model that wrote the review</div>
+      The four specialists all call <code>claude-haiku-4-5</code>. The
+      judge deliberately calls <code>claude-sonnet-5</code> instead — a
+      different, stronger model in a different tier. A model judging its
+      own family's blind spots is a weaker check than an independent model
+      grading it: any systematic bias haiku-tier reviews share (a class of
+      finding they're prone to miss, a phrasing they're prone to
+      hallucinate) is exactly the kind of error a same-family judge is
+      least likely to catch, because it may share the same blind spot.
+    </div>
+    <p>
+      The regression gate (<code>backend/evaluation/regression_gate.py</code>)
+      averages the judge's score across the 4-case golden dataset and passes
+      iff the mean is <code>&gt;= 0.700</code>. That threshold is a
+      deliberate middle, not a round number: the dataset mixes a
+      hard must-catch case (missing a real SQL injection scores that case
+      &le; 0.4 under the judge's own rubric) with softer, nice-to-catch
+      cases. Set the bar at 0.9, ordinary judge scoring noise would flip
+      the gate on reruns with no real regression; set it at 0.5, a pipeline
+      that silently stopped catching the SQL-injection case entirely could
+      still pass by acing the softer cases. 0.700 requires catching
+      essentially every must-detect finding while tolerating normal noise
+      on the rest.
+    </p>
+    <h3>The honest measurement</h3>
+    <p>
+      An LLM judge is itself an unreliable instrument, and this project
+      measured that rather than assuming it away. <code>pytest -m live
+      tests/eval/test_regression_gate.py -v</code> made 9 real
+      <code>claude-sonnet-5</code> calls across this milestone's sessions,
+      scoring the same golden case ("sqli-basic") repeatedly on both a
+      genuinely correct review and a deliberately bad one. The result:
+      <b>zero within-group variance</b> was measured — the judge gave the
+      identical score to the identical input every time it was re-run — but
+      across all 9 calls, no score ever landed inside the 0.65&ndash;0.75
+      band that would actually test the gate's threshold under realistic
+      ambiguity. Zero variance on the cases actually measured is a real,
+      reassuring data point; it is also not proof the judge is stable near
+      the threshold that matters, because none of the 9 calls ever
+      approached it.
+    </p>
+    <p>
+      The other honest limit sits in <code>eval-gate.yml</code> itself: the
+      live-scored class,
+      <code>TestLiveJudgeDistinguishesGoodFromBadReviews</code>, scores
+      exactly <b>one</b> of the golden dataset's 4 cases on every trigger —
+      including the weekly cron meant to catch silent drift. The other
+      three golden cases (clean-code false-positive avoidance,
+      docs/tests-soft-expectation cases) are exercised only by the free,
+      canned-judge test classes, which prove the gate's own pass/fail
+      arithmetic but never actually re-score those cases with a real model.
+      A regression specific to those three case types — the pipeline
+      starting to hallucinate findings on clean diffs, say — would not be
+      caught by any currently-scheduled live run.
+    </p>
+  </section>
+
+  <section id="ci">
+    <h2><span class="num">7</span>CI: a green check that ran nothing</h2>
+    <p>
+      <code>.genesis/DONE.html</code> section 2 has carried a project-wide
+      gate since M1: <em>"Every CI job references test files that exist; CI
+      is green on a clean checkout."</em> It sat N/A for twelve milestones
+      because this project had no CI workflow to check at all — a direct,
+      deliberate reaction to the reference implementation this project
+      studies, whose own CI workflow pointed at two test files that do not
+      exist in that repository. A CI badge showing green tells a reader
+      "nothing is currently broken." A CI badge that is green because the
+      jobs it runs can't even find the files they're supposed to test is
+      worse than having no badge at all — it actively asserts something
+      false, with the specific authority a green checkmark carries.
+    </p>
+    <p>
+      <code>.github/workflows/ci.yml</code> is M13's answer: every
+      <code>run:</code> step's referenced path was confirmed to exist
+      before the workflow was committed, across 5 jobs — lint
+      (<code>ruff</code>), typecheck (<code>mypy --strict</code>), imports
+      (<code>lint-imports</code>), the free test suite (against real
+      Postgres/Redis/pgvector service containers), and the frontend build.
+      All 5 went green on the very first push to a real PR — not a claim
+      taken on faith, but this milestone's own build report's first
+      real-world test of the workflow file it had just written.
+    </p>
+    <p>
+      <code>eval-gate.yml</code>, the billable judge workflow, is
+      deliberately a separate file from <code>ci.yml</code> — every
+      <code>ci.yml</code> job is free by construction (pytest's own
+      <code>addopts</code> deselects every <code>live</code>-marked test by
+      default, and the workflow never sets an API key at all), so a
+      contributor opening a routine documentation PR never spends anyone's
+      money just by pushing. <code>eval-gate.yml</code> is where the real
+      cost lives, and it is exactly the workflow M13's own L4 VERIFY REJECT
+      centered on:
+    </p>
+    <ol class="timeline">
+      <li class="reject">
+        <span class="when">L1 BUILD</span>
+        <code>eval-gate.yml</code> triggered on <code>workflow_dispatch</code>
+        and a Monday 06:00 UTC cron only — reasoned, at the time, as keeping
+        routine development free of charge. It never ran on a
+        <code>pull_request</code>, so it structurally could not be wired up
+        as a required status check.
+      </li>
+      <li class="reject">
+        <span class="when">L4 VERIFY REJECT</span>
+        The milestone's own outcome text claimed the gate "blocks a merge
+        that degrades review quality." An independent verifier pointed out
+        that was false as written — nothing here could stop a
+        quality-degrading PR from merging, no matter how badly it scored,
+        because the gate never saw the PR at all.
+      </li>
+      <li>
+        <span class="when">L2 DEBUG</span>
+        Added a <code>pull_request</code> trigger targeting <code>main</code>,
+        kept <code>workflow_dispatch</code>/the weekly cron unchanged, and
+        added a "Guard" step that fails loudly — with a message distinct
+        from a missing-secret failure — when the run is on a fork PR, since
+        GitHub Actions structurally withholds repository secrets from
+        fork-PR <code>pull_request</code> runs; no amount of re-adding the
+        secret fixes that, and a fork PR is not silently skipped or
+        vacuously passed.
+      </li>
+      <li class="approve">
+        <span class="when">L4 VERIFY APPROVE</span>
+        Confirmed the fix by inspection (<code>actionlint</code> and a real
+        YAML parse clean, every referenced path confirmed to exist) — a
+        real fork-PR run and a real required-status-check configuration
+        could not be simulated locally, so those remain open items, not
+        false claims.
+      </li>
+    </ol>
+    <div class="callout warn">
+      <div class="label">Still open: running on every PR is not the same as blocking one</div>
+      <code>eval-gate.yml</code> now genuinely runs on every pull request
+      targeting <code>main</code>. But <code>main</code> currently has
+      <b>no branch protection at all</b> —
+      <code>gh api repos/.../branches/main/protection</code> returns a
+      plain 404. A workflow that runs and fails does not stop a merge
+      unless it is configured, on GitHub's side, as a required status
+      check. That is a one-time, repo-admin setting this session did not
+      have the standing to make unilaterally — logged as the sharpest open
+      item in this milestone's Deferred list, not silently left implied.
+    </div>
+  </section>
+
+  <section id="quiz">
+    <h2><span class="num">8</span>Quiz</h2>
+    <p>Three questions. Click each one to reveal the answer.</p>
+
+    <details class="quiz">
+      <summary class="q">1. `/costs`' fix could have shipped as "just filter the synthetic rows out of the SQL query" with no visible change to the page beyond a smaller number. Why did the actual fix add a whole "Exclusions" disclosure card instead of quietly filtering and saying nothing?</summary>
+      <div class="answer">
+        <p class="verdict">A dashboard that silently drops 255 rows worth ~$97,468 and shows a small clean number instead has traded one honesty problem for another — an operator has no way to know that activity was excluded from what they're looking at, only that the number looks trustworthy now.</p>
+        <p>
+          The whole reason a dashboard exists is that an operator trusts
+          the number on the screen without going to check the database
+          themselves. Silent inclusion (the original bug) breaks that trust
+          one way — a wildly wrong total. Silent exclusion would break it a
+          different way — a plausible-looking total that hides how much was
+          quietly removed to make it look that way. The
+          <code>ExclusionSummary</code>/disclosure-card design gives the
+          honest total AND tells the operator exactly what was excluded and
+          why, so neither failure mode applies.
+        </p>
+      </div>
+    </details>
+
+    <details class="quiz">
+      <summary class="q">2. The fix excludes rows two ways at once: future-dated (`ts &gt; now`) AND a list of known test-fixture `review_id` prefixes. Given that every future-dated row in the real database WAS a synthetic fixture row, why wasn't the future-dated check alone sufficient?</summary>
+      <div class="answer">
+        <p class="verdict">Of the 170 `budget-guard-*` fixture rows in the real database, only 19 were future-dated (2030); the other 151 were past-dated (2020-06-14/15), written before this project's own M8 schema-isolation fix landed. A future-date-only filter would have caught the 19 and silently missed the 151 sitting right next to them.</p>
+        <p>
+          The two mechanisms cover different, non-overlapping gaps: a
+          future timestamp alone proves a row can't be real (nothing in
+          this system's real call path can produce a `ts` ahead of
+          `now()`), regardless of its `review_id`; a known test prefix
+          proves a row is synthetic regardless of its timestamp. Each
+          catches real production cases the other alone would have missed
+          — which is exactly why the fix runs both, not either.
+        </p>
+      </div>
+    </details>
+
+    <details class="quiz">
+      <summary class="q">3. The second, independent L4 VERIFY session ran a rolled-back-transaction probe: insert a today-dated row under an unlisted `review_id` prefix, check `/costs`, then roll back. What did that probe prove, and why did it not block APPROVE?</summary>
+      <div class="answer">
+        <p class="verdict">It proved the unlisted row still counted as real spend — the exclusion mechanism is a denylist (a best-effort list of known-synthetic prefixes), not an allowlist that could positively verify a row is genuine.</p>
+        <p>
+          That's a structural, disclosed limit, not a defect the fix was
+          supposed to close: a hard allowlist that only trusts rows
+          carrying an explicit provenance flag would need a schema change
+          this milestone didn't make. The verifier judged the shipped
+          denylist the correct fix to land now — it closes the two real,
+          concretely-triggered defects (the 19 future-dated and 151
+          past-dated rows) — while recording the allowlist-vs-denylist gap
+          as exactly the kind of honest limit this project's own discipline
+          requires disclosing rather than hiding.
+        </p>
+      </div>
+    </details>
+  </section>
+
+  <footer>
+    Generated by the <code>explain-diff-html</code> skill for genesis L4
+    VERIFY. Diff range <code>5a62cec..0dc4dff</code> on <code>main</code>,
+    repository <code>vladimir-mawla/ai-pr-review-agent</code>. Source
+    inspected directly: <code>backend/database/repository.py</code>,
+    <code>backend/api/dashboard.py</code>,
+    <code>backend/evaluation/{judge,regression_gate}.py</code>,
+    <code>frontend/src/app/{page,costs/page}.tsx</code>,
+    <code>.github/workflows/{ci,eval-gate}.yml</code>,
+    <code>.genesis/{PLAN.md,checkpoints/CURRENT.md,DONE.html}</code>.
+  </footer>
+
+</div>
+</body>
+</html>
