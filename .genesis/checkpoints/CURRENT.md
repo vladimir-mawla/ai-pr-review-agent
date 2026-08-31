@@ -1,30 +1,186 @@
 # CURRENT
 - active_loop: none (between milestones)
 - target: M9
-- iteration: 2
-- last_gate: L2 DEBUG (2026-08-31) -- attempted the real-OpenAI-embedding
-  re-verification of M9 now that a credential was believed available;
-  BLOCKED, not completed -- see the M9 L2 DEBUG (2026-08-31) entry below
-  for the full account. The OpenAI key authenticates for real but the
-  account behind it has zero spendable credit, so the actual re-seed +
-  recall measurement this session was asked to produce could not be made.
-  Gates (fixture path, unchanged code otherwise) confirmed still green and
-  repeatable; the codebase gained one new, honestly-designed, real-key-
-  gated test that now makes `pytest -v` and PLAN.md's own demo command
-  exit 1 (not 0) in THIS environment specifically because that test
-  refuses to silently pass or skip past an unfunded key -- see below.
-- next_action: fund the OpenAI account behind the configured
-  OPENAI_API_KEY (it currently has zero spendable credit -- `POST
-  /v1/embeddings` returns `429 insufficient_quota` /
-  `credit_balance_exhausted` even though `GET /v1/models` returns 200),
-  then re-run `pytest tests/integration/test_hybrid_retrieval.py -v -k
-  RealOpenAI` to get a real recall@5 number on the actual
-  `text-embedding-3-large` backend. Only once that real number exists
-  (and, per that test's own docstring, `expected_miss_ids` is pinned to
-  whatever it actually is) does it make sense to re-run L4 VERIFY on M9 --
-  re-verifying now would just re-confirm the same blocker this session
-  already found.
-- M9 L2 DEBUG (2026-08-31) -- real-embedding re-verification attempted,
+- iteration: 3
+- last_gate: L2 DEBUG (2026-08-31, real-embedding re-verification COMPLETED)
+  -- the OpenAI account behind `OPENAI_API_KEY` is now funded (a real,
+  billable `POST /v1/embeddings` call for `text-embedding-3-large`
+  returned HTTP 200, a 256-dim non-zero vector, real tokens billed),
+  unblocking the re-seed + recall measurement the previous L2 DEBUG
+  session (entry immediately below) could not make. Re-seeded
+  `code_chunks` with real embeddings and measured recall@5 on the SAME,
+  unmodified 10-query fixture: **7/10 (70%)**, up from the fixture-
+  embedder's 4/10 -- real embeddings rescue 3 of the 6 fixture misses
+  (ids 1, 5, 8) and lose none of its 4 hits; 3 misses remain (ids 3, 4, 7).
+  Clause 1 re-verified against the real corpus too (a different real
+  function than the fixture-embedder example, since real embeddings now
+  win outright on that one -- see the full entry below). Added
+  `TestRecallOnRealOpenAIEmbeddings.
+  test_known_function_name_in_top_three_fused_results_with_real_embeddings`
+  and pinned `test_recall_at_five_with_real_openai_embeddings`'s
+  `expected_miss_ids` to `{3, 4, 7}`, both now passing for real (not
+  skipped, not erroring) against the funded account. Also fixed a real
+  cross-backend test-isolation bug this work surfaced (see below). All
+  gates green; `pytest -v` run twice, byte-identical 260 passed/0
+  failed/0 error/0 skipped both times. PLAN.md's own M9 demo command run
+  verbatim, combined exit 0. Committed granularly; pushed to origin/main.
+- next_action: M9's success criteria are now fully measured on both
+  backends and neither reaches the literal 100% recall@5 clause 2 asks
+  for (4/10 fixture, 7/10 real) -- clause 1 is demonstrated on both. This
+  is a genuine, investigated shortfall of the current retrieval design at
+  real-corpus scale (see ids 3/4/7's root causes in
+  `TestRecallOnRealOpenAIEmbeddings`'s docstring), not a credentials
+  blocker anymore. Whether to accept 70% as this milestone's final
+  answer, or invest in a retrieval-quality improvement (larger candidate
+  pool tried previously and rejected; a different fusion constant;
+  re-chunking strategy) before M9 is considered done, is now a real
+  product/scope decision for L4 VERIFY or the orchestrator to make --
+  not something to silently improve by touching the pinned query fixture.
+- M9 L2 DEBUG (2026-08-31, real-embedding re-verification COMPLETED) --
+  full account:
+
+  CONTEXT: earlier the same day, a session confirmed `OPENAI_API_KEY`
+  authenticated but the account had zero spendable credit (see the
+  BLOCKED entry immediately below for that session's full investigation).
+  This session was told the account is now funded, verified moments
+  before starting with a real, billable `POST /v1/embeddings` call
+  (`text-embedding-3-large`, `dimensions=256`) that returned HTTP 200, a
+  256-dim non-zero vector, and 2 tokens billed -- confirming the previous
+  blocker is genuinely resolved, not re-asserted on faith.
+
+  TASK 1 (re-seed with real embeddings): confirmed `code_chunks` is
+  TRUNCATE-and-reload on every seed run (no append-only invariant, unlike
+  `agent_events` -- `scripts/seed_code_chunks.py`'s own docstring and
+  code confirm this), then ran `EMBEDDER_BACKEND=openai python
+  scripts/seed_code_chunks.py --repo .` for real. Seeded 382 chunks (the
+  corpus size at the time, before this session's own test-file edits grew
+  it to 387 by adding 5 new top-level helper functions -- see TASK 4).
+  Batching at 64 confirmed to hold: an instrumented re-run of the
+  identical embedding logic recorded real batch sizes
+  `[64, 64, 64, 64, 64, 62]` for 382 chunks (later `[64, 64, 64, 64, 64,
+  64, 3]` for 387). Exact measured cost for one full reseed of 382 chunks:
+  147,801 tokens, $0.019214 at $0.13/M; for 387 chunks: 150,926 tokens,
+  $0.019620. Wall time ~9-10 seconds per reseed. Vector sanity check
+  against the real stored data: 382/387 rows, all exactly 256 dimensions,
+  zero all-zero vectors; cosine similarity between two genuinely related
+  chunks (`reciprocal_rank_fusion` and `HybridRetriever`, both in
+  `context_retriever.py`, both about hybrid retrieval) was 0.40, clearly
+  higher than two unrelated chunks (0.23 and 0.11) -- real semantic
+  clustering confirmed directly, not assumed.
+
+  TASK 2 (measure recall@5, same 10 queries, unchanged): real result
+  **7/10 (70%)**, misses ids 3 (`CircuitBreaker`), 4 (`authenticate the
+  request`), 7 (`route_review`). Full per-query vector/FTS/fused rank
+  breakdown computed directly (replaying `HybridRetriever.hybrid_search`'s
+  exact candidate-pool-then-RRF logic) and recorded in
+  `TestRecallOnRealOpenAIEmbeddings`'s own docstring in
+  `tests/integration/test_hybrid_retrieval.py`. Compared query-by-query
+  against the fixture baseline (misses {1,3,4,5,7,8}): real embeddings
+  rescue ids 1, 5, 8 and lose NONE of the fixture's 4 hits (ids 2, 6, 9,
+  10) -- no regression from switching backends, only improvement or an
+  unchanged miss.
+
+  TASK 3 (clause 1 against the real-embedding corpus): the fixture-path
+  example (`_is_hex`) does NOT transfer -- with real embeddings its OWN
+  vector rank is now 1st of 387 (the embedding model wins outright,
+  needing no FTS rescue at all), which is a BETTER retrieval outcome but
+  no longer demonstrates the "FTS rescues a lower vector rank" asymmetry
+  clause 1 describes. Found a different real function where the asymmetry
+  still holds: `parse_pull_request_payload` (FTS rank 1, vector rank 7,
+  fused rank 1) -- added as a new test,
+  `test_known_function_name_in_top_three_fused_results_with_real_
+  embeddings`, proving clause 1 IS still demonstrable against the real
+  corpus, just via a different concrete example than the fixture-embedder
+  path uses.
+
+  THE TWO FLAGGED QUERIES: id 4 (`authenticate the request`, the
+  deliberate synonym-canonicalization stress test) remains a MISS with
+  real embeddings -- its true vector rank is 319th of 387 and it is not
+  matched by full-text search at all; real semantics did NOT rescue it
+  (this session's own module docstrings discussing "login"/"authenticate"
+  as a worked design example are strong decoys, same risk the fixture's
+  own `rationale` field named before this was ever run). Id 8
+  (`computing the dollar cost of tokens`, the USD/"dollar" vocabulary
+  mismatch) IS rescued by real embeddings -- vector rank 1st, fused rank
+  2nd -- confirming a real trained model connects "dollar" and "USD"
+  where the fixture embedder's hand-picked synonym table could not.
+
+  TASK 4 (update the test to assert the truth): pinned
+  `test_recall_at_five_with_real_openai_embeddings`'s `expected_miss_ids`
+  to `{3, 4, 7}` (was `set()`, PLAN.md's literal 100% target, written
+  before any real measurement existed) and rewrote its class docstring
+  with the full per-query rank breakdown and fixture-vs-real comparison
+  above, mirroring `test_recall_at_five_across_the_ten_query_fixture_
+  set`'s own discipline exactly -- the assertion locks in the real,
+  investigated result as a regression baseline rather than the aspirational
+  target. Added backend verification inside `real_openai_seeded_retriever`
+  (asserts `isinstance(embedder, OpenAIEmbedder)`, `settings.
+  embedder_backend == "openai"`, and a fresh marker-file read confirming
+  `"openai"`) so this test can never silently pass on the wrong backend.
+  Still skips cleanly (module-level `skipif` on `OPENAI_API_KEY`
+  presence, unchanged) when no key is configured.
+
+  COST CONTROL, and a REAL BUG this surfaced: added a
+  (backend, source-signature, row-count) marker file
+  (`var/retrieval_seed_marker.json`, gitignored local state) that both
+  `seeded_corpus_retriever` (fixture backend) and
+  `real_openai_seeded_retriever` (real OpenAI backend) now check before
+  reseeding, instead of the old "only reseed if the table happens to be
+  empty" logic. That old logic was a genuine cross-backend contamination
+  bug, found while implementing this: `TestRecallOnRealOpenAIEmbeddings`
+  and `TestRecallOnRealSeededCorpus` share ONE physical `code_chunks`
+  table, and a table left non-empty by a PREVIOUS real-OpenAI-embedding
+  test run (Postgres persists across separate `pytest` invocations) would
+  have silently passed the old "count > 0" check in
+  `seeded_corpus_retriever` while actually holding OpenAI-embedded
+  vectors -- corrupting the fixture-path recall measurement by comparing
+  fixture-embedded QUERY vectors against real-OpenAI-embedded STORED
+  vectors from an unrelated vector space. Fixed for both fixtures, not
+  just the new one. Real cost bound achieved: a FULL `pytest -v` run
+  still pays for exactly one real reseed (unavoidable -- the
+  fixture-backend class always runs first in file order and always
+  leaves fixture data behind, so the real-OpenAI class's fixture
+  genuinely cannot reuse stale data within the SAME run), but re-running
+  JUST the real-OpenAI class in isolation (`pytest ... -k RealOpenAI`)
+  with an unchanged source tree reuses the previous real embeddings and
+  pays nothing -- proven directly: an isolated `-k RealOpenAI` rerun after
+  a real reseed completed in 4.17s with zero additional API calls, versus
+  ~16s when a reseed was actually needed.
+
+  TASK 5 (PLAN.md/checkpoint updated honestly): done -- see PLAN.md's M9
+  Status line (rewritten, not appended-only, to state both backends'
+  measured results plainly) and this entry.
+
+  GATES (all services up -- Redis 6380, Postgres 5433, pgvector 5434):
+  `ruff check .` clean; `mypy --strict backend/` clean, 60 source files;
+  `lint-imports --config .importlinter` 2 kept/0 broken; `pytest -v` run
+  TWICE, both times 260 passed / 0 failed / 0 error / 0 skipped, diffed
+  line-for-line identical (the PASSED/FAILED/ERROR line for every one of
+  260 tests matched exactly across both runs). PLAN.md's exact M9 demo
+  command (`docker compose up -d pgvector && python
+  scripts/seed_code_chunks.py --repo . && pytest
+  tests/integration/test_hybrid_retrieval.py -v`) re-run verbatim: seeded
+  387 chunks (fixture backend, the seed step's own unmodified default),
+  then all 21 tests in that file passed -- including the real-OpenAI
+  recall and clause-1 tests, which triggered their own real reseed inside
+  that pytest run (the marker-cache correctly detected the fixture-backend
+  data the seed step had just written and paid for one real reseed, as
+  designed). Combined exit 0. Real API cost this session: 2 reseeds
+  precisely instrumented (147,801 + 150,926 = 298,727 tokens, $0.038834
+  measured exactly) plus approximately 5 more reseeds of the same
+  magnitude triggered by the various pytest invocations required by this
+  session's own gate/demo verification steps (not individually
+  instrumented, estimated at the same ~150K-token/~$0.02 rate each) --
+  total session real API spend approximately $0.13-0.14, plus negligible
+  (<$0.001) per-query embedding costs from the recall/clause-1 test
+  assertions themselves. No secret material was printed, logged, or
+  committed at any point.
+
+  Committed granularly; pushed to origin/main. Full per-query rank tables
+  and command output are in this session's final report.
+
+- M9 L2 DEBUG (2026-08-31, BLOCKED by exhausted credit -- superseded by
+  the COMPLETED entry above) -- real-embedding re-verification attempted,
   BLOCKED by exhausted OpenAI account credit (not a code defect):
 
   CONTEXT: the previous M9 L2 DEBUG session (2026-08-30, entry further
