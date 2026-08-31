@@ -58,6 +58,7 @@ rather than being free to block a worker thread indefinitely.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 from math import ceil
@@ -124,6 +125,36 @@ _SUM_LLM_COST_FOR_DAY_SQL = """
     WHERE event_type = %s AND ts >= %s AND ts < %s
 """
 
+# M13 (L2 DEBUG on the M12 continuous-aggregates adaptation): the
+# dashboard's per-agent cost/latency view. PLAN.md's M13 outcome describes
+# this as reading "from the continuous aggregates" (a TimescaleDB feature
+# -- M12, which this build does NOT include; see the M13 build report's
+# CONTINUOUS_AGGREGATES_ADAPTATION section). This query does the same
+# aggregation with plain SQL over the real, unaggregated agent_events rows
+# instead. It is written so that swapping to a real continuous aggregate
+# later is a NARROW change: M12 would create a materialized
+# `agent_health_1m`-style view/hypertable pre-aggregated by (agent, model,
+# time bucket), and this query's FROM/GROUP BY would change from
+# `agent_events ... WHERE event_type = 'llm.call' GROUP BY agent, model` to
+# `agent_health_1m GROUP BY agent, model` (or a SUM-of-already-summed-
+# buckets query) -- the call site
+# (backend.api.dashboard.get_agent_metrics) and this method's return shape
+# (AgentMetrics) would not need to change at all.
+_AGGREGATE_LLM_CALLS_BY_AGENT_SQL = """
+    SELECT
+        agent,
+        model,
+        COUNT(*) AS call_count,
+        COALESCE(SUM(cost_usd), 0) AS total_cost_usd,
+        COALESCE(AVG(latency_ms), 0) AS avg_latency_ms,
+        COALESCE(SUM(tokens_in), 0) AS total_tokens_in,
+        COALESCE(SUM(tokens_out), 0) AS total_tokens_out
+    FROM agent_events
+    WHERE event_type = %s
+    GROUP BY agent, model
+    ORDER BY agent, model
+"""
+
 # Name every EventRepository instance's circuit breaker is registered
 # under. Mirrors RedisJobQueue's pattern (backend/job_queue/redis_arq.py):
 # each instance gets its OWN CircuitBreaker object (so independent
@@ -131,6 +162,33 @@ _SUM_LLM_COST_FOR_DAY_SQL = """
 # other), while `register()` still makes the most-recently-constructed
 # instance's breaker discoverable by this name for a future /health route.
 _CIRCUIT_BREAKER_NAME = "events_db"
+
+
+@dataclass(frozen=True)
+class AgentMetrics:
+    """One (agent, model) pair's aggregated ``llm.call`` cost/latency -- the dashboard's cost view row shape.
+
+    Attributes:
+        agent: The specialist/component name (e.g. "security", "quality", "judge").
+        model: The LLM model id every call in this group used.
+        call_count: Number of ``llm.call`` events aggregated.
+        total_cost_usd: Sum of ``cost_usd`` across every call in this group.
+        avg_latency_ms: Mean ``latency_ms`` across every call in this group,
+            rounded to the nearest millisecond (Postgres ``AVG`` over an
+            integer column returns a numeric with fractional precision;
+            rounding here keeps the dashboard's units honest -- latency is
+            never fractionally precise past a millisecond in this system).
+        total_tokens_in: Sum of ``tokens_in`` across every call in this group.
+        total_tokens_out: Sum of ``tokens_out`` across every call in this group.
+    """
+
+    agent: str
+    model: str
+    call_count: int
+    total_cost_usd: Decimal
+    avg_latency_ms: int
+    total_tokens_in: int
+    total_tokens_out: int
 
 
 class EventRepository:
@@ -329,3 +387,36 @@ class EventRepository:
         if row is None or row[0] is None:
             return Decimal("0")
         return Decimal(row[0])
+
+    def aggregate_llm_calls_by_agent(self) -> list[AgentMetrics]:
+        """Cost/latency aggregated across every ``llm.call`` event, grouped by ``(agent, model)``.
+
+        The dashboard's per-agent cost/latency view -- see
+        ``_AGGREGATE_LLM_CALLS_BY_AGENT_SQL``'s comment for the M12
+        continuous-aggregate adaptation this query stands in for. Returns
+        an empty list on a fresh/empty database rather than raising --
+        "no llm.call events recorded yet" is a real, valid answer the
+        dashboard must render honestly (see
+        ``backend.api.dashboard.get_agent_metrics``), not an error.
+        """
+        with psycopg.connect(
+            self._dsn,
+            connect_timeout=self._connect_timeout_seconds,
+            autocommit=True,
+            options=self._connect_options,
+        ) as conn:
+            rows = conn.execute(
+                _AGGREGATE_LLM_CALLS_BY_AGENT_SQL, (EventType.LLM_CALL.value,)
+            ).fetchall()
+        return [
+            AgentMetrics(
+                agent=row[0] if row[0] is not None else "unknown",
+                model=row[1] if row[1] is not None else "unknown",
+                call_count=int(row[2]),
+                total_cost_usd=Decimal(row[3]),
+                avg_latency_ms=round(float(row[4])),
+                total_tokens_in=int(row[5]),
+                total_tokens_out=int(row[6]),
+            )
+            for row in rows
+        ]

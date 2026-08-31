@@ -19,13 +19,28 @@ instantiate — ``backend.webhook_receiver.router`` only ever sees the
 from __future__ import annotations
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
+from backend.api.dashboard import router as dashboard_router
 from backend.core.settings import Settings, get_settings
 from backend.database.repository import EventRepository
+from backend.database.review_store import ReviewRepository
 from backend.job_queue.in_memory import InMemoryJobQueue
 from backend.job_queue.interface import JobQueue
 from backend.job_queue.redis_arq import RedisJobQueue
 from backend.webhook_receiver.router import router as webhook_router
+
+# M13: the Next.js dashboard runs on a separate origin in local dev
+# (http://localhost:3000 by default) and calls this API's /api/* routes
+# directly from the browser (a Client Component fetch -- see
+# frontend/src/lib/api.ts), so the dashboard's own dev server origin must
+# be allowed cross-origin. Kept to a small, explicit local-dev allowlist
+# rather than "*" -- this API also serves the GitHub webhook route, which
+# must never send permissive CORS headers by default.
+_DASHBOARD_DEV_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
 
 
 def _default_job_queue(settings: Settings) -> JobQueue:
@@ -54,10 +69,23 @@ def _default_event_repository(settings: Settings) -> EventRepository:
     )
 
 
+def _default_review_repository(settings: Settings) -> ReviewRepository:
+    """Build the ``ReviewRepository`` a real (non-test) app uses, from ``Settings``.
+
+    M13: backs the dashboard's HITL-queue/trace views (``backend.api.
+    dashboard``). Same connection string as ``_default_event_repository``
+    above (``reviews`` lives in the same Postgres database as
+    ``agent_events``) -- see ``backend.database.review_store``'s module
+    docstring for why this table exists.
+    """
+    return ReviewRepository(settings.database_url)
+
+
 def create_app(
     settings: Settings | None = None,
     job_queue: JobQueue | None = None,
     event_repository: EventRepository | None = None,
+    review_repository: ReviewRepository | None = None,
 ) -> FastAPI:
     """Build a FastAPI app instance with explicit, injectable dependencies.
 
@@ -81,9 +109,15 @@ def create_app(
             real, shared docker-compose Postgres other tests depend on --
             the same per-app isolation ``job_queue`` already gives Redis-
             down simulations (see ``tests/unit/test_reliability.py``).
+        review_repository: M13. Backs ``backend.api.dashboard``'s HITL
+            queue/trace routes. Defaults to
+            ``ReviewRepository(resolved_settings.database_url)`` when not
+            given; tests pass their own instance for the same isolation
+            reasons as ``event_repository`` above.
 
     Returns:
-        A fully configured FastAPI app with the webhook router mounted.
+        A fully configured FastAPI app with the webhook and dashboard
+        routers mounted.
     """
     app = FastAPI(title="pr-review-agent", version="0.1.0")
     resolved_settings = settings if settings is not None else get_settings()
@@ -96,7 +130,19 @@ def create_app(
         if event_repository is not None
         else _default_event_repository(resolved_settings)
     )
+    app.state.review_repository = (
+        review_repository
+        if review_repository is not None
+        else _default_review_repository(resolved_settings)
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_DASHBOARD_DEV_ORIGINS,
+        allow_methods=["GET"],
+        allow_headers=["*"],
+    )
     app.include_router(webhook_router)
+    app.include_router(dashboard_router)
     return app
 
 
