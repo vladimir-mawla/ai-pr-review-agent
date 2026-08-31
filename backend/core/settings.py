@@ -19,6 +19,7 @@ from decimal import Decimal
 from functools import lru_cache
 from typing import Literal
 
+from psycopg.conninfo import make_conninfo
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -190,6 +191,18 @@ _DEFAULT_GITHUB_CIRCUIT_BREAKER_FAILURE_THRESHOLD = 5
 _DEFAULT_GITHUB_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS = 30.0
 
 
+# M12: which backend agent_events (Stage B) / code_chunks (Stage C)
+# actually live on. "local" (the default) needs no Tiger Cloud account at
+# all -- a keyless checkout, and every test/demo command that doesn't
+# explicitly opt in, must still work end to end against docker-compose.yml's
+# local Postgres/pgvector, mirroring embedder_backend's/job_queue_backend's/
+# github_client_backend's own "safe local default, explicit opt-in for the
+# real thing" pattern. "tiger" opts into the real, paid Tiger Cloud instance
+# migrations/scripts/2026-06-tiger-init.sql provisions.
+_DEFAULT_EVENTS_BACKEND: Literal["local", "tiger"] = "local"
+_DEFAULT_MEMORY_BACKEND: Literal["local", "tiger"] = "local"
+
+
 class Settings(BaseSettings):
     """Runtime configuration for the pr-review-agent backend.
 
@@ -348,6 +361,19 @@ class Settings(BaseSettings):
             second-place hit from one ranker and a first-place hit from
             another can still combine meaningfully rather than one ranker
             unilaterally deciding the top result.
+        events_backend: M12. 'local' (default) or 'tiger' -- which store
+            agent_events lives on. See its own Field description.
+        memory_backend: M12. 'local' (default) or 'tiger' -- which store
+            code_chunks lives on. See its own Field description.
+        tiger_database_url: M12. Optional explicit Tiger Cloud admin DSN
+            override; unset by default in favor of native PG* env vars.
+            See ``resolve_tiger_dsn``'s docstring.
+        pghost, pgport, pgdatabase, pgsslmode: M12. libpq's own native
+            PG* variables, read here only so ``resolve_tiger_writer_dsn``
+            can build the restricted role's own connection string.
+        tiger_events_writer_password: M12. The restricted
+            ``agent_events_writer`` role's password, set out of band.
+            Required for ``events_backend='tiger'`` application runtime.
     """
 
     github_webhook_secret: str = Field(
@@ -467,6 +493,100 @@ class Settings(BaseSettings):
         description=(
             "Postgres connection string used only to apply migrations "
             "(the postgres superuser). Never used by request-path code."
+        ),
+    )
+
+    events_backend: Literal["local", "tiger"] = Field(
+        default=_DEFAULT_EVENTS_BACKEND,
+        description=(
+            "M12. Which store agent_events actually lives on. 'local' "
+            "(default) needs no Tiger Cloud account -- every test and a "
+            "keyless checkout use it. 'tiger' routes EventRepository and "
+            "migration application at the real Tiger Cloud hypertable "
+            "instead (see resolve_tiger_dsn/resolve_tiger_writer_dsn)."
+        ),
+    )
+
+    memory_backend: Literal["local", "tiger"] = Field(
+        default=_DEFAULT_MEMORY_BACKEND,
+        description=(
+            "M12. Which store code_chunks actually lives on. 'local' "
+            "(default) needs no Tiger Cloud account -- HybridRetriever "
+            "talks to docker-compose.yml's pgvector service. 'tiger' "
+            "routes it at the real Tiger Cloud DiskANN index instead."
+        ),
+    )
+
+    tiger_database_url: str | None = Field(
+        default=None,
+        description=(
+            "M12. Optional EXPLICIT libpq connection URI/conninfo for "
+            "Tiger Cloud (e.g. 'postgresql://user:pass@host:port/db"
+            "?sslmode=require'), used as the ADMIN/migration connection "
+            "when events_backend/memory_backend='tiger'. This is NOT the "
+            "primary configuration path -- see resolve_tiger_dsn's "
+            "docstring for why PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE/"
+            "PGSSLMODE (libpq's own native environment variables, which "
+            "psycopg and psql both already read without any code here) "
+            "are preferred. This field exists only for the cases that "
+            "genuinely need one bundled string instead of five separate "
+            "variables -- e.g. handing a single secret to a CI/CD "
+            "pipeline, or a one-off `psql \"$TIGER_DATABASE_URL\"` from a "
+            "shell that does not already have the PG* variables set. When "
+            "unset (the common case for local development, including this "
+            "project's own actual Tiger Cloud configuration), Tiger "
+            "connections fall back to libpq's native PG* environment "
+            "variables entirely."
+        ),
+    )
+
+    pghost: str | None = Field(
+        default=None,
+        validation_alias="PGHOST",
+        description=(
+            "M12. Tiger Cloud host, libpq's native PGHOST variable. Read "
+            "here (in addition to psycopg/psql's own native libpq "
+            "handling) only so resolve_tiger_writer_dsn can build the "
+            "restricted agent_events_writer role's own connection string "
+            "-- see that method's docstring for why that one connection "
+            "cannot simply reuse an empty conninfo the way the admin "
+            "connection does."
+        ),
+    )
+
+    pgport: int | None = Field(
+        default=None,
+        validation_alias="PGPORT",
+        description="M12. Tiger Cloud port, libpq's native PGPORT variable.",
+    )
+
+    pgdatabase: str | None = Field(
+        default=None,
+        validation_alias="PGDATABASE",
+        description="M12. Tiger Cloud database name, libpq's native PGDATABASE variable.",
+    )
+
+    pgsslmode: str | None = Field(
+        default=None,
+        validation_alias="PGSSLMODE",
+        description="M12. Tiger Cloud SSL mode, libpq's native PGSSLMODE variable.",
+    )
+
+    tiger_events_writer_password: str | None = Field(
+        default=None,
+        description=(
+            "M12. Password for the restricted `agent_events_writer` role "
+            "migrations/scripts/2026-06-tiger-init.sql creates on Tiger "
+            "Cloud (SELECT+INSERT only, UPDATE/DELETE/TRUNCATE revoked -- "
+            "see that file's Stage B comment for why this role is "
+            "LOAD-BEARING on a hypertable, not merely defense in depth). "
+            "Set once, out of band, via `ALTER ROLE agent_events_writer "
+            "PASSWORD ...` by whoever provisions a given Tiger instance -- "
+            "never generated or written by application code, never "
+            "committed. Required for events_backend='tiger' application "
+            "runtime (not migrations, which use the admin credential "
+            "above); resolve_tiger_writer_dsn raises a clear error if "
+            "events_backend='tiger' and this is unset."
         ),
     )
 
@@ -772,6 +892,112 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    def resolve_tiger_dsn(self) -> str:
+        """The ADMIN/migration connection string for Tiger Cloud (tsdbadmin-equivalent).
+
+        Returns ``tiger_database_url`` verbatim when it is set (the
+        explicit-override path -- see that field's docstring for when this
+        is the right choice). Otherwise returns the empty string, which is
+        the deliberate PRIMARY path this milestone chose: psycopg (and
+        psql) both pass an empty conninfo straight through to libpq, which
+        then fills every connection parameter from its own native
+        PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE/PGSSLMODE environment
+        variables -- exactly what the user configured in ``.env`` for this
+        project's real Tiger Cloud instance, and exactly what a bare
+        ``psql`` with no arguments already does. This means every
+        connection-opening call site in this codebase (``psycopg.connect``,
+        ``backend.database.postgres.apply_migrations``/``init_tiger_schema``,
+        ``backend.memory.tiger_client.connect``) needs NO code change at all
+        to support Tiger -- it already accepts an arbitrary DSN string, and
+        "" is simply a valid one.
+        """
+        return self.tiger_database_url if self.tiger_database_url else ""
+
+    def resolve_tiger_writer_dsn(self) -> str:
+        """The restricted ``agent_events_writer`` role's connection string for Tiger Cloud.
+
+        Unlike ``resolve_tiger_dsn`` (the admin connection, used only to
+        apply migrations), this is what application code actually writes
+        ``agent_events`` through when ``events_backend='tiger'`` -- mirroring
+        local's own ``database_url`` (writer) vs. ``database_admin_url``
+        (admin) split. It cannot simply fall back to an empty conninfo the
+        way the admin connection does, because libpq's PG* environment
+        variables name the ADMIN user (``PGUSER=tsdbadmin`` in this
+        project's own ``.env``) -- this method explicitly overrides the user
+        and password while reusing the same host/port/database/sslmode, via
+        ``psycopg.conninfo.make_conninfo`` (not hand-rolled string
+        formatting) so a password containing special characters is quoted
+        correctly rather than corrupting the conninfo string.
+
+        Raises:
+            RuntimeError: ``pghost`` or ``tiger_events_writer_password`` is
+                unset -- both are required to build this connection string,
+                and there is no safe default for either (unlike the admin
+                path, there is no "just use libpq's environment" fallback,
+                since PGUSER/PGPASSWORD in the environment name the admin
+                role, not this restricted one).
+        """
+        if not self.pghost or not self.tiger_events_writer_password:
+            raise RuntimeError(
+                "events_backend='tiger' requires PGHOST and "
+                "TIGER_EVENTS_WRITER_PASSWORD to build the restricted "
+                "agent_events_writer connection string -- see "
+                "Settings.tiger_events_writer_password's docstring."
+            )
+        return make_conninfo(
+            host=self.pghost,
+            port=self.pgport if self.pgport is not None else 5432,
+            dbname=self.pgdatabase if self.pgdatabase is not None else "tsdb",
+            user="agent_events_writer",
+            password=self.tiger_events_writer_password,
+            sslmode=self.pgsslmode if self.pgsslmode is not None else "require",
+        )
+
+    @property
+    def effective_database_url(self) -> str:
+        """The connection string application code actually writes ``agent_events`` through.
+
+        ``events_backend='local'`` (default): ``database_url`` unchanged --
+        every existing call site's behavior is byte-for-byte identical to
+        before this property existed. ``events_backend='tiger'``: the
+        restricted ``agent_events_writer`` role's DSN (never the admin
+        credential -- see ``resolve_tiger_writer_dsn``).
+        """
+        if self.events_backend == "tiger":
+            return self.resolve_tiger_writer_dsn()
+        return self.database_url
+
+    @property
+    def effective_database_admin_url(self) -> str:
+        """The connection string used ONLY to apply migrations against ``agent_events``.
+
+        ``events_backend='local'`` (default): ``database_admin_url``
+        unchanged. ``events_backend='tiger'``: the Tiger admin DSN (see
+        ``resolve_tiger_dsn``) -- used by
+        ``backend.database.postgres.init_tiger_schema``, never by
+        request-path code.
+        """
+        if self.events_backend == "tiger":
+            return self.resolve_tiger_dsn()
+        return self.database_admin_url
+
+    @property
+    def effective_pgvector_url(self) -> str:
+        """The connection string ``HybridRetriever``/``code_chunks`` actually use.
+
+        ``memory_backend='local'`` (default): ``pgvector_url`` unchanged.
+        ``memory_backend='tiger'``: the Tiger admin DSN (see
+        ``resolve_tiger_dsn``) -- ``code_chunks`` has no append-only
+        invariant (it is a fully rebuildable retrieval index, see
+        ``migrations/scripts/dev-pgvector-init.sql``'s module docstring),
+        so unlike ``agent_events`` there is no restricted-role split here:
+        one Tiger credential is used for both migrations and application
+        reads/writes against this table.
+        """
+        if self.memory_backend == "tiger":
+            return self.resolve_tiger_dsn()
+        return self.pgvector_url
 
 
 @lru_cache
