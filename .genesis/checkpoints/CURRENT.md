@@ -1,13 +1,173 @@
 # CURRENT
 - active_loop: none (between milestones)
 - target: M9
-- iteration: 1
-- last_gate: L2 DEBUG (2026-08-30) -- fixed the test-isolation defect the
-  M9 L2 DEBUG entry below flagged and deferred (M8's
-  test_budget_guard_events.py fixture rows accumulating in production
-  agent_events across pytest runs); M9's own two-defect L4 REJECT fix
-  further below is unrelated and still awaiting re-verification.
-- next_action: re-run L4 VERIFY on M9 (separate session)
+- iteration: 2
+- last_gate: L2 DEBUG (2026-08-31) -- attempted the real-OpenAI-embedding
+  re-verification of M9 now that a credential was believed available;
+  BLOCKED, not completed -- see the M9 L2 DEBUG (2026-08-31) entry below
+  for the full account. The OpenAI key authenticates for real but the
+  account behind it has zero spendable credit, so the actual re-seed +
+  recall measurement this session was asked to produce could not be made.
+  Gates (fixture path, unchanged code otherwise) confirmed still green and
+  repeatable; the codebase gained one new, honestly-designed, real-key-
+  gated test that now makes `pytest -v` and PLAN.md's own demo command
+  exit 1 (not 0) in THIS environment specifically because that test
+  refuses to silently pass or skip past an unfunded key -- see below.
+- next_action: fund the OpenAI account behind the configured
+  OPENAI_API_KEY (it currently has zero spendable credit -- `POST
+  /v1/embeddings` returns `429 insufficient_quota` /
+  `credit_balance_exhausted` even though `GET /v1/models` returns 200),
+  then re-run `pytest tests/integration/test_hybrid_retrieval.py -v -k
+  RealOpenAI` to get a real recall@5 number on the actual
+  `text-embedding-3-large` backend. Only once that real number exists
+  (and, per that test's own docstring, `expected_miss_ids` is pinned to
+  whatever it actually is) does it make sense to re-run L4 VERIFY on M9 --
+  re-verifying now would just re-confirm the same blocker this session
+  already found.
+- M9 L2 DEBUG (2026-08-31) -- real-embedding re-verification attempted,
+  BLOCKED by exhausted OpenAI account credit (not a code defect):
+
+  CONTEXT: the previous M9 L2 DEBUG session (2026-08-30, entry further
+  below) measured recall@5 = 4/10 against `DeterministicFixtureEmbedder`
+  and explicitly deferred a real-embedding measurement pending a valid
+  `OPENAI_API_KEY`. This session was told both `ANTHROPIC_API_KEY` and
+  `OPENAI_API_KEY` were now present and valid, with the OpenAI key
+  specifically described as "verified with a live HTTP 200 against
+  /v1/models" -- true, but not sufficient, as this session discovered.
+
+  THE BLOCKER, confirmed independently three separate ways (not a guess,
+  not a retry-related artifact): (1) `OpenAIEmbedder.embed()` through this
+  project's own retry/breaker/timeout composition failed after exhausting
+  all 3 configured attempts; (2) a raw `urllib` call to `POST
+  https://api.openai.com/v1/embeddings`, entirely bypassing this project's
+  code, returned `429` with body `{"error": {"message": "You have no
+  credits remaining. Add credits to continue using the API...", "type":
+  "insufficient_quota", "code": "credit_balance_exhausted"}}`; (3) the
+  identical raw call repeated twice more, several seconds apart, returned
+  the exact same error both times (ruling out a transient rate-limit
+  blip). A raw `GET /v1/models` call with the SAME key, in the SAME
+  session, DID return a real 200 -- proving the key itself authenticates
+  correctly and the failure is specifically "this account cannot spend
+  money," not "this key is invalid" or "this project's code is
+  malformed." `text-embedding-3-large` at $0.13/M tokens would have cost
+  well under $0.05 to re-seed this repo's ~380 chunks -- the account
+  cannot spend even that.
+
+  TASK 1 (verify the OpenAI embedder path) -- PARTIALLY completed, for
+  real, to the extent possible without spendable credit:
+  `backend/memory/embedder.py`'s `OpenAIEmbedder._make_request` was
+  confirmed to request `dimensions=256` as a native `client.embeddings.
+  create(...)` keyword argument (server-side truncation via OpenAI's own
+  API, not a client-side slice of a 3072-dim vector -- confirmed by
+  reading the call site directly). `Settings.embedder_backend` (default
+  `"fixture"`) is the one switch `get_embedder()` reads; unchanged, still
+  correctly defaulting to the credential-free path. The real
+  retry/circuit-breaker/timeout composition was confirmed live and
+  genuinely on this path: `OpenAIEmbedder.__init__` builds a real
+  `RetryPolicy`, `TimeoutPolicy`, and a registered `CircuitBreaker` named
+  `"openai_embedder"`, and the actual failing call above shows all three
+  in the real traceback (`call_with_retry` -> `self._breaker.call` ->
+  `run_with_timeout` -> the real `client.embeddings.create`), attempted
+  exactly 3 times before giving up, exactly as `Settings.
+  embedding_retry_max_attempts` (default 3) specifies. What could NOT be
+  verified: an actual returned vector's length, non-zero-ness, or
+  determinism -- every real call attempt failed before OpenAI returned a
+  body, since the account cannot pay for it. Not fabricated; genuinely
+  unmeasured.
+
+  TASKS 2/3 (re-seed with real embeddings; re-run recall@5) -- NOT
+  DONE, and not attempted destructively: no re-seed against the real
+  backend could complete (every attempt fails at the very first batch,
+  before any row is inserted -- `code_chunks` was confirmed still at 0
+  rows immediately after a failed real-backend re-seed attempt, i.e. the
+  failure is clean, not a corrupted partial seed). No recall number for
+  the real embedding backend exists as a result -- none is reported here,
+  fabricated, or guessed at. The previous session's fixture-path result
+  (4/10, root-caused per-query in that entry below and in
+  `tests/integration/test_hybrid_retrieval.py`'s own
+  `test_recall_at_five_across_the_ten_query_fixture_set` docstring) is
+  unchanged and was reconfirmed by this session's own gate run (same exact
+  6 miss ids: 1, 3, 4, 5, 7, 8).
+
+  TASK 4 (make the test assert the truth) -- DONE, honestly, within what
+  this session could measure. Added `TestRecallOnRealOpenAIEmbeddings` to
+  `tests/integration/test_hybrid_retrieval.py`, gated by a module-level
+  `pytest.mark.skipif(not _BASE_SETTINGS.openai_api_key, ...)` mirroring
+  `tests/integration/test_security_agent_live.py`'s `ANTHROPIC_API_KEY`
+  pattern exactly (skip on absence, run for real on presence -- checked
+  once at collection time). Deliberately does NOT also probe whether the
+  key has spendable credit before deciding to skip vs. run -- doing so
+  would let an authenticated-but-unfunded key quietly downgrade a real
+  gate into an uninformative skip, exactly the "must never silently pass
+  on the wrong backend" failure mode this milestone's own instructions
+  warn against. Its `real_openai_seeded_retriever` fixture re-seeds
+  `code_chunks` for real via `EMBEDDER_BACKEND=openai python
+  scripts/seed_code_chunks.py --repo .` (the identical real script, env-
+  overridden, not a second parallel seeding implementation) and, on
+  success, measures recall@5 against the SAME unmodified 10-query fixture,
+  asserting PLAN.md's literal 100% target (`expected_miss_ids = set()`)
+  with an explicit docstring instruction for whoever re-runs this once the
+  account is funded: pin `expected_miss_ids` to the real, investigated
+  result -- do not just loosen the assertion to whatever number comes
+  back, mirroring the fixture-path test's own discipline exactly. Proven,
+  not just written: run in isolation
+  (`pytest tests/integration/test_hybrid_retrieval.py -v -k RealOpenAI`)
+  and as part of the full suite, this test genuinely executes (not
+  skipped -- `OPENAI_API_KEY` is present) and fails LOUDLY with the real
+  `EmbeddingCallFailedError`/`RateLimitError` traceback shown above, not a
+  silent pass and not a masked skip.
+
+  CONSEQUENCE, disclosed rather than hidden: because `OPENAI_API_KEY` is
+  present in `.env` in THIS environment, adding this test means `pytest
+  -v` now exits 1 (258 passed, 1 error), not 0, and PLAN.md's own demo
+  command's combined exit code is now genuinely 1, not 0 -- both proven
+  repeatable (run twice, byte-identical outcome each time; see GATES
+  below). This is not a regression in retrieval correctness -- every
+  pre-existing test still passes, 258/258 either way -- it is this new
+  test doing exactly its job: refusing to let an unfunded real credential
+  look, from the outside, like a passing gate. Judged the more honest
+  choice than either (a) skipping on key presence alone regardless of
+  credit (would satisfy "green demo" but silently pass on a backend that
+  cannot actually run), or (b) not adding this test at all (would leave
+  clause 2 of PLAN.md's own success criteria permanently unverifiable
+  against the real backend the milestone actually specifies).
+
+  TASK 5 (update PLAN.md honestly) -- DONE. Added a "Status" line directly
+  under M9's existing (unchanged) success-criteria bullet, stating plainly:
+  clause 1 (top-3 via FTS) is demonstrated against the real corpus; clause
+  2 (recall@5 = 100%) is NOT met on the fixture path (4/10, real number
+  given) and UNMEASURED on the real OpenAI path (blocked by the credit
+  issue above, with the exact verification steps and cost estimate
+  included). The original criterion text itself was left untouched --
+  only annotated -- per this task's explicit "do not quietly rewrite the
+  criterion" instruction. The Credentials line was also annotated: a key
+  that merely authenticates is not sufficient; it must have spendable
+  credit.
+
+  GATES (this session, all services up -- Redis 6380, Postgres 5433,
+  pgvector 5434; no code in `backend/` was changed, only
+  `tests/integration/test_hybrid_retrieval.py` gained the new class and
+  `.genesis/PLAN.md`/this checkpoint were annotated): `ruff check .`
+  clean; `mypy --strict backend/` clean, 60 source files (unchanged, since
+  no `backend/` file was touched); `lint-imports --config .importlinter`
+  2 kept/0 broken; `pytest -v` run twice, both times 258 passed, 1 error
+  (`TestRecallOnRealOpenAIEmbeddings::
+  test_recall_at_five_with_real_openai_embeddings`, the new honestly-
+  failing real-credential test), byte-identical PASSED/FAILED/ERROR lines
+  across both runs. PLAN.md's exact M9 demo command (`docker compose up -d
+  pgvector && python scripts/seed_code_chunks.py --repo . && pytest
+  tests/integration/test_hybrid_retrieval.py -v`) re-run for real: seeded
+  382 chunks (embedder_backend=fixture, confirmed the correct default
+  given the account cannot currently fund the alternative), 19 of the
+  file's pre-existing tests passed, the 1 new OpenAI-gated test errored
+  with the same real billing error -- combined exit code 1 (verified via
+  `$?` directly, not inferred from a piped command).
+
+  Committed granularly; pushed to origin/main. No secret material was
+  printed, logged, or committed at any point (`.env` was never `cat`,
+  only read programmatically through `Settings`, and no key value appears
+  in any diff, commit message, or this checkpoint entry).
+
 - M8 L2 DEBUG (2026-08-30) -- test-isolation fix for
   `tests/integration/test_budget_guard_events.py`
   (flagged, not fixed, by the M9 L2 DEBUG entry immediately below):
