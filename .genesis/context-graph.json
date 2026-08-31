@@ -1,7 +1,7 @@
 {
   "$comment": "nodes=modules, edges=[cause,effect] where cause is imported-by effect. ADD invariants by hand.",
   "project": ".",
-  "generated": "2026-08-31T09:48:36.922Z",
+  "generated": "2026-08-31T14:25:43.053Z",
   "nodes": [
     "__future__",
     "__init__",
@@ -11,6 +11,7 @@
     "arq",
     "arq_worker",
     "ast",
+    "asymmetric",
     "asyncio",
     "audit",
     "base",
@@ -26,6 +27,7 @@
     "dataclasses",
     "datetime",
     "decimal",
+    "diff_mapping",
     "docs_agent",
     "embedder",
     "enum",
@@ -35,7 +37,9 @@
     "findings",
     "functools",
     "futures",
+    "github_auth",
     "github_client",
+    "github_models",
     "graph",
     "hashlib",
     "hmac",
@@ -46,6 +50,7 @@
     "itertools",
     "job_queue",
     "json",
+    "jwt",
     "langgraph_engine",
     "llm_client",
     "logging",
@@ -64,6 +69,7 @@
     "pgvector",
     "postgres",
     "pricing",
+    "primitives",
     "psycopg",
     "pydantic",
     "pydantic_settings",
@@ -71,6 +77,7 @@
     "quality_agent",
     "queue",
     "random",
+    "rbac",
     "re",
     "redis",
     "redis_arq",
@@ -101,10 +108,15 @@
     "test_budget_guard",
     "test_budget_guard_across_four_agents",
     "test_budget_guard_events",
+    "test_diff_mapping",
     "test_embedder",
     "test_events_failure_policy",
     "test_events_spine",
     "test_full_local_review",
+    "test_github_auth",
+    "test_github_client",
+    "test_github_client_contract",
+    "test_github_live_demo",
     "test_hitl_gate",
     "test_hybrid_retrieval",
     "test_llm_client",
@@ -112,6 +124,7 @@
     "test_orchestrator_fanout",
     "test_queue_roundtrip",
     "test_queue_to_orchestrator",
+    "test_rbac",
     "test_reliability",
     "test_security_agent_live",
     "test_security_agent_schema",
@@ -165,6 +178,10 @@
     ],
     [
       "__future__",
+      "diff_mapping"
+    ],
+    [
+      "__future__",
       "docs_agent"
     ],
     [
@@ -177,7 +194,15 @@
     ],
     [
       "__future__",
+      "github_auth"
+    ],
+    [
+      "__future__",
       "github_client"
+    ],
+    [
+      "__future__",
+      "github_models"
     ],
     [
       "__future__",
@@ -230,6 +255,10 @@
     [
       "__future__",
       "queue"
+    ],
+    [
+      "__future__",
+      "rbac"
     ],
     [
       "__future__",
@@ -317,6 +346,10 @@
     ],
     [
       "__future__",
+      "test_diff_mapping"
+    ],
+    [
+      "__future__",
       "test_embedder"
     ],
     [
@@ -330,6 +363,22 @@
     [
       "__future__",
       "test_full_local_review"
+    ],
+    [
+      "__future__",
+      "test_github_auth"
+    ],
+    [
+      "__future__",
+      "test_github_client"
+    ],
+    [
+      "__future__",
+      "test_github_client_contract"
+    ],
+    [
+      "__future__",
+      "test_github_live_demo"
     ],
     [
       "__future__",
@@ -354,6 +403,10 @@
     [
       "__future__",
       "test_queue_to_orchestrator"
+    ],
+    [
+      "__future__",
+      "test_rbac"
     ],
     [
       "__future__",
@@ -421,6 +474,10 @@
     ],
     [
       "abc",
+      "github_client"
+    ],
+    [
+      "abc",
       "nodes"
     ],
     [
@@ -442,6 +499,10 @@
     [
       "abc",
       "test_events_spine"
+    ],
+    [
+      "abc",
+      "test_github_auth"
     ],
     [
       "abc",
@@ -522,6 +583,14 @@
     [
       "ast",
       "seed_code_chunks"
+    ],
+    [
+      "asymmetric",
+      "test_github_auth"
+    ],
+    [
+      "asymmetric",
+      "test_github_client"
     ],
     [
       "asyncio",
@@ -669,6 +738,10 @@
     ],
     [
       "circuit_breaker",
+      "github_client"
+    ],
+    [
+      "circuit_breaker",
       "llm_client"
     ],
     [
@@ -745,6 +818,14 @@
     ],
     [
       "dataclasses",
+      "diff_mapping"
+    ],
+    [
+      "dataclasses",
+      "github_auth"
+    ],
+    [
+      "dataclasses",
       "interface"
     ],
     [
@@ -793,6 +874,10 @@
     ],
     [
       "datetime",
+      "github_auth"
+    ],
+    [
+      "datetime",
       "models"
     ],
     [
@@ -834,6 +919,18 @@
     [
       "datetime",
       "test_events_spine"
+    ],
+    [
+      "datetime",
+      "test_github_auth"
+    ],
+    [
+      "datetime",
+      "test_github_client"
+    ],
+    [
+      "datetime",
+      "test_github_live_demo"
     ],
     [
       "datetime",
@@ -941,6 +1038,14 @@
     ],
     [
       "decimal",
+      "test_github_client"
+    ],
+    [
+      "decimal",
+      "test_github_live_demo"
+    ],
+    [
+      "decimal",
       "test_hitl_gate"
     ],
     [
@@ -970,6 +1075,14 @@
     [
       "decimal",
       "test_specialist_agents"
+    ],
+    [
+      "diff_mapping",
+      "github_client"
+    ],
+    [
+      "diff_mapping",
+      "test_diff_mapping"
     ],
     [
       "docs_agent",
@@ -1096,6 +1209,26 @@
       "timeout"
     ],
     [
+      "github_auth",
+      "github_client"
+    ],
+    [
+      "github_auth",
+      "rbac"
+    ],
+    [
+      "github_auth",
+      "test_github_auth"
+    ],
+    [
+      "github_auth",
+      "test_github_client"
+    ],
+    [
+      "github_auth",
+      "test_rbac"
+    ],
+    [
       "github_client",
       "arq_worker"
     ],
@@ -1109,7 +1242,39 @@
     ],
     [
       "github_client",
+      "test_github_client"
+    ],
+    [
+      "github_client",
+      "test_github_client_contract"
+    ],
+    [
+      "github_client",
+      "test_github_live_demo"
+    ],
+    [
+      "github_client",
       "test_queue_to_orchestrator"
+    ],
+    [
+      "github_models",
+      "diff_mapping"
+    ],
+    [
+      "github_models",
+      "github_auth"
+    ],
+    [
+      "github_models",
+      "github_client"
+    ],
+    [
+      "github_models",
+      "test_diff_mapping"
+    ],
+    [
+      "github_models",
+      "test_github_client_contract"
     ],
     [
       "graph",
@@ -1181,6 +1346,18 @@
     ],
     [
       "httpx",
+      "github_auth"
+    ],
+    [
+      "httpx",
+      "github_client"
+    ],
+    [
+      "httpx",
+      "rbac"
+    ],
+    [
+      "httpx",
       "send_signed_webhook"
     ],
     [
@@ -1189,7 +1366,19 @@
     ],
     [
       "httpx",
+      "test_github_auth"
+    ],
+    [
+      "httpx",
+      "test_github_client"
+    ],
+    [
+      "httpx",
       "test_queue_roundtrip"
+    ],
+    [
+      "httpx",
+      "test_rbac"
     ],
     [
       "in_memory",
@@ -1265,6 +1454,14 @@
     ],
     [
       "json",
+      "test_github_client"
+    ],
+    [
+      "json",
+      "test_github_client_contract"
+    ],
+    [
+      "json",
       "test_hybrid_retrieval"
     ],
     [
@@ -1298,6 +1495,14 @@
     [
       "json",
       "test_webhook_validator"
+    ],
+    [
+      "jwt",
+      "github_auth"
+    ],
+    [
+      "jwt",
+      "test_github_auth"
     ],
     [
       "langgraph_engine",
@@ -1414,6 +1619,10 @@
     [
       "logging",
       "events"
+    ],
+    [
+      "logging",
+      "github_client"
     ],
     [
       "logging",
@@ -1569,6 +1778,14 @@
     ],
     [
       "models",
+      "test_github_client"
+    ],
+    [
+      "models",
+      "test_github_live_demo"
+    ],
+    [
+      "models",
       "test_hitl_gate"
     ],
     [
@@ -1677,6 +1894,14 @@
     ],
     [
       "os",
+      "test_github_client_contract"
+    ],
+    [
+      "os",
+      "test_github_live_demo"
+    ],
+    [
+      "os",
       "test_hybrid_retrieval"
     ],
     [
@@ -1729,6 +1954,10 @@
     ],
     [
       "pathlib",
+      "test_github_client_contract"
+    ],
+    [
+      "pathlib",
       "test_hybrid_retrieval"
     ],
     [
@@ -1776,6 +2005,14 @@
       "llm_client"
     ],
     [
+      "primitives",
+      "test_github_auth"
+    ],
+    [
+      "primitives",
+      "test_github_client"
+    ],
+    [
       "psycopg",
       "events"
     ],
@@ -1814,6 +2051,10 @@
     [
       "pydantic",
       "findings"
+    ],
+    [
+      "pydantic",
+      "github_models"
     ],
     [
       "pydantic",
@@ -1893,6 +2134,22 @@
     ],
     [
       "pytest",
+      "test_github_auth"
+    ],
+    [
+      "pytest",
+      "test_github_client"
+    ],
+    [
+      "pytest",
+      "test_github_client_contract"
+    ],
+    [
+      "pytest",
+      "test_github_live_demo"
+    ],
+    [
+      "pytest",
       "test_hybrid_retrieval"
     ],
     [
@@ -1914,6 +2171,10 @@
     [
       "pytest",
       "test_queue_to_orchestrator"
+    ],
+    [
+      "pytest",
+      "test_rbac"
     ],
     [
       "pytest",
@@ -2000,8 +2261,20 @@
       "retry"
     ],
     [
+      "rbac",
+      "github_client"
+    ],
+    [
+      "rbac",
+      "test_rbac"
+    ],
+    [
       "re",
       "base_agent"
+    ],
+    [
+      "re",
+      "diff_mapping"
     ],
     [
       "redis_arq",
@@ -2133,6 +2406,10 @@
     ],
     [
       "retry",
+      "github_client"
+    ],
+    [
+      "retry",
       "llm_client"
     ],
     [
@@ -2229,6 +2506,10 @@
     ],
     [
       "settings",
+      "github_client"
+    ],
+    [
+      "settings",
       "llm_client"
     ],
     [
@@ -2270,6 +2551,18 @@
     [
       "settings",
       "test_events_spine"
+    ],
+    [
+      "settings",
+      "test_github_client"
+    ],
+    [
+      "settings",
+      "test_github_client_contract"
+    ],
+    [
+      "settings",
+      "test_github_live_demo"
     ],
     [
       "settings",
@@ -2434,6 +2727,10 @@
     [
       "threading",
       "circuit_breaker"
+    ],
+    [
+      "threading",
+      "github_auth"
     ],
     [
       "threading",
@@ -2720,12 +3017,12 @@
       "review_local"
     ]
   ],
-  "invariants": {
-    "inward-only-dependencies": "No module under backend/core/** imports any other backend package, and no backend package imports a package that is farther from core than itself (ADR-002's modular-monolith dependency rule); verify with an import-linter contract run over backend/ that fails on any outward-to-inward violation.",
-    "hmac-verified-before-any-work": "backend/webhook_receiver/validator.py's signature check runs and passes before backend/webhook_receiver/router.py enqueues a job or invokes any handler; verify by tracing that every code path reaching job_queue.enqueue() in the webhook handler is preceded by a successful validate_signature() call, and that no other entry point can reach enqueue() for GitHub events.",
-    "budget-guard-hard-blocks": "AnthropicLLMClient.complete/complete_async (backend/tools/llm_client.py) call BudgetGuard.check_and_raise() as the first statement, before the underlying Anthropic client is constructed or invoked; verify by grepping every call site of `Anthropic(` and `messages.create` and confirming each is reachable only through complete.",
-    "events-table-append-only": "Rows written to agent_events (or its local pre-Tiger-Cloud equivalent table) are only ever inserted, never updated or deleted, by application code; verify by grepping backend/ for UPDATE/DELETE SQL or ORM .update()/.delete() calls targeting the events table/model, expecting zero matches outside migrations/."
-  },
+  "invariants": [
+    "inward-only-dependencies",
+    "hmac-verified-before-any-work",
+    "budget-guard-hard-blocks",
+    "events-table-append-only"
+  ],
   "freeze_boundary": [
     "src/**"
   ]
