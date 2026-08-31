@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>M9 Explained — Hybrid Retrieval / Local Vector Memory</title>
+<style>
+  :root {
+    --bg: #f7f7f5;
+    --bg-card: #ffffff;
+    --ink: #1b1f23;
+    --mut: #5b6472;
+    --line: #e2e4e8;
+    --accent: #2f6feb;
+    --accent-ink: #ffffff;
+    --ok: #1a7f37;
+    --warn: #9a6700;
+    --bad: #cf222e;
+    --code-bg: #f0f1f3;
+    --pill-bg: #eef2ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1117;
+      --bg-card: #161b22;
+      --ink: #e6edf3;
+      --mut: #9aa4b2;
+      --line: #2d333b;
+      --accent: #6ea8fe;
+      --accent-ink: #0d1117;
+      --ok: #3fb950;
+      --warn: #d29922;
+      --bad: #f85149;
+      --code-bg: #1c2128;
+      --pill-bg: #1c2440;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1117;
+    --bg-card: #161b22;
+    --ink: #e6edf3;
+    --mut: #9aa4b2;
+    --line: #2d333b;
+    --accent: #6ea8fe;
+    --accent-ink: #0d1117;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --bad: #f85149;
+    --code-bg: #1c2128;
+    --pill-bg: #1c2440;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    font-size: 16px;
+  }
+  .page { max-width: 880px; margin: 0 auto; padding: 40px 20px 100px; }
+  header.hero { margin-bottom: 32px; }
+  header.hero .kicker {
+    color: var(--accent);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-size: 12.5px;
+    margin: 0 0 10px;
+  }
+  h1 { font-size: clamp(26px, 4vw, 36px); margin: 0 0 12px; line-height: 1.2; }
+  .lede { color: var(--mut); font-size: 17px; max-width: 70ch; }
+  nav.toc {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin: 28px 0 40px;
+  }
+  nav.toc h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--mut);
+    margin: 0 0 10px;
+  }
+  nav.toc ol { margin: 0; padding-left: 20px; columns: 2; column-gap: 24px; }
+  nav.toc li { margin: 4px 0; break-inside: avoid; }
+  nav.toc a { color: var(--ink); text-decoration: none; border-bottom: 1px dashed var(--line); }
+  nav.toc a:hover { border-bottom-color: var(--accent); color: var(--accent); }
+
+  section { margin: 56px 0; }
+  section > h2 {
+    font-size: 22px;
+    margin: 0 0 16px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--line);
+  }
+  section > h2 .num { color: var(--accent); font-variant-numeric: tabular-nums; margin-right: 10px; }
+  h3 { font-size: 17px; margin: 26px 0 10px; }
+  p { margin: 12px 0; }
+  a { color: var(--accent); }
+  a:focus-visible, button:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .card { background: var(--bg-card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 22px; margin: 16px 0; }
+  .callout { border-left: 4px solid var(--accent); background: var(--pill-bg); border-radius: 8px; padding: 14px 18px; margin: 18px 0; }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.ok { border-left-color: var(--ok); }
+  .callout.bad { border-left-color: var(--bad); }
+  .callout .label {
+    font-weight: 700;
+    font-size: 12.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--mut);
+    margin-bottom: 6px;
+  }
+
+  code {
+    background: var(--code-bg);
+    padding: 1px 6px;
+    border-radius: 5px;
+    font-size: 0.9em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    white-space: pre;
+    font-size: 13.5px;
+    line-height: 1.55;
+  }
+  pre code { background: none; padding: 0; border-radius: 0; }
+
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14.5px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--mut); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .tablewrap { overflow-x: auto; }
+
+  .pill {
+    display: inline-block;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 2px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    color: var(--mut);
+    white-space: nowrap;
+  }
+  .pill.ok { color: var(--ok); border-color: var(--ok); }
+  .pill.bad { color: var(--bad); border-color: var(--bad); }
+  .pill.warn { color: var(--warn); border-color: var(--warn); }
+
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 18px 0; }
+  .flow .node {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 13.5px;
+    min-width: 120px;
+    text-align: center;
+  }
+  .flow .node.core { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .flow .node.bad { border-color: var(--bad); color: var(--bad); font-weight: 600; }
+  .flow .node.ok { border-color: var(--ok); color: var(--ok); font-weight: 600; }
+  .flow .node.warn { border-color: var(--warn); color: var(--warn); font-weight: 600; }
+  .flow .arrow { color: var(--mut); font-size: 18px; }
+  .flow.vertical { flex-direction: column; align-items: stretch; }
+  .flow.vertical .node { text-align: left; }
+  .flow.vertical .arrow { text-align: center; }
+
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+  @media (max-width: 640px) { .compare { grid-template-columns: 1fr; } }
+  .compare .col { border-radius: 12px; padding: 16px 18px; border: 1px solid var(--line); }
+  .compare .col.before { background: color-mix(in srgb, var(--bad) 6%, var(--bg-card)); }
+  .compare .col.after { background: color-mix(in srgb, var(--ok) 6%, var(--bg-card)); }
+  .compare h4 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .compare.before-after .before h4 { color: var(--bad); }
+  .compare.before-after .after h4 { color: var(--ok); }
+
+  .module-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin: 18px 0; }
+  .module-card { background: var(--bg-card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .module-card h4 {
+    margin: 0 0 6px;
+    font-size: 15px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: var(--accent);
+  }
+  .module-card p { margin: 6px 0 0; font-size: 14px; color: var(--mut); }
+
+  .lane-grid { display: flex; flex-wrap: wrap; gap: 12px; margin: 18px 0; align-items: stretch; }
+  .lane {
+    flex: 1 1 220px;
+    border-radius: 12px;
+    border: 2px solid var(--line);
+    padding: 14px 16px;
+    background: var(--bg-card);
+  }
+  .lane .lane-tag {
+    font-size: 11.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--mut);
+    margin-bottom: 6px;
+  }
+  .lane.busy { border-color: var(--bad); }
+  .lane.busy .lane-tag { color: var(--bad); }
+  .lane p { font-size: 13.5px; margin: 6px 0 0; }
+
+  .finding-card { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 10px 0; background: var(--bg-card); }
+  .finding-card .sev { color: var(--bad); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .finding-card .loc { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; color: var(--mut); }
+  .finding-card .conf { float: right; color: var(--mut); font-size: 13px; }
+  .finding-card .rationale { margin-top: 8px; font-size: 14px; }
+
+  ol.gaps li, ul.plain li { margin: 8px 0; }
+
+  .timeline { margin: 20px 0; padding: 0; list-style: none; }
+  .timeline li {
+    position: relative;
+    padding: 4px 0 18px 26px;
+    border-left: 2px solid var(--line);
+    margin-left: 6px;
+  }
+  .timeline li:last-child { border-left-color: transparent; padding-bottom: 0; }
+  .timeline li::before {
+    content: "";
+    position: absolute;
+    left: -7px;
+    top: 6px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--bg-card);
+    border: 2px solid var(--accent);
+  }
+  .timeline li.reject::before { border-color: var(--bad); }
+  .timeline li.approve::before { border-color: var(--ok); }
+  .timeline li .when { font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .timeline li.reject .when { color: var(--bad); }
+  .timeline li.approve .when { color: var(--ok); }
+
+  details.quiz {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 18px;
+    margin: 16px 0;
+  }
+  details.quiz summary { cursor: pointer; font-weight: 600; list-style: none; }
+  details.quiz summary::-webkit-details-marker { display: none; }
+  details.quiz summary::before { content: "▸ "; color: var(--accent); }
+  details.quiz[open] summary::before { content: "▾ "; }
+  details.quiz .q { font-weight: 600; margin-bottom: 4px; }
+  details.quiz .answer { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
+  details.quiz .answer .verdict { font-weight: 700; color: var(--ok); }
+
+  footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--mut); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <p class="kicker">Genesis L4 · Explain Diff · Milestone M9</p>
+    <h1>Hybrid Retrieval / Local Vector Memory</h1>
+    <p class="lede">
+      M9 gives this system a grounding layer: a local Postgres+pgvector
+      store searchable by both vector similarity and full-text search,
+      merged by reciprocal rank fusion (RRF). The interesting part of this
+      milestone is not the plumbing — it's what happened when the team
+      tried to make that fusion better and couldn't, and what a rigorous
+      statistical test says about the improvement they kept instead. This
+      page covers the two retrieval modes and why neither is sufficient
+      alone, the exact arithmetic RRF uses and what it throws away to get
+      there, the fixture embedder's honest collapse at real corpus scale,
+      a 13-variant tuning investigation that failed its own held-out test
+      (and was correctly discarded), and a McNemar test that turns a
+      "73% vs 60%" headline into a much more careful claim. Diff range
+      <code>9d145f1</code>&nbsp;&hellip;&nbsp;<code>f28e64a</code> on
+      <code>main</code> — 24 commits, 18 files changed, 4573
+      insertions(+), 36 deletions(-).
+    </p>
+  </header>
+
+  <nav class="toc">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#grounding">Grounding: why an agent needs retrieved context, not the whole repo</a></li>
+      <li><a href="#two-modes">Two retrieval modes, and what each is good at</a></li>
+      <li><a href="#rrf">Reciprocal rank fusion: the formula, k=60, and what it discards</a></li>
+      <li><a href="#fixture-embedder">The fixture embedder: why it exists, and where it collapses</a></li>
+      <li><a href="#methodology">The centrepiece: tuning on the same 10 queries is fitting noise</a></li>
+      <li><a href="#statistics">73% vs 60% sounds decisive. McNemar says otherwise.</a></li>
+      <li><a href="#limits">Honest limits</a></li>
+      <li><a href="#quiz">Quiz</a></li>
+    </ol>
+  </nav>
+
+  <section id="grounding">
+    <h2><span class="num">1</span>Grounding: why an agent needs retrieved context, not the whole repo</h2>
+    <p>
+      Every specialist agent this system runs (M8's real <code>SecurityAgent</code>,
+      and M10's three more) answers a question about one diff: is this
+      change safe, correct, well-tested, well-documented? Answering that
+      well often requires more than the diff's own lines — does this
+      function's caller already validate the input another way? Is there
+      an existing helper that does the same thing? Does this touch a
+      pattern the codebase has a documented convention for? That extra
+      material is <strong>grounding</strong>: real, retrieved context from
+      the surrounding codebase, handed to the model alongside the diff.
+    </p>
+    <p>
+      The obvious alternative — just send the whole repository — fails for
+      reasons that compound rather than trade off against each other. A
+      model's context window is finite and this repo alone is already
+      hundreds of chunks; cost scales with tokens sent, so a whole-repo
+      prompt on every review multiplies M8's already-metered
+      <code>BudgetGuard</code> spend for no benefit on a diff that touches
+      three functions; and — the subtler cost — a model asked to reason
+      over everything at once has no signal for which of a thousand
+      unrelated functions might matter, which measurably degrades
+      relevance judgments compared to a short, targeted context. Grounding
+      exists to solve exactly this: given a diff (or a query derived from
+      it), retrieve a small number of genuinely relevant chunks from a
+      pre-indexed store, and hand only those to the specialist.
+    </p>
+    <div class="callout">
+      <p class="label">What M9 actually builds</p>
+      <p>
+        A local Postgres instance with the <code>pgvector</code> extension
+        (a separate docker-compose service from M7's events Postgres, on
+        its own host port 5434) stores <code>code_chunks</code> — this
+        repo's own source, chunked and embedded — and
+        <code>HybridRetriever.hybrid_search</code> is the one call a future
+        specialist will make to get grounding context back: "find the
+        chunks most relevant to this query," fused from two independent
+        rankers rather than trusting either alone. M9 builds and proves
+        this retrieval layer in isolation; wiring it into a specialist's
+        actual prompt is later-milestone scope, the same staging M4's
+        orchestrator and M8's LLM client followed before they were wired
+        into the request path.
+      </p>
+    </div>
+  </section>
+
+  <section id="two-modes">
+    <h2><span class="num">2</span>Two retrieval modes, and what each is good at</h2>
+    <p>
+      <code>backend/memory/context_retriever.py</code> runs two independent
+      searches over the same <code>code_chunks</code> table for every
+      query, because each is good at exactly what the other is bad at.
+    </p>
+    <div class="compare">
+      <div class="col before">
+        <h4>Vector search (<code>search_vector</code>)</h4>
+        <p>
+          ANN search over <code>embedding</code> by cosine distance
+          (pgvector's <code>&lt;=&gt;</code> operator, an HNSW index).
+          Good at <strong>semantic</strong> matches — a query for
+          "authenticate the request" can, in principle, find code that
+          talks about "login" even though the two share no literal
+          token. Bad at treating a rare, exact identifier as special: a
+          single occurrence of a unique token gets averaged into whatever
+          else is in that chunk's embedding, with no mechanism to say
+          "this token appearing at all is a strong signal on its own."
+        </p>
+      </div>
+      <div class="col after">
+        <h4>Full-text search (<code>search_fulltext</code>)</h4>
+        <p>
+          Postgres's own <code>ts_rank_cd</code> over a generated,
+          GIN-indexed <code>content_tsv</code> column, using
+          <code>plainto_tsquery</code>. Good at exact and stemmed keyword
+          matches — a query for the literal function name
+          <code>reciprocal_rank_fusion</code> finds the chunk that defines
+          it directly, no embedding noise involved. Bad at synonyms: it
+          has no notion that "authenticate" and "login" are related unless
+          both literal (stemmed) forms appear in the text.
+        </p>
+      </div>
+    </div>
+    <p>
+      This milestone's own fixture set has concrete examples of both
+      failure/success modes, chosen from this repo's real code before
+      ever being run against it (see <code>tests/fixtures/
+      retrieval_queries.json</code>'s own rationale fields):
+    </p>
+    <table>
+      <thead><tr><th>Query</th><th>What it tests</th><th>Which ranker wins</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>CircuitBreaker</code> (id 3)</td>
+          <td>An exact class name — full-text should nail this trivially</td>
+          <td>Vector actually leads here (rank 2 of 387) — see section 3 for why full-text's own rank (18th) is deceptively bad</td>
+        </tr>
+        <tr>
+          <td>"authenticate the request" (id 4)</td>
+          <td>Natural-language paraphrase with no literal keyword overlap — the vector-synonym case</td>
+          <td>Depends entirely on embedding quality (section 4) — the deliberately riskiest query in the set</td>
+        </tr>
+        <tr>
+          <td><code>reciprocal_rank_fusion</code> (id 1)</td>
+          <td>Literal, corpus-unique identifier</td>
+          <td>Full-text search's natural strength; used directly as this milestone's "known function name lands top-3" success criterion</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>
+      Neither mode is sufficient alone across this whole query mix — which
+      is precisely the justification for fusing them rather than picking
+      one.
+    </p>
+  </section>
+
+  <section id="rrf">
+    <h2><span class="num">3</span>Reciprocal rank fusion: the formula, k=60, and what it discards</h2>
+    <p>
+      <code>reciprocal_rank_fusion</code> (a pure function, no database
+      dependency, directly unit-tested with known rank inputs) merges the
+      two rankers' outputs with one formula:
+    </p>
+    <pre><code>score(chunk) = sum over rankers r that surfaced chunk of  1 / (k + rank_r(chunk))</code></pre>
+    <p>
+      <code>rank_r</code> is 1-indexed — a ranker's top result has rank 1,
+      never 0. A chunk that only one ranker surfaced still gets a score
+      (from that one term); a chunk both rankers surfaced gets the sum of
+      both terms, which is how a merely-decent showing on two rankers can
+      outscore a brilliant showing on only one. <code>k=60</code> is not
+      an arbitrary constant this project invented — it's the commonly
+      cited default from the RRF literature (Cormack, Clarke &amp;
+      Buettcher, 2009), chosen because it's large enough that a
+      document's exact rank near the very top of one ranker doesn't
+      completely dominate the fused score on its own; a second-place hit
+      from one ranker and a first-place hit from another can still combine
+      meaningfully rather than one ranker unilaterally deciding the
+      result.
+    </p>
+    <h3>The real case that shows what this formula discards</h3>
+    <p>
+      Query id 3, <code>CircuitBreaker</code>, against the real,
+      OpenAI-embedded corpus: the target chunk's true <strong>vector
+      rank is 2nd</strong> of 387, at cosine similarity <strong>0.4806</strong>
+      — genuinely the second-best match in the entire corpus, a confident,
+      well-separated signal. Its <strong>full-text rank is 18th</strong>
+      of 20 matched candidates, with <code>ts_rank_cd = 0.1</code>. On its
+      face, "rank 18" looks like full-text search strongly disliked this
+      document. Direct inspection of the full ranking shows that isn't
+      what happened at all: <code>ts_rank_cd</code> for this query returns
+      only a handful of coarse, quantized values (0.5, 0.3, 0.2, 0.1, ...),
+      and this target's score of 0.1 is <strong>exactly tied with 11 other
+      candidates</strong> — ranks 9 through 20 of the pool. Rank 18 doesn't
+      mean "full-text meaningfully preferred the document at rank 9 over
+      this one" — it means Postgres's own tie-break (row order) happened
+      to place this one near the bottom of a 12-way tie carrying almost no
+      discriminating information at all.
+    </p>
+    <pre><code>RRF score = 1/(60+2) + 1/(60+18)
+          = 0.016129 + 0.012821
+          = 0.028950   -&gt; fused rank 6 of the pool (a miss at top-5)</code></pre>
+    <div class="callout warn">
+      <p class="label">The fundamental cost of ignoring magnitude</p>
+      <p>
+        RRF's formula only ever sees the two integers "rank 2" and "rank
+        18." It has no way to know that rank 2's cosine similarity
+        (0.4806) reflects real, well-separated confidence, while rank
+        18's <code>ts_rank_cd</code> (0.1) reflects an arbitrary
+        tie-break among 12 equally-scored candidates carrying almost no
+        signal. A document one ranker is genuinely <em>confident</em>
+        about is treated identically to one it barely, arbitrarily
+        preferred — purely because both happen to land at the same
+        ordinal position. Eight other candidates that scored only
+        moderately on <em>both</em> rankers (e.g. vector rank 5 + full-text
+        rank 1) out-accumulate this target's one very-strong-plus-one-weak
+        combination, simply because RRF sums reciprocal ranks, not
+        underlying scores. This is not a bug in the implementation — it's
+        the structural trade-off any purely rank-based fusion makes in
+        exchange for not needing the two rankers' scores to be on a
+        comparable scale at all (cosine similarity and <code>ts_rank_cd</code>
+        live in entirely different, incomparable ranges — RRF's whole
+        appeal is sidestepping that problem, at the cost of exactly this
+        kind of magnitude-blindness).
+      </p>
+    </div>
+    <p>
+      Section 5's tuning investigation tried a score-based fusion
+      (min-max normalizing raw cosine similarity and <code>ts_rank_cd</code>
+      within each pool) specifically to address this — it did not end up
+      winning, but it was tried for exactly this reason, not omitted.
+    </p>
+  </section>
+
+  <section id="fixture-embedder">
+    <h2><span class="num">4</span>The fixture embedder: why it exists, and where it collapses</h2>
+    <p>
+      <code>DeterministicFixtureEmbedder</code> exists because, for most of
+      this milestone's build, there was no funded OpenAI credential
+      available, and this project's own policy (mirroring
+      <code>AnthropicLLMClient</code>'s injectable fake client pattern from
+      M8) is that nothing outside a real, credentialed live-demo path may
+      depend on a network credential — every unit test, every integration
+      test, and the demo command itself needed a no-network,
+      fully-reproducible embedder. It tokenizes the input text, hashes
+      each token to a deterministic unit vector, sums those vectors, and
+      L2-normalizes the result — a real, inspectable mechanism, not a
+      trained model, engineered specifically to make semantically related
+      text (shared or canonicalized tokens) land near each other in vector
+      space.
+    </p>
+    <p>
+      The honest finding, measured directly rather than assumed: this
+      design <strong>collapses at real corpus scale</strong>. A
+      summed-then-normalized bag of tokens dilutes a single occurrence of
+      even an exact, corpus-unique identifier once the corpus has hundreds
+      of chunks. The concrete, measured example — query id 7,
+      <code>route_review</code>, against the real seeded corpus: the
+      function's own definition chunk has a true vector rank of
+      <strong>117th of 378</strong>, at cosine similarity
+      <strong>0.032</strong> — <em>below</em> the ~0.0625 magnitude two
+      completely unrelated random 256-dimensional vectors correlate at by
+      pure chance. The fixture embedder doesn't just rank the definition
+      chunk low; on this metric alone it can no longer distinguish "this
+      chunk is about <code>route_review</code>" from "these two vectors
+      share no relationship at all." Meanwhile, chunks that merely
+      <em>call</em> the function several times (mostly test files) repeat
+      the exact identifier token repeatedly and outrank the actual
+      definition, in both full-text cover-density and vector token-sum
+      weight.
+    </p>
+    <div class="callout ok">
+      <p class="label">This is a fixture-embedder limitation, not a retriever bug</p>
+      <p>
+        <code>HybridRetriever</code>'s SQL and <code>reciprocal_rank_fusion</code>'s
+        arithmetic were verified directly to do exactly what they are
+        specified to do. A larger candidate pool was tried experimentally
+        (up to 100 candidates, over a quarter of the corpus) and only
+        recovered 2 of 6 misses on the original 10-query set — a partial
+        fix that defeats the pool's own documented purpose, correctly
+        rejected rather than shipped. Once a funded OpenAI credential
+        existed, the same 10 queries were re-measured on real
+        <code>text-embedding-3-large</code> embeddings: recall@5 rose from
+        4/10 to <strong>7/10</strong>, rescuing 3 of the fixture embedder's
+        6 misses and losing none of its hits — direct evidence the
+        collapse above is a property of the hashed bag-of-tokens design,
+        not of the retrieval architecture around it.
+      </p>
+    </div>
+  </section>
+
+  <section id="methodology">
+    <h2><span class="num">5</span>The centrepiece: tuning on the same 10 queries is fitting noise</h2>
+    <p>
+      With fusion and vector-alone tied at 7/10 on the original 10-query
+      set, the obvious next move looks like: try a few fusion variants,
+      keep whichever scores highest on those same 10 queries. That move is
+      a methodological trap, and this milestone's investigation is worth
+      walking through precisely because it demonstrates the trap being
+      avoided on purpose, not stumbled past.
+    </p>
+    <p>
+      Ten queries is a small enough sample that a variant can score higher
+      purely by luck — by fitting whatever idiosyncrasies happen to exist
+      in those specific 10 items, rather than by being genuinely better at
+      retrieval in general. If the winner is then judged only against the
+      same 10 queries it was selected on, there is no way to tell the
+      difference between "this variant is actually better" and "this
+      variant happened to fit this particular sample's noise." The fix
+      applied here is the standard one from any discipline that takes
+      overfitting seriously: hold out a second, independent sample, commit
+      it before it is ever used, and touch it exactly once, after the
+      selection is already locked in.
+    </p>
+    <ol class="gaps">
+      <li>
+        <strong>The held-out set was written and git-committed <em>before</em>
+        any tuning happened.</strong> <code>tests/fixtures/
+        retrieval_queries_holdout.json</code> — 15 queries, chosen blind
+        from this repo's own source the same way the original 10 were —
+        exists in git history from before the first of the 13 variants was
+        ever tried. This ordering matters: a held-out set built or edited
+        <em>after</em> seeing which variant looks best is not held-out at
+        all, it's just a second chance to cherry-pick.
+      </li>
+      <li>
+        <strong>Every tuning step used only the original 10.</strong> 13
+        variants — weighted RRF at vector:fts ratios of 2:1, 3:1, and 1:2;
+        candidate pools of 50, 100, and the full 387-chunk corpus; RRF's
+        own <code>k</code> at 10, 20, and 120; three score-based fusion
+        weightings; one best-rank fusion — were all scored exclusively
+        against the 10-query tuning set. Best result: <strong>8/10</strong>,
+        achieved by three separate variants, never 9/10 or 10/10.
+      </li>
+      <li>
+        <strong>The selection rule was written down before the held-out
+        set was touched.</strong> Highest recall@5; tie-break on
+        recall@3; tie-break on upweighting the already-stronger vector
+        ranker; tie-break on the smallest parameter deviation from
+        current defaults. Applying it mechanically picked weighted RRF at
+        vector:fts = 3:1 (k=60, pool=20).
+      </li>
+      <li>
+        <strong>The held-out set was queried exactly once</strong>, with
+        the winner, the untuned current default, and vector-alone all
+        measured together for a fair three-way comparison.
+      </li>
+    </ol>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Method</th><th>Original 10 (tuning set)</th><th>Held-out 15 (recall@5)</th><th>Held-out 15 (recall@10)</th></tr></thead>
+        <tbody>
+          <tr><td>Vector alone</td><td>7/10</td><td>9/15 (60%)</td><td>10/15 (67%)</td></tr>
+          <tr><td>Current RRF (k=60, pool=20, untuned)</td><td>7/10</td><td>11/15 (73%)</td><td>13/15 (87%)</td></tr>
+          <tr><td><strong>Tuned winner (vec:fts=3:1)</strong></td><td><strong>8/10</strong></td><td>11/15 (73%, tied)</td><td>12/15 (80%, <em>worse</em>)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      The tuned winner's edge on the tuning set (8/10 vs 7/10) evaporated
+      on the held-out set — it merely tied the untuned default at
+      recall@5, and was outright worse at recall@10. This is the
+      overfitting risk the whole methodology exists to catch, caught for
+      real.
+    </p>
+    <div class="callout bad">
+      <p class="label">Why NOT shipping the tuned variant is the correct engineering outcome</p>
+      <p>
+        It would have been easy to ship the 3:1 weighting anyway — it did
+        score better on some evidence, and a less careful process might
+        have stopped at "8/10 beats 7/10, ship it." The held-out test
+        exists specifically to prevent that: a change justified only by
+        the same data used to find it is not justified at all, and
+        shipping it here would have meant a real, worse-at-recall@10
+        change to a live retrieval system, sold on evidence that had
+        already been shown not to generalize.
+        <code>HybridRetriever</code>/<code>reciprocal_rank_fusion</code>
+        are unchanged from before this investigation began — the correct
+        response to "13 variants, none of which beat the shipped default
+        on held-out data" is not to force one through anyway, but to
+        conclude the current configuration isn't leaving obvious,
+        cheap, generalizable recall on the table, which is itself a
+        useful, if less exciting, result.
+      </p>
+    </div>
+  </section>
+
+  <section id="statistics">
+    <h2><span class="num">6</span>73% vs 60% sounds decisive. McNemar says otherwise.</h2>
+    <p>
+      The held-out numbers above — 11/15 vs 9/15 at recall@5 (73% vs 60%),
+      13/15 vs 10/15 at recall@10 (87% vs 67%) — read like a clear win for
+      fusion. This milestone's own PLAN.md, in its first pass at recording
+      this result, said as much: fusion "clearly beats" vector-alone, by a
+      margin "large enough to not be noise." An independent verification
+      session later ran the actual statistical test this claim implies,
+      and the picture it produced is narrower.
+    </p>
+    <p>
+      <strong>McNemar's test</strong> is the right tool here because
+      recall@5 and vector-alone-recall@5 aren't two independent samples —
+      they're two scores on the <em>same</em> 15 queries. What matters for
+      "is method A really better than method B" isn't the raw counts, it's
+      the queries where the two methods <em>disagree</em> — the
+      discordant pairs. A query both methods get right, or both get
+      wrong, provides no information about which method is better; only
+      the disagreements do.
+    </p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Metric</th><th>Discordant pairs</th><th>RRF right / vector wrong</th><th>Vector right / RRF wrong</th><th>McNemar p-value</th></tr></thead>
+        <tbody>
+          <tr><td>recall@5</td><td>2</td><td>2</td><td>0</td><td><strong>p = 0.5</strong></td></tr>
+          <tr><td>recall@10</td><td>3</td><td>3</td><td>0</td><td><strong>p = 0.25</strong></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      Neither p-value clears any conventional significance threshold
+      (e.g. p &lt; 0.05) — and with only 2 or 3 discordant pairs total,
+      no test could. What the data <em>does</em> show, precisely: at both
+      recall@5 and recall@10, every single discordant pair went RRF's way
+      and <strong>none</strong> went the other way. The direction is
+      perfectly one-sided everywhere it was formally tested. What it does
+      not show: that this one-sidedness is anything more than what you'd
+      expect to see some of the time from a coin that isn't actually
+      biased, given how few discordant pairs there are to work with.
+    </p>
+    <div class="callout warn">
+      <p class="label">Direction consistent. Significance absent. These are different claims.</p>
+      <p>
+        For someone deciding whether to trust this benchmark, the
+        distinction matters concretely: "no evidence fusion hurts" is
+        fully supported (RRF lost zero discordant pairs at either k on
+        the held-out set); "suggestive evidence fusion helps" is a fair
+        characterization (the one-sidedness is a real pattern, not
+        nothing); "fusion clearly beats vector-alone" is <em>not</em>
+        supported by this sample size, however the raw percentages look.
+        A benchmark can be honestly reported and still not be decisive —
+        the two are not the same claim, and collapsing them is exactly
+        the kind of overclaim this closeout session's fix to PLAN.md
+        exists to correct. Settling the question for real would need
+        enough discordant pairs — realistically a substantially larger,
+        blindly-chosen query set (30 or more) — for McNemar to have a
+        chance of reaching significance even if the true effect is real.
+      </p>
+    </div>
+    <p>
+      One more nuance the original "clearly beats" framing omitted
+      entirely: on the small original 10-query set, fusion doesn't
+      uniformly win at every <code>k</code> — at recall@3 specifically,
+      vector-alone actually leads, 6/10 to fusion's 5/10. That's the one
+      place in either query set where the direction runs against fusion
+      outright, not merely short of statistical significance.
+    </p>
+  </section>
+
+  <section id="limits">
+    <h2><span class="num">7</span>Honest limits</h2>
+    <ol class="gaps">
+      <li>
+        <strong>The success criterion was amended after the numbers were
+        already measured.</strong> PLAN.md's original M9 criterion — a
+        literal "recall@5 = 100% on a 10-query fixture" — was written
+        before any real measurement existed. It was retired only after
+        the honest 40%/70%/tied-then-not-significant results were already
+        on record, with the original wording and every intermediate
+        status kept verbatim above the correction, not rewritten. This is
+        the right order of operations (measure, then decide whether the
+        bar was realistic) but it does mean the bar this milestone is
+        ultimately judged against was not fixed in advance the way the
+        held-out query set discipline (section 5) insists tuning
+        decisions should be.
+      </li>
+      <li>
+        <strong>n=15 is small.</strong> The held-out set is large enough
+        to be a real, blind, single-use test — the discipline that
+        matters most for avoiding overfitting — but it is not large
+        enough to make a statistically confident claim about the size of
+        fusion's benefit, as section 6 shows directly. A 30+-query set is
+        the tracked next step, not yet built.
+      </li>
+      <li>
+        <strong>The corpus vanishes on every container recreate.</strong>
+        The <code>pgvector</code> service has no volume, by design — a
+        <code>docker compose down &amp;&amp; up</code> starts
+        <code>code_chunks</code> empty every time. A host-side marker file
+        that survives the recreate can still claim a corpus is already
+        seeded, which has already cost two separate verification sessions
+        a surprise re-seed and real API spend. The test fixtures guard
+        against this correctly (comparing the marker's claimed count
+        against a live row count before trusting it); a human running the
+        demo command by hand is not automatically protected — see
+        README.md's local development notes and the <code>pgvector</code>
+        service comment in <code>docker-compose.yml</code>, both updated
+        in this closeout session.
+      </li>
+    </ol>
+  </section>
+
+  <section id="quiz">
+    <h2><span class="num">8</span>Quiz</h2>
+    <p>Three questions. Click each one to reveal the answer.</p>
+
+    <details class="quiz">
+      <summary class="q">1. Thirteen fusion variants were tuned and scored using only the original 10-query set, and a held-out 15-query set — written and committed before any tuning began — was queried exactly once, after a winner was already selected. Why does the order of these two steps matter, and what would go wrong if the held-out set had instead been built or adjusted after seeing how the 13 variants performed?</summary>
+      <div class="answer">
+        <p class="verdict">Because a held-out set only tells you anything if it is genuinely independent of the selection process it's meant to check. If the held-out set were built or adjusted after seeing the 13 variants' results, it would no longer be an independent test -- it would just be a second opportunity to pick queries (consciously or not) that happen to favor whichever variant already looked best, defeating the entire purpose.</p>
+        <p>
+          This is exactly the failure mode the pre-registered selection
+          rule and the committed-before-queried held-out set were built to
+          prevent: the tuned winner (weighted RRF, vector:fts=3:1) scored
+          8/10 on the original 10 -- a real, measured edge -- but then
+          tied the untuned default at recall@5 and lost at recall@10 on
+          the held-out 15, revealing that its tuning-set edge had fit
+          noise specific to those 10 queries rather than reflecting a
+          genuine improvement. Querying the held-out set only once, after
+          the winner was locked in, is what makes that a trustworthy
+          negative result rather than something that could itself have
+          been cherry-picked.
+        </p>
+      </div>
+    </details>
+
+    <details class="quiz">
+      <summary class="q">2. Query id 3 (CircuitBreaker) has a true vector rank of 2nd (cosine 0.4806) but a full-text rank of 18th (ts_rank_cd 0.1) -- direct inspection shows that 0.1 score is exactly tied with 11 other candidates. Why does RRF's formula, score = 1/(k+rank), treat this rank-18 result as meaningfully worse than a rank-9 result with the identical tied score, and what does that reveal about what rank-based fusion discards?</summary>
+      <div class="answer">
+        <p class="verdict">Because RRF's formula only ever looks at the ordinal rank number, never the underlying score that produced it. It has no way to represent "these 12 candidates are actually tied and this rank ordering among them is arbitrary" -- rank 9 and rank 18 get different, fixed contributions (1/(60+9) vs 1/(60+18)) regardless of whether the scores behind them are meaningfully different or an arbitrary tie-break among equals.</p>
+        <p>
+          This is the fundamental cost of ignoring magnitude: a ranker's
+          genuine confidence (vector rank 2 at a strong, well-separated
+          cosine similarity of 0.4806) is fused using the exact same
+          mechanism as a ranker's arbitrary, low-information tie-break
+          (full-text rank 18, tied with 11 others at a score that
+          barely discriminates between any of them). A rank-based fusion
+          like RRF sidesteps the real problem of putting cosine similarity
+          and <code>ts_rank_cd</code> on a comparable scale -- but the
+          price is that it cannot tell a confident rank from a
+          coin-flip rank once both happen to land at the same ordinal
+          position.
+        </p>
+      </div>
+    </details>
+
+    <details class="quiz">
+      <summary class="q">3. The held-out 15-query results show current RRF beating vector-alone 11/15 to 9/15 at recall@5 (73% vs 60%) -- but a McNemar test on the underlying discordant pairs (2 pairs, both favoring RRF, 0 the other way) gives p=0.5, nowhere near significant. Which of these is the accurate way to describe what this evidence actually supports?</summary>
+      <div class="answer">
+        <p class="verdict">"No evidence fusion hurts, and suggestive but statistically unproven evidence that it helps" -- not "fusion clearly beats vector-alone." The direction is genuinely one-sided (every discordant pair favored RRF, none favored vector-alone, at both recall@5 and recall@10), which is real information -- but with only 2-3 discordant pairs total, that one-sidedness is exactly the kind of pattern a fair coin would also produce some of the time by chance, so it cannot be called statistically significant.</p>
+        <p>
+          This is precisely the gap between the raw percentages (73% vs
+          60% looks decisive) and what a formal significance test on the
+          same underlying data actually supports. PLAN.md's own M9
+          success criteria originally said fusion "clearly beats"
+          vector-alone with a margin "large enough to not be noise" --
+          this closeout session corrected that wording on top of (not
+          instead of) the original, specifically because "direction
+          consistent" and "statistically significant" are different
+          claims, and only the first one is currently earned. Settling
+          the second would need a larger, blindly-chosen query set (30+)
+          to generate enough discordant pairs for McNemar to have a real
+          chance at significance.
+        </p>
+      </div>
+    </details>
+  </section>
+
+  <footer>
+    Generated by the <code>explain-diff-html</code> skill during L4 VERIFY housekeeping for
+    milestone M9 of the <code>pr-review-agent</code> genesis-kit project. Diff range:
+    <code>9d145f1</code> (feat(compose): add pgvector service and M9 embedding/pgvector deps)
+    through <code>f28e64a</code> (docs(genesis): amend M9's success criteria after a
+    fusion-vs-vector-alone investigation) — 24 commits, 18 files changed, 4573 insertions(+),
+    36 deletions(-). Self-contained: no external stylesheets, fonts, scripts, or images. No API
+    key material of any kind appears anywhere on this page.
+  </footer>
+
+</div>
+</body>
+</html>
