@@ -202,6 +202,28 @@ a paid/external credential (M8, M10–M13) come after, per the user-approved ord
 - **Token budget:** 50000
 - **Credentials:** **[CREDENTIALS REQUIRED: LLM API key for the judge (claude-sonnet-5); Railway deployment credentials only if the dashboard is deployed rather than run locally]**
 
+**L1 BUILD ADAPTATION, DISCLOSED (2026-08-31):** this outcome's "from the
+continuous aggregates" clause describes a TimescaleDB feature that belongs
+to M12 (Tiger Cloud Migration), which has **not** been built — there is no
+`agent_health_1m` or `pr_cost_hourly`, and M12 has no Progress entry above.
+The M13 build was explicitly scoped to skip M12 and adapt: the dashboard's
+cost/latency view reads `agent_events` directly with plain SQL aggregation
+(`backend.database.repository.EventRepository.aggregate_llm_calls_by_agent`),
+grouped by `(agent, model)` exactly as a continuous aggregate would be,
+so a future M12 swap to a real materialized/continuous aggregate is a
+narrow change to that one method's SQL (FROM/GROUP BY only) — the API
+route and every consumer of it are unaffected. Node is 24.7.0 on the build
+machine, not this outcome's stated "Node 20" — compatible (Next 15 needs
+≥18.18) and pinned for reproducibility in `frontend/.nvmrc` and
+`frontend/package.json`'s `engines.node`, rather than silently
+mismatched. See the M13 Progress entry below for the full account,
+including a second, disclosed addition outside this milestone's literal
+freeze boundary: `backend/database/migrations/0002_reviews.sql` and
+`backend/database/review_store.py`, the durable HITL-queue/dashboard read
+model `backend/hitl/queue.py`'s own M5 docstring named as deferred future
+work — `agent_events` alone cannot answer "what are this review's real
+findings/severities/routing-reason", only its routing outcome/confidence.
+
 ---
 
 ## Credential summary for the orchestrator to surface up front
@@ -799,3 +821,86 @@ number with dated reasoning, don't just loosen the assertion").
   test now failing at a measured 8/10 against its pinned exact 7/10 and
   miss-set, a pinned-exact assertion breaking on improvement rather than
   regression).
+
+- **2026-08-31 — M13 (Dashboard + Evaluation/CI Gate) — L1 BUILD.** Built
+  the Next.js 15 operator dashboard (`frontend/`, three Client-Component
+  views — HITL queue, per-agent cost/latency, and review trace
+  reconstruction — all fetching a new backend JSON API,
+  `backend/api/dashboard.py`, chosen over direct DB reads from Next server
+  components to keep the inward-only architecture intact and avoid a
+  second SQL client duplicating `EventRepository`/`ReviewRepository`'s
+  schema knowledge in TypeScript); the golden dataset
+  (`tests/fixtures/golden_dataset.json`, 4 cases spanning the existing
+  `sqli_diff.patch`/`sample_pr_diff.patch` plus two new fixtures —
+  `clean_diff.patch` for hallucination-detection and
+  `missing_docs_diff.patch` for soft DOCS/TESTS expectations) and its
+  loader (`backend/evaluation/golden_dataset.py`); the LLM-as-judge
+  (`backend/evaluation/judge.py`, real judge is **claude-sonnet-5** via
+  `AnthropicLLMClient` with only the model id overridden — never the same
+  model family the haiku-tier specialists use); the regression gate
+  (`backend/evaluation/regression_gate.py`, threshold **0.700**, reasoned
+  explicitly in that module's docstring) with a `StaticScoreJudge` proving
+  the gate can genuinely fail (not just pass) against a canned degraded
+  score, per this milestone's own success criteria; and both CI workflows
+  (`.github/workflows/ci.yml` — lint/typecheck/tests/imports/frontend-build,
+  with real Postgres+pgvector as native GitHub Actions service containers
+  and Redis started via `docker run` because `--enable-debug-command yes`
+  cannot be expressed through the `services:` key — and
+  `.github/workflows/eval-gate.yml` — the billable judge run, triggered by
+  `workflow_dispatch` + a weekly Monday-06:00-UTC schedule, never on push,
+  reasoned in that file's own header comment).
+
+  **Two disclosed adaptations/additions**, both flagged in this
+  milestone's own section above and in its build report: (1) the
+  continuous-aggregates → plain-SQL adaptation (M12 not built — see this
+  section's ADAPTATION note); (2) a new `reviews` table
+  (`backend/database/migrations/0002_reviews.sql`,
+  `backend/database/review_store.py`, wired into
+  `backend.orchestrator.nodes.aggregate_node` right after its existing
+  `emit_decision` call, same log-and-swallow failure policy) outside this
+  milestone's literal freeze boundary — required because the HITL queue
+  view's own success criterion ("with their findings, severities,
+  confidence and routing reason") cannot be answered from `agent_events`
+  alone (that table's `decision` event carries only `outcome`/
+  `confidence`, never the findings or reason string that produced them).
+  This is the durable, Postgres-backed queue `backend/hitl/queue.py`'s own
+  M5 docstring named as deferred future work, not a new invention.
+
+  A real bug was caught by this milestone's own integration tests before
+  it ever reached a dashboard user: `EventRepository.
+  aggregate_llm_calls_by_agent` initially omitted `options=
+  self._connect_options` from its `psycopg.connect` call, so it silently
+  ignored the `search_path` isolation every other method in that class
+  honors — `tests/integration/test_dashboard_api.py`'s isolated-schema
+  fixture caught it immediately (an "empty database" test returned
+  $97,468 of pre-existing shared-container test fixture spend instead of
+  $0), fixed by adding the missing parameter.
+
+  All 6 gates green with real services up (Redis 6380, Postgres 5433,
+  pgvector 5434): `ruff check .` (0 issues), `mypy --strict backend/`
+  (0 issues, 74 files), `pytest -v` (394 passed, 13 deselected — the free
+  suite stayed FREE, verified directly: `agent_events`' `llm.call` row
+  count moved 265→266, and the one new row is a pre-existing 2030-dated
+  `$2119.000446` fixture row from `tests/unit/test_budget_guard.py`'s
+  own historical fixture pattern, not a real Anthropic call), `lint-imports
+  --config .importlinter` (2 contracts kept, 0 broken, 74 files), and
+  `npm --prefix frontend run build` (7 routes, 0 errors; `npm run lint`
+  also 0 errors after fixing an eslint flat-config gap that was linting
+  Next's own generated `.next/types/**` output). PLAN.md's own demo
+  command (`npm --prefix frontend run build && npm --prefix frontend run
+  dev & pytest tests/eval/test_regression_gate.py -v`) was run verbatim
+  (venv activated, matching a real operator shell) and exits 0: the build
+  succeeds, the dev server starts and serves real HTTP 200s (confirmed via
+  curl and a real browser screenshot showing genuine seeded HITL-queue/
+  cost/trace data, not placeholders), and 6 of 7 collected eval tests pass
+  (1 deselected — the `@pytest.mark.live` real-judge class, correctly
+  excluded from a plain, credential-free demo run).
+
+  **Live judge run** (`pytest -m live tests/eval/test_regression_gate.py
+  -v`, run exactly once): 3 real `claude-sonnet-5` calls total — see this
+  session's final report's JUDGE_AND_GATE section for the exact recorded
+  scores, the measured run-to-run variance on an identical input, and the
+  honest read of how much (and how little) an LLM judge can be trusted as
+  a regression gate.
+
+  L4 VERIFY on M13 has not yet run — see `checkpoints/CURRENT.md`.

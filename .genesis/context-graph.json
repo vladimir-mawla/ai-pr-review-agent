@@ -1,12 +1,14 @@
 {
   "$comment": "nodes=modules, edges=[cause,effect] where cause is imported-by effect. ADD invariants by hand.",
   "project": ".",
-  "generated": "2026-08-31T14:25:43.053Z",
+  "generated": "2026-08-31T15:36:39.063Z",
   "nodes": [
+    "StatusViews",
     "__future__",
     "__init__",
     "abc",
     "anthropic",
+    "api",
     "argparse",
     "arq",
     "arq_worker",
@@ -24,6 +26,8 @@
     "context_retriever",
     "contextlib",
     "contracts",
+    "cors",
+    "dashboard",
     "dataclasses",
     "datetime",
     "decimal",
@@ -32,6 +36,7 @@
     "embedder",
     "enum",
     "enums",
+    "eslint.config",
     "events",
     "fastapi",
     "findings",
@@ -40,6 +45,8 @@
     "github_auth",
     "github_client",
     "github_models",
+    "globals",
+    "golden_dataset",
     "graph",
     "hashlib",
     "hmac",
@@ -50,20 +57,25 @@
     "itertools",
     "job_queue",
     "json",
+    "judge",
     "jwt",
     "langgraph_engine",
+    "layout",
     "llm_client",
     "logging",
     "main",
     "math",
     "message",
     "models",
+    "next-env.d",
+    "next.config",
     "nodes",
     "observability",
     "openai",
     "operator",
     "orchestrator",
     "os",
+    "page",
     "parser",
     "pathlib",
     "pgvector",
@@ -82,12 +94,14 @@
     "redis",
     "redis_arq",
     "registry",
+    "regression_gate",
     "repository",
     "response_parsing",
     "responses",
     "retry",
     "review",
     "review_local",
+    "review_store",
     "router",
     "run_fixture_review",
     "runnables",
@@ -108,6 +122,7 @@
     "test_budget_guard",
     "test_budget_guard_across_four_agents",
     "test_budget_guard_events",
+    "test_dashboard_api",
     "test_diff_mapping",
     "test_embedder",
     "test_events_failure_policy",
@@ -117,15 +132,19 @@
     "test_github_client",
     "test_github_client_contract",
     "test_github_live_demo",
+    "test_golden_dataset",
     "test_hitl_gate",
     "test_hybrid_retrieval",
+    "test_judge",
     "test_llm_client",
     "test_models",
     "test_orchestrator_fanout",
     "test_queue_roundtrip",
     "test_queue_to_orchestrator",
     "test_rbac",
+    "test_regression_gate",
     "test_reliability",
+    "test_review_store",
     "test_security_agent_live",
     "test_security_agent_schema",
     "test_security_node_infrastructure_failures",
@@ -140,6 +159,7 @@
     "types",
     "typing",
     "usage",
+    "useApiData",
     "uuid",
     "validator",
     "webhook",
@@ -178,6 +198,10 @@
     ],
     [
       "__future__",
+      "dashboard"
+    ],
+    [
+      "__future__",
       "diff_mapping"
     ],
     [
@@ -206,6 +230,10 @@
     ],
     [
       "__future__",
+      "golden_dataset"
+    ],
+    [
+      "__future__",
       "graph"
     ],
     [
@@ -215,6 +243,10 @@
     [
       "__future__",
       "interface"
+    ],
+    [
+      "__future__",
+      "judge"
     ],
     [
       "__future__",
@@ -270,6 +302,10 @@
     ],
     [
       "__future__",
+      "regression_gate"
+    ],
+    [
+      "__future__",
       "repository"
     ],
     [
@@ -283,6 +319,10 @@
     [
       "__future__",
       "review_local"
+    ],
+    [
+      "__future__",
+      "review_store"
     ],
     [
       "__future__",
@@ -346,6 +386,10 @@
     ],
     [
       "__future__",
+      "test_dashboard_api"
+    ],
+    [
+      "__future__",
       "test_diff_mapping"
     ],
     [
@@ -382,11 +426,19 @@
     ],
     [
       "__future__",
+      "test_golden_dataset"
+    ],
+    [
+      "__future__",
       "test_hitl_gate"
     ],
     [
       "__future__",
       "test_hybrid_retrieval"
+    ],
+    [
+      "__future__",
+      "test_judge"
     ],
     [
       "__future__",
@@ -410,7 +462,15 @@
     ],
     [
       "__future__",
+      "test_regression_gate"
+    ],
+    [
+      "__future__",
       "test_reliability"
+    ],
+    [
+      "__future__",
+      "test_review_store"
     ],
     [
       "__future__",
@@ -495,6 +555,10 @@
     [
       "abc",
       "test_budget_guard_events"
+    ],
+    [
+      "abc",
+      "test_dashboard_api"
     ],
     [
       "abc",
@@ -809,6 +873,14 @@
       "test_aggregator"
     ],
     [
+      "cors",
+      "main"
+    ],
+    [
+      "dashboard",
+      "main"
+    ],
+    [
       "dataclasses",
       "circuit_breaker"
     ],
@@ -830,6 +902,10 @@
     ],
     [
       "dataclasses",
+      "judge"
+    ],
+    [
+      "dataclasses",
       "llm_client"
     ],
     [
@@ -838,7 +914,19 @@
     ],
     [
       "dataclasses",
+      "regression_gate"
+    ],
+    [
+      "dataclasses",
+      "repository"
+    ],
+    [
+      "dataclasses",
       "retry"
+    ],
+    [
+      "dataclasses",
+      "review_store"
     ],
     [
       "dataclasses",
@@ -847,6 +935,10 @@
     [
       "dataclasses",
       "test_embedder"
+    ],
+    [
+      "dataclasses",
+      "test_judge"
     ],
     [
       "dataclasses",
@@ -867,6 +959,10 @@
     [
       "datetime",
       "budget"
+    ],
+    [
+      "datetime",
+      "dashboard"
     ],
     [
       "datetime",
@@ -898,6 +994,10 @@
     ],
     [
       "datetime",
+      "review_store"
+    ],
+    [
+      "datetime",
       "router"
     ],
     [
@@ -911,6 +1011,10 @@
     [
       "datetime",
       "test_budget_guard_events"
+    ],
+    [
+      "datetime",
+      "test_dashboard_api"
     ],
     [
       "datetime",
@@ -938,6 +1042,10 @@
     ],
     [
       "datetime",
+      "test_judge"
+    ],
+    [
+      "datetime",
       "test_llm_client"
     ],
     [
@@ -949,6 +1057,14 @@
       "test_orchestrator_fanout"
     ],
     [
+      "datetime",
+      "test_regression_gate"
+    ],
+    [
+      "datetime",
+      "test_review_store"
+    ],
+    [
       "decimal",
       "base_agent"
     ],
@@ -958,11 +1074,19 @@
     ],
     [
       "decimal",
+      "dashboard"
+    ],
+    [
+      "decimal",
       "events"
     ],
     [
       "decimal",
       "findings"
+    ],
+    [
+      "decimal",
+      "judge"
     ],
     [
       "decimal",
@@ -986,11 +1110,19 @@
     ],
     [
       "decimal",
+      "regression_gate"
+    ],
+    [
+      "decimal",
       "repository"
     ],
     [
       "decimal",
       "review"
+    ],
+    [
+      "decimal",
+      "review_store"
     ],
     [
       "decimal",
@@ -1026,6 +1158,10 @@
     ],
     [
       "decimal",
+      "test_dashboard_api"
+    ],
+    [
+      "decimal",
       "test_events_failure_policy"
     ],
     [
@@ -1050,6 +1186,10 @@
     ],
     [
       "decimal",
+      "test_judge"
+    ],
+    [
+      "decimal",
       "test_llm_client"
     ],
     [
@@ -1063,6 +1203,14 @@
     [
       "decimal",
       "test_queue_to_orchestrator"
+    ],
+    [
+      "decimal",
+      "test_regression_gate"
+    ],
+    [
+      "decimal",
+      "test_review_store"
     ],
     [
       "decimal",
@@ -1162,6 +1310,10 @@
     ],
     [
       "enums",
+      "golden_dataset"
+    ],
+    [
+      "enums",
       "review"
     ],
     [
@@ -1182,6 +1334,10 @@
     ],
     [
       "fastapi",
+      "dashboard"
+    ],
+    [
+      "fastapi",
       "main"
     ],
     [
@@ -1195,6 +1351,10 @@
     [
       "findings",
       "review"
+    ],
+    [
+      "functools",
+      "review_store"
     ],
     [
       "functools",
@@ -1275,6 +1435,30 @@
     [
       "github_models",
       "test_github_client_contract"
+    ],
+    [
+      "globals",
+      "layout"
+    ],
+    [
+      "golden_dataset",
+      "judge"
+    ],
+    [
+      "golden_dataset",
+      "regression_gate"
+    ],
+    [
+      "golden_dataset",
+      "test_golden_dataset"
+    ],
+    [
+      "golden_dataset",
+      "test_judge"
+    ],
+    [
+      "golden_dataset",
+      "test_regression_gate"
     ],
     [
       "graph",
@@ -1386,6 +1570,10 @@
     ],
     [
       "in_memory",
+      "test_dashboard_api"
+    ],
+    [
+      "in_memory",
       "test_events_spine"
     ],
     [
@@ -1430,7 +1618,19 @@
     ],
     [
       "json",
+      "golden_dataset"
+    ],
+    [
+      "json",
+      "judge"
+    ],
+    [
+      "json",
       "response_parsing"
+    ],
+    [
+      "json",
+      "review_store"
     ],
     [
       "json",
@@ -1459,6 +1659,10 @@
     [
       "json",
       "test_github_client_contract"
+    ],
+    [
+      "json",
+      "test_golden_dataset"
     ],
     [
       "json",
@@ -1495,6 +1699,18 @@
     [
       "json",
       "test_webhook_validator"
+    ],
+    [
+      "judge",
+      "regression_gate"
+    ],
+    [
+      "judge",
+      "test_judge"
+    ],
+    [
+      "judge",
+      "test_regression_gate"
     ],
     [
       "jwt",
@@ -1550,6 +1766,10 @@
     ],
     [
       "llm_client",
+      "judge"
+    ],
+    [
+      "llm_client",
       "nodes"
     ],
     [
@@ -1586,6 +1806,10 @@
     ],
     [
       "llm_client",
+      "test_judge"
+    ],
+    [
+      "llm_client",
       "test_llm_client"
     ],
     [
@@ -1595,6 +1819,10 @@
     [
       "llm_client",
       "test_queue_to_orchestrator"
+    ],
+    [
+      "llm_client",
+      "test_regression_gate"
     ],
     [
       "llm_client",
@@ -1629,6 +1857,14 @@
       "response_parsing"
     ],
     [
+      "logging",
+      "review_store"
+    ],
+    [
+      "main",
+      "test_dashboard_api"
+    ],
+    [
       "main",
       "test_events_spine"
     ],
@@ -1651,6 +1887,10 @@
     [
       "math",
       "repository"
+    ],
+    [
+      "math",
+      "review_store"
     ],
     [
       "message",
@@ -1678,6 +1918,10 @@
     ],
     [
       "models",
+      "dashboard"
+    ],
+    [
+      "models",
       "docs_agent"
     ],
     [
@@ -1695,6 +1939,10 @@
     [
       "models",
       "interface"
+    ],
+    [
+      "models",
+      "judge"
     ],
     [
       "models",
@@ -1718,6 +1966,10 @@
     ],
     [
       "models",
+      "regression_gate"
+    ],
+    [
+      "models",
       "repository"
     ],
     [
@@ -1727,6 +1979,10 @@
     [
       "models",
       "review_local"
+    ],
+    [
+      "models",
+      "review_store"
     ],
     [
       "models",
@@ -1766,6 +2022,10 @@
     ],
     [
       "models",
+      "test_dashboard_api"
+    ],
+    [
+      "models",
       "test_events_failure_policy"
     ],
     [
@@ -1790,6 +2050,10 @@
     ],
     [
       "models",
+      "test_judge"
+    ],
+    [
+      "models",
       "test_llm_client"
     ],
     [
@@ -1810,7 +2074,15 @@
     ],
     [
       "models",
+      "test_regression_gate"
+    ],
+    [
+      "models",
       "test_reliability"
+    ],
+    [
+      "models",
+      "test_review_store"
     ],
     [
       "models",
@@ -1905,8 +2177,16 @@
       "test_hybrid_retrieval"
     ],
     [
+      "os",
+      "test_regression_gate"
+    ],
+    [
       "parser",
       "router"
+    ],
+    [
+      "pathlib",
+      "golden_dataset"
     ],
     [
       "pathlib",
@@ -1998,7 +2278,15 @@
     ],
     [
       "postgres",
+      "test_dashboard_api"
+    ],
+    [
+      "postgres",
       "test_events_spine"
+    ],
+    [
+      "postgres",
+      "test_review_store"
     ],
     [
       "pricing",
@@ -2014,6 +2302,10 @@
     ],
     [
       "psycopg",
+      "dashboard"
+    ],
+    [
+      "psycopg",
       "events"
     ],
     [
@@ -2026,7 +2318,15 @@
     ],
     [
       "psycopg",
+      "review_store"
+    ],
+    [
+      "psycopg",
       "test_budget_guard_events"
+    ],
+    [
+      "psycopg",
+      "test_dashboard_api"
     ],
     [
       "psycopg",
@@ -2042,6 +2342,10 @@
     ],
     [
       "psycopg",
+      "test_review_store"
+    ],
+    [
+      "psycopg",
       "tiger_client"
     ],
     [
@@ -2050,11 +2354,19 @@
     ],
     [
       "pydantic",
+      "dashboard"
+    ],
+    [
+      "pydantic",
       "findings"
     ],
     [
       "pydantic",
       "github_models"
+    ],
+    [
+      "pydantic",
+      "golden_dataset"
     ],
     [
       "pydantic",
@@ -2118,6 +2430,10 @@
     ],
     [
       "pytest",
+      "test_dashboard_api"
+    ],
+    [
+      "pytest",
       "test_embedder"
     ],
     [
@@ -2150,7 +2466,15 @@
     ],
     [
       "pytest",
+      "test_golden_dataset"
+    ],
+    [
+      "pytest",
       "test_hybrid_retrieval"
+    ],
+    [
+      "pytest",
+      "test_judge"
     ],
     [
       "pytest",
@@ -2178,7 +2502,15 @@
     ],
     [
       "pytest",
+      "test_regression_gate"
+    ],
+    [
+      "pytest",
       "test_reliability"
+    ],
+    [
+      "pytest",
+      "test_review_store"
     ],
     [
       "pytest",
@@ -2317,6 +2649,14 @@
       "base_agent"
     ],
     [
+      "regression_gate",
+      "test_regression_gate"
+    ],
+    [
+      "re",
+      "judge"
+    ],
+    [
       "repository",
       "__init__"
     ],
@@ -2327,6 +2667,10 @@
     [
       "repository",
       "budget"
+    ],
+    [
+      "repository",
+      "dashboard"
     ],
     [
       "repository",
@@ -2347,6 +2691,10 @@
     [
       "repository",
       "test_budget_guard_events"
+    ],
+    [
+      "repository",
+      "test_dashboard_api"
     ],
     [
       "repository",
@@ -2433,6 +2781,26 @@
       "test_full_local_review"
     ],
     [
+      "review_store",
+      "dashboard"
+    ],
+    [
+      "review_store",
+      "main"
+    ],
+    [
+      "review_store",
+      "nodes"
+    ],
+    [
+      "review_store",
+      "test_dashboard_api"
+    ],
+    [
+      "review_store",
+      "test_review_store"
+    ],
+    [
       "router",
       "main"
     ],
@@ -2510,6 +2878,10 @@
     ],
     [
       "settings",
+      "judge"
+    ],
+    [
+      "settings",
       "llm_client"
     ],
     [
@@ -2523,6 +2895,10 @@
     [
       "settings",
       "redis_arq"
+    ],
+    [
+      "settings",
+      "review_store"
     ],
     [
       "settings",
@@ -2543,6 +2919,10 @@
     [
       "settings",
       "test_budget_guard_events"
+    ],
+    [
+      "settings",
+      "test_dashboard_api"
     ],
     [
       "settings",
@@ -2570,6 +2950,10 @@
     ],
     [
       "settings",
+      "test_judge"
+    ],
+    [
+      "settings",
       "test_llm_client"
     ],
     [
@@ -2582,7 +2966,15 @@
     ],
     [
       "settings",
+      "test_regression_gate"
+    ],
+    [
+      "settings",
       "test_reliability"
+    ],
+    [
+      "settings",
+      "test_review_store"
     ],
     [
       "settings",
@@ -2711,6 +3103,10 @@
     [
       "test_agent",
       "test_specialist_agents"
+    ],
+    [
+      "testclient",
+      "test_dashboard_api"
     ],
     [
       "testclient",
@@ -2870,6 +3266,10 @@
     ],
     [
       "typing",
+      "dashboard"
+    ],
+    [
+      "typing",
       "embedder"
     ],
     [
@@ -2879,6 +3279,10 @@
     [
       "typing",
       "interface"
+    ],
+    [
+      "typing",
+      "judge"
     ],
     [
       "typing",
@@ -2962,6 +3366,10 @@
     ],
     [
       "uuid",
+      "test_dashboard_api"
+    ],
+    [
+      "uuid",
       "test_events_spine"
     ],
     [
@@ -2979,6 +3387,10 @@
     [
       "uuid",
       "test_reliability"
+    ],
+    [
+      "uuid",
+      "test_review_store"
     ],
     [
       "validator",
