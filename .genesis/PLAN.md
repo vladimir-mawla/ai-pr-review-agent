@@ -658,3 +658,82 @@ breakdown.
   account and its Deferred list for the L4 VERIFY findings above that
   remain open (the adjacent-line dedupe gap and the missing `grounded`
   flag), plus two new forward-looking items the verifier flagged for M11/M13.
+
+### M11 — Real GitHub Integration (L1 BUILD, 2026-08-31)
+
+**Built, behind the same `GitHubClient` Protocol M10 established (nothing
+upstream changed shape):** real GitHub App auth (`backend/integrations/
+github_auth.py` — RS256 JWT minting with `iat` backdated 60s and `exp`
+clamped to 9 minutes, well inside GitHub's 10-minute ceiling; installation
+token exchange; `InstallationTokenCache` refreshing 5 minutes before each
+token's real ~1h expiry rather than minting per-call or letting one expire
+mid-flight); a repository-level authorization gate
+(`backend/security/rbac.py`'s `RepositoryAuthorizer`, resolving the
+installation id via `GET /repos/{owner}/{repo}/installation` rather than
+hardcoding it — that same call doubles as the authorization check, a 404
+meaning "not installed here"); diff-position mapping
+(`backend/integrations/diff_mapping.py`, `line`+`side` anchoring — the
+current GitHub-recommended scheme, not the legacy `position` offset —
+parsing each changed file's patch into RIGHT/LEFT line-number sets); typed
+response models (`backend/integrations/github_models.py`); and
+`RealGitHubClient` (`backend/integrations/github_client.py`), wired behind
+the M6/M8-style retry→circuit-breaker composition with GitHub-specific
+response classification (401 non-retryable, a rate-limited 403/429
+retryable, a generic 403 non-retryable, 422 never caught/swallowed).
+
+**The hard part — one unmappable finding must never take down the whole
+review, the exact failure mode the reference implementation
+(`ayush488-glitch/ai-pr-review-agent`) gave up in front of (it posts
+summary-only for every review as a result):** every finding is
+independently mapped; an unmappable one degrades into the review's summary
+body instead of being dropped or attempted as an inline comment that would
+422 the entire review. Proven both against a fake transport
+(`tests/unit/test_github_client.py`) and over a real GitHub round trip
+(`tests/integration/test_github_live_demo.py`, live).
+
+**Closed a real, disclosed M10 Deferred item:** ARQ's default job-level
+retry could call `post_review_comment` twice for the same review.
+`post_review_comment` now checks the PR's existing reviews for this
+project's own hidden idempotency marker
+(`<!-- pr-review-agent:review_id=... -->`) and skips posting if a matching
+review is already there — verified for real by running the live
+integration test twice and confirming no duplicate review appeared.
+
+**Contract test** (`tests/contract/test_github_client_contract.py`) pins
+`github_models.py` against `tests/fixtures/github_api_contract.json`, JSON
+captured from real, live calls against the testbed repo during this
+session (installation discovery, PR metadata, changed files with a real
+patch, an existing review carrying the idempotency marker, a real
+`POST .../reviews` response — token redacted). The default half needs no
+credential; a `live`-marked half re-runs the same calls against the real
+API to prove the fixture isn't stale.
+
+**`queue_for_hitl` is a deliberate no-op (log only) for the real client** —
+no durable HITL queue exists yet (M13's job); a `QUEUED_FOR_HITL` review
+already means "don't call GitHub", which not calling it trivially
+guarantees.
+
+**Live demo (see this session's final report for the full account):**
+created a real PR (`vladimir-mawla/pr-review-agent-testbed#1`, a genuine
+SQL-injection defect) via `gh`, ran the real four-agent pipeline against
+it (`run_review_locally` with `RealGitHubClient` injected), and confirmed
+the M5 HITL gate correctly withheld auto-posting because the run's own
+real findings were CRITICAL — then, for M11's own explicit demo
+requirement, called `post_review_comment` directly (disclosed as a
+deliberate demo-only bypass of that gate) and confirmed a real review
+landed on the real PR: 2 findings, both mapped inline, no findings
+degraded. `ngrok` is not installed on this machine and was not installed
+silently — PLAN.md's own demo command's tunnel step could not run;
+everything else (auth, fetch, pipeline, mapping, posting) ran for real
+without it.
+
+**Gates:** `ruff check .` clean; `mypy --strict backend/` clean (69
+files); `lint-imports` 2/2 contracts kept; plain `pytest -v` — 350 passed,
+12 deselected (0 new spend, confirmed via `agent_events`); `pytest -m live
+-v` — 11 passed, 1 pre-existing, out-of-freeze-boundary failure in
+`tests/integration/test_hybrid_retrieval.py`'s
+`TestRecallOnRealOpenAIEmbeddings` (real-world OpenAI recall drifted from
+7/10 to 8/10 on re-embed — an M9 statistical-fixture staleness issue,
+disclosed, not touched here since it is outside M11's freeze boundary and
+the project's own discipline for this class of test is "pin the new
+number with dated reasoning, don't just loosen the assertion").
