@@ -1,43 +1,35 @@
 # CURRENT
-- active_loop: none -- M13 L2 DEBUG done (fixing an independent L4 VERIFY
-  REJECT), awaiting L4 VERIFY re-run; M12 (Tiger Cloud Migration)
-  deliberately skipped/not built, per an earlier session's explicit
-  instruction, unchanged this session
-- target: M13
-- iteration: 1 (L2 DEBUG round, following L4 VERIFY's REJECT of the L1
-  BUILD at iteration 0)
-- last_gate: **L4 VERIFY REJECTED M13 (2026-08-31)** for two blocking
-  defects: (1) `/costs` summed ~$40,261 of 2030-dated `budget-guard-*`
-  test-fixture rows into "real" spend with no date/prefix filter and no
-  disclosure, alongside a false "Nothing on these pages is fabricated"
-  homepage claim; (2) `.github/workflows/eval-gate.yml` never triggered on
-  a pull_request (only `workflow_dispatch` + a weekly cron), so nothing
-  could actually block a quality-degrading merge despite M13's outcome
-  text claiming it does. Both fixed this session (L2 DEBUG) -- see
-  `.genesis/PLAN.md`'s M13 AMENDED success-criteria line and its new
-  2026-08-31 Progress entry for the full account. Gates re-run green,
-  real services up: `ruff check .` (0 issues), `mypy --strict backend/`
-  (0 issues, 74 files), `pytest -v` (396 passed, 13 deselected -- FREE
-  confirmed directly: `agent_events` `llm.call` row count moved 268->269,
-  the one new row a synthetic `precision-*` fixture, not a real Anthropic
-  call), `lint-imports --config .importlinter` (2 contracts kept, 0
-  broken), `npm --prefix frontend run build` (7 routes, 0 errors).
-  `actionlint` ran clean on the edited workflow file. `pytest -m live` was
-  NOT re-run this session (not required by either fix; $0.00 spent this
-  session) -- see this session's final report's API_SPEND.
-- last_action: L2 DEBUG on M13's L4 REJECT -- both blocking defects fixed
-  (dashboard exclusion filter + disclosure + homepage copy; eval-gate.yml
-  pull_request trigger + loud-fail-on-missing-secret + fork handling),
-  plus two non-blocking cleanups (removed dead `InMemoryHitlQueue`;
-  dated PLAN.md amendment). Granular commits, pushed to main -- see this
-  session's final report's COMMITS/PUSH_RESULT for exact SHAs.
-- next_action: re-run L4 VERIFY on M13 (separate session)
+- active_loop: none -- M13 is DONE (second independent L4 VERIFY APPROVEd
+  it after the REJECT/fix cycle below). M13 was the last unbuilt milestone
+  besides M12; M12 (Tiger Cloud Migration) remains deliberately not built,
+  since it needs a Tiger Cloud account this project does not have.
+- target: M12
+- iteration: 0
+- last_gate: **L4 VERIFY APPROVE on M13 (after REJECT and fix)** -- a
+  second, independent L4 VERIFY session re-ran M13 against the L2 DEBUG
+  fixes (dashboard synthetic-row exclusion filter + disclosure card,
+  corrected homepage claim, `eval-gate.yml` `pull_request` trigger) and
+  APPROVEd: independently reproduced the genuine-spend arithmetic
+  ($0.076917), classified every `review_id` prefix itself with no false
+  negatives, and proved by a rolled-back-transaction probe that an
+  unlisted synthetic prefix still counts as real spend on `/costs` --
+  ruling the exclusion mechanism a denylist, not an allowlist guarantee.
+  See `.genesis/PLAN.md`'s final 2026-08-31 M13 Progress entry and
+  `.genesis/explanations/2026-08-31-explanation-m13.html` for the full
+  account.
+- last_action: post-APPROVE bookkeeping close-out for M13 (this session) --
+  `.genesis/DONE.html` section 3 pill flipped to done, `.genesis/PLAN.md`
+  Progress entry appended, `.genesis/implementation-notes.html` row
+  appended, this checkpoint rolled to M12, explain-diff HTML written, all
+  gates re-run green, commits pushed.
+- next_action: M12 (Tiger Cloud) is the only unbuilt milestone and needs a
+  Tiger Cloud account -- otherwise work the Deferred list below.
 - model: claude-sonnet-5
 - tokens_used: not tracked this session
 - tokens_budget: 50000
 - skills_loaded: []
 
-## M13 build summary (Dashboard + Evaluation/CI Gate) -- L1 BUILD done, NOT yet L4 VERIFYed
+## M13 final state (Dashboard + Evaluation/CI Gate) -- DONE, L4 VERIFY APPROVE (after REJECT/fix)
 
 See `.genesis/PLAN.md`'s M13 ADAPTATION note and its Progress entry for
 the full account. Condensed:
@@ -65,6 +57,27 @@ the full account. Condensed:
   aggregation query) was caught and fixed by this milestone's own
   integration tests before merge -- see the build report's GATE_RESULTS/
   ANOMALIES for the full account.
+
+**A first, independent L4 VERIFY REJECTED** this build for two blocking
+defects: `/costs` summed ~$40,261 of 2030-dated `budget-guard-*` fixture
+rows into "real" spend at the same `(agent, model)` key genuine calls use,
+with no filter or disclosure, alongside a false "Nothing on these pages is
+fabricated" homepage claim; and `eval-gate.yml` never triggered on a
+`pull_request`, so nothing could block a merge. **An L2 DEBUG loop fixed
+both:** a combined date + review_id-prefix exclusion filter (both
+mechanisms genuinely required -- 151 of 170 real `budget-guard-*` rows were
+past-dated, not future-dated), exclusions surfaced in a visible disclosure
+card rather than dropped; the false homepage claim replaced; `eval-gate.yml`
+now triggers on every `pull_request` with a loud failure on a fork PR or a
+missing secret; and the dead `InMemoryHitlQueue` removed.
+
+**A second, independent L4 VERIFY session then APPROVEd** M13: it
+independently reproduced the arithmetic ($0.076917 genuine spend),
+classified every `review_id` prefix itself finding no false negatives, and
+proved by a rolled-back-transaction probe that an unlisted synthetic prefix
+still counts as real spend -- so the allowlist is a denylist, not a
+guarantee. M13 is now DONE; see `.genesis/PLAN.md`'s final M13 Progress
+entry and `.genesis/explanations/2026-08-31-explanation-m13.html`.
 
 ## M11 final state (Real GitHub Integration) -- DONE, L4 VERIFY APPROVE
 
@@ -377,14 +390,11 @@ New from M13 (L1 BUILD), non-blocking except where noted:
   of one is not a statistically robust variance estimate. A future
   session with more eval-gate budget should measure variance across more
   cases/repeats before leaning harder on this gate's stability.
-- **`backend/hitl/queue.py`'s `InMemoryHitlQueue`/`route_review` were not
-  touched or removed** -- the new `ReviewRepository`
-  (`backend/database/review_store.py`) is a parallel, durable read model
-  the dashboard/orchestrator now also write to; the in-memory queue class
-  itself is now effectively dead code (nothing constructs or reads it
-  outside its own tests). A future session should decide whether to
-  delete it or actually wire it in somewhere, rather than carry an unused
-  class indefinitely.
+- ~~`backend/hitl/queue.py`'s `InMemoryHitlQueue`/`route_review` were not
+  touched or removed`~~ -- resolved in the L2 DEBUG pass that followed L4
+  VERIFY's REJECT: `InMemoryHitlQueue` (confirmed, by grep, to have zero
+  production call sites) was removed as dead code; `route_review` itself
+  was left untouched.
 - **postcss high-severity npm advisory (GHSA-*, transitively via
   `next@15.5.24`) remains unresolved** -- fixable only by a Next 16
   major-version bump, deliberately not taken mid-milestone (PLAN.md
@@ -396,6 +406,28 @@ New from M13 (L1 BUILD), non-blocking except where noted:
   milestone's only frontend verification. Not requested by PLAN.md's M13
   scope, but a future session adding real frontend interactivity (forms,
   client-side filtering) should consider adding one.
+
+New from M13 (L4 VERIFY, final APPROVE, 2026-08-31), non-blocking except
+where noted -- all raised by the second, independent L4 VERIFY session:
+- **`main` has NO branch protection** (`gh api .../branches/main/protection`
+  returns 404), so the eval gate cannot actually block a merge even though
+  it now runs on every `pull_request`. Requires a repo-admin setting: a
+  required status check wired to the eval-gate job.
+- **The eval gate live-scores only 1 of 4 golden cases on every trigger**,
+  including the weekly cron -- regressions in clean-code false-positive
+  avoidance and docs/test detection go uncaught.
+- **The synthetic-row exclusion allowlist is a denylist**: a today-dated
+  row with an unlisted `review_id` prefix is counted as real spend (proven
+  by L4 VERIFY's rolled-back-transaction probe). A schema-level provenance
+  flag is the structural fix.
+- **`tests/integration/test_events_spine.py` still writes fixture rows into
+  production `agent_events` on every free `pytest` run** (~4 rows/run,
+  permanently, since the table is append-only). `test_budget_guard_events.py`
+  and `test_dashboard_api.py` use per-run disposable schemas; this file was
+  never migrated to that pattern.
+- **A residual high-severity `postcss` npm advisory** remains, fixable only
+  via a breaking `next@16` bump (same item as the M13 L1 BUILD entry above,
+  restated here as L4 VERIFY's own confirmed finding).
 
 New from M11 (L1 BUILD), non-blocking except where noted:
 - **`ngrok` is not installed on this build machine.** PLAN.md's own M11
