@@ -1,17 +1,51 @@
 # CURRENT
-- active_loop: none -- M11 CLOSED (L4 VERIFY APPROVE); M12 not yet started
-- target: M12
+- active_loop: none -- M13 L1 BUILD done, awaiting L4 VERIFY; M12 (Tiger
+  Cloud Migration) deliberately skipped/not built, per this session's
+  explicit instruction
+- target: M13
 - iteration: 0
-- last_gate: L4 VERIFY APPROVE on M11
-- last_action: M11 POST-APPROVE bookkeeping closeout (DONE.html/PLAN.md/
-  implementation-notes.html/this file updated; explain-diff HTML written;
-  gates re-run; granular commits pushed to main) -- see this session's
-  final report for the exact command output
-- next_action: run G0 existence pre-flight on M12
+- last_gate: all M13 gates green on a real, un-mocked run (ruff, mypy
+  --strict, pytest -v [394 passed, 13 deselected], lint-imports, npm
+  build/lint) plus a real push whose CI run was independently observed
+  green end-to-end (5/5 jobs) -- see this session's final report for full
+  command output and the CI run URL
+- last_action: M13 L1 BUILD (dashboard + golden dataset/judge/regression
+  gate + CI), 6 granular commits pushed to main (5a62cec..b5052cf),
+  context graph regenerated and invariants/freeze_boundary restored
+- next_action: L4 VERIFY on M13 (separate session)
 - model: claude-sonnet-5
 - tokens_used: not tracked this session
 - tokens_budget: 50000
 - skills_loaded: []
+
+## M13 build summary (Dashboard + Evaluation/CI Gate) -- L1 BUILD done, NOT yet L4 VERIFYed
+
+See `.genesis/PLAN.md`'s M13 ADAPTATION note and its Progress entry for
+the full account. Condensed:
+
+- **Disclosed adaptation:** M12 (continuous aggregates) not built; the
+  cost/latency dashboard view reads `agent_events` with plain SQL
+  (`EventRepository.aggregate_llm_calls_by_agent`), structured so a real
+  M12 swap is a narrow change to that one query.
+- **Disclosed addition outside M13's literal freeze boundary:** a new
+  `reviews` table (migration 0002 + `backend/database/review_store.py`),
+  the durable HITL queue M5's own docstring named as deferred future
+  work -- `agent_events` alone cannot answer "what are this review's real
+  findings/severities/routing-reason".
+- Dashboard (`frontend/`, Next.js 15, Node 24.7.0 pinned in `.nvmrc`/
+  `package.json` -- not PLAN's stated Node 20, disclosed and compatible):
+  three real, client-fetched views (HITL queue, cost/latency, trace),
+  verified end-to-end against a real backend and real browser render.
+- Golden dataset (4 cases) + `claude-sonnet-5` LLM-as-judge + regression
+  gate (threshold 0.700, reasoned in `regression_gate.py`'s docstring),
+  proven able to FAIL with both a canned judge and, in one live run (3
+  real sonnet calls), the real judge on a deliberately bad review.
+- CI (`.github/workflows/ci.yml`, `eval-gate.yml`): first real push's CI
+  run was green, all 5 jobs, on the first try.
+- A real bug (missing `search_path` isolation option on one new
+  aggregation query) was caught and fixed by this milestone's own
+  integration tests before merge -- see the build report's GATE_RESULTS/
+  ANOMALIES for the full account.
 
 ## M11 final state (Real GitHub Integration) -- DONE, L4 VERIFY APPROVE
 
@@ -310,6 +344,39 @@ query embeds at negligible additional cost).
   account.
 
 ## Deferred
+
+New from M13 (L1 BUILD), non-blocking except where noted:
+- **M12 (Tiger Cloud Migration) is still not built.** The cost/latency
+  dashboard view reads `agent_events` with plain SQL instead of a real
+  continuous aggregate -- disclosed, and structured for a narrow swap
+  (see `EventRepository.aggregate_llm_calls_by_agent`'s docstring), but a
+  future M12 session should do that swap rather than leave the stand-in
+  permanently.
+- **The judge's run-to-run variance was measured on only ONE pair of
+  calls** (score 1.000 both times, variance 0.000, on the "sqli-basic"
+  good-review case) -- a real measurement, not fabricated, but a sample
+  of one is not a statistically robust variance estimate. A future
+  session with more eval-gate budget should measure variance across more
+  cases/repeats before leaning harder on this gate's stability.
+- **`backend/hitl/queue.py`'s `InMemoryHitlQueue`/`route_review` were not
+  touched or removed** -- the new `ReviewRepository`
+  (`backend/database/review_store.py`) is a parallel, durable read model
+  the dashboard/orchestrator now also write to; the in-memory queue class
+  itself is now effectively dead code (nothing constructs or reads it
+  outside its own tests). A future session should decide whether to
+  delete it or actually wire it in somewhere, rather than carry an unused
+  class indefinitely.
+- **postcss high-severity npm advisory (GHSA-*, transitively via
+  `next@15.5.24`) remains unresolved** -- fixable only by a Next 16
+  major-version bump, deliberately not taken mid-milestone (PLAN.md
+  pins Next 15). Low real risk (build-tool-only, this repo's own trusted
+  CSS, never user-supplied input at runtime) but tracked, not silently
+  ignored -- see `npm audit`'s output in this session's final report.
+- **No frontend test suite exists** (no Jest/Vitest/Playwright) --
+  `npm run build`/`npm run lint` and a real browser check are this
+  milestone's only frontend verification. Not requested by PLAN.md's M13
+  scope, but a future session adding real frontend interactivity (forms,
+  client-side filtering) should consider adding one.
 
 New from M11 (L1 BUILD), non-blocking except where noted:
 - **`ngrok` is not installed on this build machine.** PLAN.md's own M11
