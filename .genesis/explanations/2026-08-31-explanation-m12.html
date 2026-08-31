@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>M12 Explained — Tiger Cloud Migration</title>
+<style>
+  :root {
+    --bg: #f7f7f5;
+    --bg-card: #ffffff;
+    --ink: #1b1f23;
+    --mut: #5b6472;
+    --line: #e2e4e8;
+    --accent: #2f6feb;
+    --accent-ink: #ffffff;
+    --ok: #1a7f37;
+    --warn: #9a6700;
+    --bad: #cf222e;
+    --code-bg: #f0f1f3;
+    --pill-bg: #eef2ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1117;
+      --bg-card: #161b22;
+      --ink: #e6edf3;
+      --mut: #9aa4b2;
+      --line: #2d333b;
+      --accent: #6ea8fe;
+      --accent-ink: #0d1117;
+      --ok: #3fb950;
+      --warn: #d29922;
+      --bad: #f85149;
+      --code-bg: #1c2128;
+      --pill-bg: #1c2440;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1117;
+    --bg-card: #161b22;
+    --ink: #e6edf3;
+    --mut: #9aa4b2;
+    --line: #2d333b;
+    --accent: #6ea8fe;
+    --accent-ink: #0d1117;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --bad: #f85149;
+    --code-bg: #1c2128;
+    --pill-bg: #1c2440;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    font-size: 16px;
+  }
+  .page { max-width: 880px; margin: 0 auto; padding: 40px 20px 100px; }
+  header.hero { margin-bottom: 32px; }
+  header.hero .kicker {
+    color: var(--accent);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-size: 12.5px;
+    margin: 0 0 10px;
+  }
+  h1 { font-size: clamp(26px, 4vw, 36px); margin: 0 0 12px; line-height: 1.2; }
+  .lede { color: var(--mut); font-size: 17px; max-width: 70ch; }
+  nav.toc {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin: 28px 0 40px;
+  }
+  nav.toc h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--mut);
+    margin: 0 0 10px;
+  }
+  nav.toc ol { margin: 0; padding-left: 20px; columns: 2; column-gap: 24px; }
+  nav.toc li { margin: 4px 0; break-inside: avoid; }
+  nav.toc a { color: var(--ink); text-decoration: none; border-bottom: 1px dashed var(--line); }
+  nav.toc a:hover { border-bottom-color: var(--accent); color: var(--accent); }
+
+  section { margin: 56px 0; }
+  section > h2 {
+    font-size: 22px;
+    margin: 0 0 16px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--line);
+  }
+  section > h2 .num { color: var(--accent); font-variant-numeric: tabular-nums; margin-right: 10px; }
+  h3 { font-size: 17px; margin: 26px 0 10px; }
+  p { margin: 12px 0; }
+  a { color: var(--accent); }
+  a:focus-visible, button:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .card { background: var(--bg-card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 22px; margin: 16px 0; }
+  .callout { border-left: 4px solid var(--accent); background: var(--pill-bg); border-radius: 8px; padding: 14px 18px; margin: 18px 0; }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.ok { border-left-color: var(--ok); }
+  .callout.bad { border-left-color: var(--bad); }
+  .callout .label {
+    font-weight: 700;
+    font-size: 12.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--mut);
+    margin-bottom: 6px;
+  }
+
+  code {
+    background: var(--code-bg);
+    padding: 1px 6px;
+    border-radius: 5px;
+    font-size: 0.9em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    white-space: pre;
+    font-size: 13.5px;
+    line-height: 1.55;
+  }
+  pre code { background: none; padding: 0; border-radius: 0; }
+
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14.5px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--mut); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .tablewrap { overflow-x: auto; }
+
+  .pill {
+    display: inline-block;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 2px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    color: var(--mut);
+    white-space: nowrap;
+  }
+  .pill.ok { color: var(--ok); border-color: var(--ok); }
+  .pill.bad { color: var(--bad); border-color: var(--bad); }
+  .pill.warn { color: var(--warn); border-color: var(--warn); }
+
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 18px 0; }
+  .flow .node {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 13.5px;
+    min-width: 120px;
+    text-align: center;
+  }
+  .flow .node.core { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .flow .node.bad { border-color: var(--bad); color: var(--bad); font-weight: 600; }
+  .flow .node.ok { border-color: var(--ok); color: var(--ok); font-weight: 600; }
+  .flow .node.warn { border-color: var(--warn); color: var(--warn); font-weight: 600; }
+  .flow .arrow { color: var(--mut); font-size: 18px; }
+  .flow.vertical { flex-direction: column; align-items: stretch; }
+  .flow.vertical .node { text-align: left; }
+  .flow.vertical .arrow { text-align: center; }
+
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+  @media (max-width: 640px) { .compare { grid-template-columns: 1fr; } }
+  .compare .col { border-radius: 12px; padding: 16px 18px; border: 1px solid var(--line); }
+  .compare .col.before { background: color-mix(in srgb, var(--bad) 6%, var(--bg-card)); }
+  .compare .col.after { background: color-mix(in srgb, var(--ok) 6%, var(--bg-card)); }
+  .compare h4 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .compare.before-after .before h4 { color: var(--bad); }
+  .compare.before-after .after h4 { color: var(--ok); }
+
+  .module-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin: 18px 0; }
+  .module-card { background: var(--bg-card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .module-card h4 {
+    margin: 0 0 6px;
+    font-size: 15px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: var(--accent);
+  }
+  .module-card p { margin: 6px 0 0; font-size: 14px; color: var(--mut); }
+
+  .lane-grid { display: flex; flex-wrap: wrap; gap: 12px; margin: 18px 0; align-items: stretch; }
+  .lane {
+    flex: 1 1 220px;
+    border-radius: 12px;
+    border: 2px solid var(--line);
+    padding: 14px 16px;
+    background: var(--bg-card);
+  }
+  .lane .lane-tag {
+    font-size: 11.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--mut);
+    margin-bottom: 6px;
+  }
+  .lane.busy { border-color: var(--bad); }
+  .lane.busy .lane-tag { color: var(--bad); }
+  .lane.ok { border-color: var(--ok); }
+  .lane.ok .lane-tag { color: var(--ok); }
+  .lane p { font-size: 13.5px; margin: 6px 0 0; }
+
+  ol.gaps li, ul.plain li { margin: 8px 0; }
+
+  .timeline { margin: 20px 0; padding: 0; list-style: none; }
+  .timeline li {
+    position: relative;
+    padding: 4px 0 18px 26px;
+    border-left: 2px solid var(--line);
+    margin-left: 6px;
+  }
+  .timeline li:last-child { border-left-color: transparent; padding-bottom: 0; }
+  .timeline li::before {
+    content: "";
+    position: absolute;
+    left: -7px;
+    top: 6px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--bg-card);
+    border: 2px solid var(--accent);
+  }
+  .timeline li.reject::before { border-color: var(--bad); }
+  .timeline li.approve::before { border-color: var(--ok); }
+  .timeline li .when { font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .timeline li.reject .when { color: var(--bad); }
+  .timeline li.approve .when { color: var(--ok); }
+
+  details.quiz {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 18px;
+    margin: 16px 0;
+  }
+  details.quiz summary { cursor: pointer; font-weight: 600; list-style: none; }
+  details.quiz summary::-webkit-details-marker { display: none; }
+  details.quiz summary::before { content: "▸ "; color: var(--accent); }
+  details.quiz[open] summary::before { content: "▾ "; }
+  details.quiz .q { font-weight: 600; margin-bottom: 4px; }
+  details.quiz .answer { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
+  details.quiz .answer .verdict { font-weight: 700; color: var(--ok); }
+
+  footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--mut); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <p class="kicker">Genesis L4 · Explain Diff · Milestone M12</p>
+    <h1>Tiger Cloud Migration</h1>
+    <p class="lede">
+      Every table this project has written to since M7 has lived on a
+      single local Postgres box with no time-partitioning at all.
+      M12 moves <code>agent_events</code> and <code>code_chunks</code> onto
+      a real, paid Tiger Cloud (managed TimescaleDB) instance — a real
+      hypertable, real continuous aggregates, a real DiskANN index. The
+      centerpiece is a gap that almost slipped through unnoticed: the
+      append-only invariant this project has enforced with database
+      triggers since M7 turned out to have a hole a hypertable's chunking
+      opens up, one the parent table's own correct behavior was actively
+      hiding. This page covers what a hypertable actually is, why chunking
+      forces a schema change to the primary key, the row-trigger-vs-
+      statement-trigger gap and how it was closed, why a continuous
+      aggregate's exclusion filter has to live inside the view, the
+      arithmetic trap in combining pre-aggregated buckets, and a glob bug
+      that briefly leaked Tiger-only SQL into local development. Diff range
+      <code>011acf0^..8c6eee2</code> on <code>main</code> — 9 commits, 13
+      files changed, 1,642 insertions(+), 92 deletions(-).
+    </p>
+  </header>
+
+  <nav class="toc">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#background">Background: what a hypertable is</a></li>
+      <li><a href="#pk">Why the primary key had to change</a></li>
+      <li><a href="#centerpiece">The centerpiece: the trigger that didn't follow</a></li>
+      <li><a href="#caggs">Continuous aggregates and the filter's address</a></li>
+      <li><a href="#weighting">The weighting trap</a></li>
+      <li><a href="#diskann">DiskANN vs. HNSW</a></li>
+      <li><a href="#local">Keeping local development alive</a></li>
+      <li><a href="#quiz">Quiz</a></li>
+    </ol>
+  </nav>
+
+  <section id="background">
+    <h2><span class="num">1</span>Background: what a hypertable is</h2>
+    <p>
+      <code>agent_events</code> has been an ordinary Postgres table since
+      M7 — one <code>INSERT</code> per span, LLM call, or routing decision,
+      growing forever because the table is deliberately append-only (a
+      database trigger rejects <code>UPDATE</code>/<code>DELETE</code> for
+      every role, superuser included). An ordinary table with no
+      partitioning has one physical structure holding every row ever
+      written; a query scoped to "the last hour" still has to consult an
+      index built over the entire table's history, and an index that
+      spans years of rows gets larger, slower to update, and slower to
+      vacuum every single day the table stays in production.
+    </p>
+    <p>
+      A <b>hypertable</b> (TimescaleDB's core abstraction, layered on top
+      of ordinary Postgres) looks like one table to every query
+      (<code>SELECT</code>, <code>INSERT</code>, an index, a trigger — all
+      of it addressed by the hypertable's own name,
+      <code>agent_events</code>), but is physically implemented as many
+      smaller tables called <b>chunks</b>, each holding one time range.
+      This migration chunks on <code>ts</code> at a 1-day interval:
+    </p>
+    <div class="flow vertical">
+      <div class="node core">agent_events (hypertable — the name every query still uses)</div>
+      <div class="arrow">&darr; physically implemented as &darr;</div>
+      <div class="node">chunk: 2026-08-29 (its own physical table)</div>
+      <div class="node">chunk: 2026-08-30 (its own physical table)</div>
+      <div class="node">chunk: 2026-08-31 (its own physical table)</div>
+    </div>
+    <p>
+      A query scoped to today only ever touches today's chunk — its index
+      is small, no matter how many years of history the hypertable holds
+      in total. An <code>INSERT</code> is routed to the right chunk
+      automatically (creating a new one the first time a row lands in a
+      day that doesn't have one yet); nothing about
+      <code>EventRepository</code>'s own <code>INSERT</code>/
+      <code>SELECT</code> SQL had to change, because it still only ever
+      names <code>agent_events</code>. This is exactly why an append-only
+      audit table that grows without bound — this project's own
+      description of <code>agent_events</code> since M7 — is close to the
+      textbook case a hypertable exists for.
+    </p>
+  </section>
+
+  <section id="pk">
+    <h2><span class="num">2</span>Why the primary key had to change</h2>
+    <p>
+      Local's <code>agent_events</code> (migration
+      <code>0001_agent_events.sql</code>) has a plain <code>id BIGSERIAL
+      PRIMARY KEY</code>. The Tiger migration's schema is byte-for-byte
+      identical in every other column, but its primary key is
+      <code>PRIMARY KEY (id, ts)</code> — <code>ts</code>, the partitioning
+      column, added into the constraint.
+    </p>
+    <p>
+      This isn't a style choice. TimescaleDB's <code>create_hypertable()</code>
+      rejects a unique or primary-key constraint outright if it does not
+      include the column being partitioned on. The reason is structural,
+      not arbitrary: a unique constraint has to be enforceable, and
+      Postgres enforces uniqueness by checking an index — but each chunk
+      only holds an index over its own rows. If <code>id</code> alone were
+      the key, guaranteeing no two chunks ever produced the same
+      <code>id</code> would require checking <em>every</em> chunk on every
+      insert, defeating the entire point of splitting the table up.
+      Requiring the partitioning column in the key means each chunk can
+      enforce uniqueness of <code>(id, ts)</code> purely locally, using
+      only its own index — the constraint stays cheap precisely because it
+      never has to look outside the chunk it's inserting into.
+    </p>
+    <div class="callout">
+      <div class="label">What this says about partitioned tables generally</div>
+      A uniqueness guarantee that isn't allowed to touch every partition
+      has to be re-derived to depend only on the field that determines
+      which partition a row lives in. This shows up under different names
+      across partitioning schemes: TimescaleDB's chunking, a sharded SQL
+      database's shard key, or a NoSQL store's partition key — the common
+      thread is that a global uniqueness invariant becomes local (and
+      cheap) exactly when the constraint includes the partition key.
+      <code>id</code> (a <code>BIGSERIAL</code>) still remains effectively
+      unique in practice, because one sequence generates it regardless of
+      which chunk a row ends up in — but what Postgres/TimescaleDB actually
+      enforce is the composite <code>(id, ts)</code>, not <code>id</code>
+      alone.
+    </div>
+  </section>
+
+  <section id="centerpiece">
+    <h2><span class="num">3</span>The centerpiece: the trigger that didn't follow</h2>
+    <p>
+      Since M7, <code>agent_events</code> has enforced append-only with
+      three triggers: a <code>BEFORE UPDATE</code> and a
+      <code>BEFORE DELETE</code>, both <b>row-level</b>
+      (<code>FOR EACH ROW</code>), and a <code>BEFORE TRUNCATE</code>,
+      <b>statement-level</b> (<code>FOR EACH STATEMENT</code>) — added at
+      M7 specifically because PostgreSQL never fires a row-level trigger
+      for a <code>TRUNCATE</code> at all; <code>TRUNCATE</code> only
+      supports statement-level triggers. That distinction — which
+      PostgreSQL requires for <code>TRUNCATE</code> specifically — is what
+      turned out to matter again here, in a completely different way.
+    </p>
+    <p>
+      TimescaleDB re-creates a hypertable's row-level triggers on every
+      chunk automatically: an <code>UPDATE</code> or <code>DELETE</code>
+      issued directly against a chunk's own internal table name (something
+      like <code>_timescaledb_internal._hyper_3_14_chunk</code>, not the
+      <code>agent_events</code> name any application code uses) still fires
+      the same rejection. A statement-level trigger created on the
+      hypertable does <b>not</b> get this treatment — it exists only on the
+      hypertable itself, never propagated to any chunk, past or future.
+    </p>
+    <div class="compare before-after">
+      <div class="col before">
+        <h4>What was tested (looked safe)</h4>
+        <pre><code>TRUNCATE agent_events;
+-- ERROR: agent_events is
+-- append-only: TRUNCATE is
+-- not permitted</code></pre>
+        <p style="font-size:13.5px;color:var(--mut);margin-top:10px">
+          The hypertable name itself correctly rejects — the statement
+          trigger fires here, because this <em>is</em> the relation it was
+          created on.
+        </p>
+      </div>
+      <div class="col after">
+        <h4>What was never tried before this milestone</h4>
+        <pre><code>TRUNCATE
+  _timescaledb_internal._hyper_3_14_chunk;
+-- (silently succeeds; rows gone,
+--  no exception)</code></pre>
+        <p style="font-size:13.5px;color:var(--mut);margin-top:10px">
+          The chunk's own physical table has no statement-level trigger at
+          all — nothing intercepts this.
+        </p>
+      </div>
+    </div>
+    <p>
+      This is exactly why the gap was invisible from the obvious test: the
+      one behavior everyone naturally checks — does
+      <code>TRUNCATE agent_events</code> get rejected? — <em>passes</em>,
+      because that statement genuinely does hit the trigger. The parent
+      table's own correct rejection actively hides the fact that a chunk,
+      addressed by its internal name, has no such protection. Proving the
+      gap required deliberately bypassing the name every application uses
+      and typing an internal <code>_timescaledb_internal</code> relation
+      name instead.
+    </p>
+    <div class="callout bad">
+      <div class="label">The fix: privileges propagate where statement triggers don't</div>
+      <code>agent_events_writer</code> — the restricted role every
+      real write path connects as (SELECT + INSERT only,
+      UPDATE/DELETE/TRUNCATE explicitly <code>REVOKE</code>d) — closes the
+      gap, because PostgreSQL <code>GRANT</code>/<code>REVOKE</code> on a
+      hypertable <b>is</b> propagated by TimescaleDB to every chunk,
+      existing and future, unlike a statement-level trigger. Proven live:
+      a brand-new chunk, created by an insert with a <code>ts</code> days
+      in the future after the role already existed, carried the identical
+      restricted ACL with no manual step — and
+      <code>TRUNCATE</code>/<code>UPDATE</code>/<code>DELETE</code> issued
+      directly against a real chunk's own name, as
+      <code>agent_events_writer</code>, each failed with "permission
+      denied for table ...", rejected by the privilege system itself
+      before any trigger could even run.
+    </div>
+    <h3>The honest residual</h3>
+    <p>
+      This closes the gap for <code>agent_events_writer</code> — the role
+      every production code path actually uses — but not for the owning
+      admin role (<code>tsdbadmin</code>) itself. A <code>REVOKE</code>
+      cannot restrict a table's own owner, and no statement-level trigger
+      reaches a chunk directly, so an operator connected as
+      <code>tsdbadmin</code> who deliberately types a specific chunk's
+      internal name and runs <code>TRUNCATE</code> against it still
+      bypasses both mechanisms. This is judged acceptable, not silently
+      ignored: no production code path ever connects as
+      <code>tsdbadmin</code> (grep-confirmed — every real write goes
+      through <code>agent_events_writer</code>), and it requires
+      deliberately discovering and typing an internal relation name, not
+      something an ordinary mistake could stumble into. It is the same
+      class of "an admin connection with DDL rights can always find a way
+      around a restriction built for everyone else" limitation this
+      project's local design already accepts for its own Postgres
+      superuser.
+    </p>
+    <div class="callout warn">
+      <div class="label">Independently reproduced by L4 VERIFY</div>
+      A second, independent verification session did not take the build
+      session's account on faith: it seeded 34 rows into a target chunk
+      inside a transaction, issued <code>TRUNCATE</code> against that
+      chunk's internal name, watched the row count go from 34 to 0 with no
+      exception, root-caused the absence by querying <code>pg_trigger</code>
+      directly (the statement-level trigger's <code>tgrelid</code> pointed
+      only at the hypertable, never at the chunk's own relation), confirmed
+      the same absence on a chunk created fresh after the trigger already
+      existed — ruling out "the chunk just predates the trigger" as an
+      alternate explanation — and then rolled the whole transaction back,
+      leaving no destructive trace in the real database.
+    </div>
+  </section>
+
+  <section id="caggs">
+    <h2><span class="num">4</span>Continuous aggregates and the filter's address</h2>
+    <p>
+      A <b>continuous aggregate</b> is a materialized view TimescaleDB
+      keeps incrementally up to date on a schedule (a <b>refresh
+      policy</b>), rather than recomputing from scratch on every read.
+      This migration adds two: <code>agent_health_1m</code> (1-minute
+      buckets — call count, cost sum, latency sum, and a p95-latency sketch
+      via <code>timescaledb_toolkit</code>'s <code>percentile_agg</code>,
+      grouped by agent/model) and <code>pr_cost_hourly</code> (hourly,
+      per-review). What materializing a rollup buys is the same thing a
+      hypertable's chunking buys for raw rows: a query against "the last
+      hour of agent health" touches pre-summed buckets instead of
+      re-scanning and re-aggregating every individual
+      <code>llm.call</code> event since the table was created.
+    </p>
+    <p>
+      Both views' <code>WHERE</code> clause excludes known
+      test-and-fixture <code>review_id</code> prefixes — the exact same
+      list <code>backend.database.repository._TEST_FIXTURE_REVIEW_ID_
+      PREFIXES</code> already used to filter M13's plain-SQL cost query,
+      duplicated by hand as literal <code>NOT LIKE</code> clauses inside
+      each <code>CREATE MATERIALIZED VIEW</code> statement.
+    </p>
+    <div class="callout">
+      <div class="label">Why "baked into the view" and not "applied when reading it"</div>
+      A continuous aggregate pre-computes its buckets once, on the
+      refresh schedule — a synthetic row admitted into a bucket at
+      refresh time is permanently summed into that bucket's
+      <code>cost_usd_sum</code>. Filtering it back out later, at read
+      time, cannot undo a sum that already happened; the only way to
+      exclude a row from a rollup is to keep it out of the aggregation in
+      the first place. This is precisely M13's own $97,468.71 defect in
+      miniature, one layer earlier: M13's bug was a query that forgot to
+      filter before summing; a continuous aggregate that pre-summed
+      before any filter ran would bake that same contamination
+      permanently into the materialized bucket, immune to any filter a
+      later reader remembered to add. Putting the exclusion inside the
+      view definition is what makes "forgetting to filter at read time"
+      structurally impossible instead of merely unlikely.
+    </div>
+    <p>
+      One asymmetry is deliberate, not an oversight: the
+      <b>future-dated</b> half of the filter (M13's other exclusion
+      mechanism, alongside the prefix list) is <em>not</em> repeated inside
+      the view. It doesn't need to be — a row with a <code>ts</code> in the
+      future lands in a future time bucket regardless, and any reader
+      (<code>EventRepository.aggregate_llm_calls_by_agent</code>'s Tiger
+      path) applies its own <code>bucket &lt;= now()</code> bound at query
+      time, structurally excluding that bucket the same way the pre-swap
+      local query's <code>ts &lt;= now()</code> clause did. A prefix a
+      view never admits has to be excluded inside the view; a bucket that
+      simply hasn't arrived yet can still be excluded correctly by a
+      reader, because "not yet" is a property of when you look, not what
+      you summed.
+    </p>
+  </section>
+
+  <section id="weighting">
+    <h2><span class="num">5</span>The weighting trap</h2>
+    <p>
+      <code>EventRepository.aggregate_llm_calls_by_agent</code> gained a
+      Tiger-backend branch that reads <code>agent_health_1m</code> instead
+      of raw <code>agent_events</code>. M13's own comment anticipated this
+      swap as "a narrow change to that one method's
+      <code>FROM</code>/<code>GROUP BY</code>" — and the honest correction
+      this milestone makes is that the swap needed one more change: the
+      <code>SELECT</code> list itself.
+    </p>
+    <p>
+      A per-minute bucket already stores <code>sum(latency_ms)</code> and
+      <code>count(*)</code> separately — not a pre-computed average. Combine
+      several buckets into one overall average two different ways, and
+      they do not agree unless every bucket happens to contain exactly the
+      same number of calls:
+    </p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Bucket</th><th>calls</th><th>latency sum (ms)</th><th>bucket mean (ms)</th></tr></thead>
+        <tbody>
+          <tr><td>12:00</td><td>1</td><td>2,000</td><td>2,000</td></tr>
+          <tr><td>12:01</td><td>99</td><td>9,900</td><td>100</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      A naive "average of the bucket means" gives
+      <code>(2000 + 100) / 2 = 1050</code>ms — dominated by the one-call
+      bucket, as if it mattered exactly as much as the ninety-nine-call
+      bucket next to it. The true overall mean is
+      <code>(2000 + 9900) / (1 + 99) = 119</code>ms — barely above the
+      hundred-call bucket's own mean, because that's where nearly every
+      call actually happened. Averaging bucket-level averages silently
+      re-weights every bucket equally, no matter how many calls produced
+      it.
+    </p>
+    <div class="callout ok">
+      <div class="label">How <code>SUM(sum)/SUM(count)</code> avoids it</div>
+      <code>agent_health_1m</code> stores raw sums
+      (<code>latency_ms_sum</code>, <code>call_count</code>), never a
+      pre-divided average, specifically so a reader combining buckets can
+      compute <code>SUM(latency_ms_sum) / SUM(call_count)</code> — which
+      is algebraically identical to summing every individual call's
+      latency and dividing by the true total call count, regardless of how
+      unevenly calls are spread across buckets.
+      <code>aggregate_llm_calls_by_agent</code>'s Tiger branch does exactly
+      this in Python
+      (<code>total_latency_ms / call_count</code>), not a second
+      <code>AVG()</code> in SQL over already-averaged rows.
+    </div>
+    <p>
+      L4 VERIFY re-verified this directly against real seeded buckets: the
+      swapped query returned a 182ms average latency, against a true
+      weighted average of 181.8ms computed independently from the
+      underlying rows — where naively averaging the per-minute bucket
+      means themselves would have returned 550ms for the same data. The
+      gap between 182ms and 550ms is the entire weighting trap made
+      concrete.
+    </p>
+  </section>
+
+  <section id="diskann">
+    <h2><span class="num">6</span>DiskANN vs. HNSW</h2>
+    <p>
+      <code>code_chunks</code> exists on both backends with the same
+      <code>VECTOR(256)</code> column and the same generated-column FTS
+      index, so <code>HybridRetriever</code>'s SQL is unchanged either way
+      — only the ANN (approximate nearest neighbor) index type differs.
+      Local's <code>dev-pgvector-init.sql</code> uses HNSW
+      (Hierarchical Navigable Small World), pgvector's built-in graph
+      index. Tiger's migration uses <b>DiskANN</b>
+      (pgvectorscale's index, built specifically for TimescaleDB/Tiger),
+      chosen for exactly the property its name promises: it's designed to
+      serve approximate nearest-neighbor queries efficiently against an
+      index too large to fit entirely in memory, which matters once a
+      deployment's embedded corpus grows past what a single local
+      Postgres box comfortably holds in RAM. Local's HNSW stays HNSW
+      deliberately — pgvectorscale/DiskANN is a Tiger-side extension, and
+      local's whole point (a keyless checkout, no paid account required)
+      would be defeated by depending on it there.
+    </p>
+    <p>
+      This milestone's own build-time test seeded 2,000 rows and confirmed
+      <code>EXPLAIN</code> shows the planner choosing an
+      <code>Index Scan using idx_code_chunks_embedding_diskann</code>, not
+      a sequential scan, for an <code>ORDER BY embedding &lt;=&gt; ...
+      LIMIT</code> query. L4 VERIFY ran its own independent version of the
+      same check at a different scale — 2,500 rows — and confirmed the same
+      planner choice.
+    </p>
+  </section>
+
+  <section id="local">
+    <h2><span class="num">7</span>Keeping local development alive</h2>
+    <p>
+      Nothing about this milestone was allowed to require a Tiger Cloud
+      account just to run the existing free test suite — a keyless
+      checkout has been this project's standing bar since M1. Both new
+      Settings fields, <code>events_backend</code> and
+      <code>memory_backend</code>, default to <code>"local"</code>; the
+      free suite (396 tests) was proven green with <code>.env</code>
+      entirely absent, meaning nothing in that path even imports
+      anything Tiger-specific, let alone connects to it.
+    </p>
+    <div class="callout bad">
+      <div class="label">The regression this discipline nearly missed</div>
+      <code>backend.memory.tiger_client.apply_migrations</code>'s
+      LOCAL-only migration runner applies every <code>.sql</code> file in
+      <code>migrations/scripts/</code> by globbing the directory. Adding
+      <code>2026-06-tiger-init.sql</code> alongside the pre-existing
+      <code>dev-pgvector-init.sql</code> in that same directory meant the
+      glob started picking up the Tiger file too — silently applying
+      DiskANN/hypertable DDL that does not exist on local pgvector,
+      against local pgvector.
+    </div>
+    <p>
+      The two files are genuinely incompatible on purpose, not just by
+      accident of where they happen to live: local's HNSW index must never
+      also exist on Tiger (Stage C's entire point is DiskANN replacing
+      HNSW, not sitting alongside it), and Tiger's schema needs
+      <code>vectorscale</code>/hypertable machinery local's plain pgvector
+      image doesn't have. The fix was to stop treating "every
+      <code>.sql</code> file in this directory" as one applyable set: the
+      Tiger migration is now applied only by
+      <code>backend.database.postgres.init_tiger_schema</code>, called
+      explicitly by name, never picked up by the local glob. L4 VERIFY
+      confirmed the fix by inspecting both local databases' schemas
+      directly (Postgres 5433, pgvector 5434) and finding no Tiger-only
+      DDL in either.
+    </p>
+  </section>
+
+  <section id="quiz">
+    <h2><span class="num">8</span>Quiz</h2>
+    <p>Three questions. Click each one to reveal the answer.</p>
+
+    <details class="quiz">
+      <summary class="q">1. `TRUNCATE agent_events;` correctly raised the append-only exception both before and after this migration. Why wasn't that enough to prove the append-only invariant survived the move to a hypertable?</summary>
+      <div class="answer">
+        <p class="verdict">Because that statement only ever tests the hypertable's own relation — TimescaleDB does not propagate a statement-level trigger to chunks, so a `TRUNCATE` issued directly against a chunk's own internal table name (`_timescaledb_internal._hyper_N_M_chunk`) bypasses the trigger entirely and silently succeeds.</p>
+        <p>
+          The row-level `UPDATE`/`DELETE` triggers <em>do</em> get
+          automatically re-created on every chunk, so testing those against
+          the hypertable name genuinely does prove the same protection
+          holds at the chunk level. `TRUNCATE`'s trigger is
+          statement-level (the only kind PostgreSQL allows for
+          `TRUNCATE`), and statement-level triggers stay put on whatever
+          relation created them — the hypertable's own correct rejection
+          says nothing about a chunk addressed directly, which is exactly
+          why the obvious test looked sufficient and wasn't.
+        </p>
+      </div>
+    </details>
+
+    <details class="quiz">
+      <summary class="q">2. The chunk-level TRUNCATE gap is closed by REVOKEing UPDATE/DELETE/TRUNCATE from the `agent_events_writer` role, not by adding another trigger. Why does a privilege REVOKE succeed here where a statement-level trigger fails?</summary>
+      <div class="answer">
+        <p class="verdict">PostgreSQL GRANT/REVOKE on a hypertable is automatically propagated by TimescaleDB to every chunk, existing and future — the same propagation row-level triggers get, but which statement-level triggers never get.</p>
+        <p>
+          A new trigger created on the hypertable would face the identical
+          problem the original TRUNCATE trigger had: statement-level
+          triggers simply don't reach chunks. Privileges are a different
+          mechanism entirely, checked by the relation's own ACL rather
+          than fired as a database object — and TimescaleDB keeps that ACL
+          in sync across chunks automatically, proven directly by a
+          brand-new chunk (created after the role already existed)
+          carrying the identical restricted grants with no manual step.
+        </p>
+      </div>
+    </details>
+
+    <details class="quiz">
+      <summary class="q">3. `agent_health_1m`'s WHERE clause excludes known test-fixture `review_id` prefixes inside the CREATE MATERIALIZED VIEW statement itself. Why not just keep the existing local-path filter and apply it when reading the aggregate, the way M13's plain-SQL query already did?</summary>
+      <div class="answer">
+        <p class="verdict">A continuous aggregate pre-sums its buckets on a refresh schedule — once a synthetic row is summed into a bucket's `cost_usd_sum`, no filter applied afterward, at read time, can undo that sum. The only way to keep a row out of the rollup is to keep it out of the aggregation in the first place.</p>
+        <p>
+          This is M13's own $97,468.71 defect one layer earlier: that bug
+          was a query that forgot to filter before summing raw rows. A
+          continuous aggregate that pre-summed before any filter ran would
+          bake the same contamination permanently into a materialized
+          bucket, immune to whatever filter a later reader remembered to
+          add. Baking the exclusion into the view definition makes
+          "forgetting to filter" structurally impossible rather than
+          merely unlikely — exactly the fix M13's own history argued for.
+        </p>
+      </div>
+    </details>
+  </section>
+
+  <footer>
+    Generated by the <code>explain-diff-html</code> skill for genesis L4
+    VERIFY. Diff range <code>011acf0^..8c6eee2</code> on <code>main</code>,
+    repository <code>vladimir-mawla/ai-pr-review-agent</code>. Source
+    inspected directly: <code>migrations/scripts/2026-06-tiger-init.sql</code>,
+    <code>backend/database/migrations/0001_agent_events.sql</code>,
+    <code>backend/database/{postgres,repository}.py</code>,
+    <code>backend/memory/tiger_client.py</code>,
+    <code>backend/core/settings.py</code>,
+    <code>tests/integration/test_tiger_migration.py</code>,
+    <code>.env.example</code>,
+    <code>.genesis/{PLAN.md,checkpoints/CURRENT.md}</code>. No connection
+    to the real Tiger Cloud instance was made or required to write this
+    page; the row-count/timing figures attributed to L4 VERIFY are
+    reported from that session's own record, not independently re-run
+    here.
+  </footer>
+
+</div>
+</body>
+</html>
