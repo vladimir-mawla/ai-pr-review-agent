@@ -58,6 +58,17 @@ all, but lives in this same file (PLAN.md names this exact path as M9's
 demo test suite) and under the same module-level skip for simplicity --
 harmless, since PLAN.md's own demo command always brings pgvector up
 first.
+
+JOB 1 (this session): ``TestRecallOnRealOpenAIEmbeddings`` and
+``TestFusionVsVectorAloneOnHeldOutQueries`` are marked
+``@pytest.mark.live`` (deselected by default via ``pyproject.toml``'s
+``addopts``) since both make real, billable OpenAI calls when
+``OPENAI_API_KEY`` is configured -- a plain ``pytest`` run no longer pays
+for them. ``TestRecallOnRealSeededCorpus`` is deliberately left unmarked
+(it makes no billable call at all), which is also what closes the
+re-embed-churn gap a prior investigation found: see
+``TestRecallOnRealOpenAIEmbeddings``'s own docstring and
+``TestRecallOnRealSeededCorpus``'s own docstring for the full mechanism.
 """
 
 from __future__ import annotations
@@ -364,6 +375,22 @@ class TestRecallOnRealSeededCorpus:
     via ``seeded_corpus_retriever`` (see its docstring for why it
     deliberately does not truncate ``code_chunks``, unlike every fixture
     above it in this file).
+
+    Deliberately left UNMARKED with ``@pytest.mark.live`` (unlike
+    ``TestRecallOnRealOpenAIEmbeddings``/``TestFusionVsVectorAloneOnHeldOutQueries``
+    below): this class needs no API key and makes no billable network call
+    at all -- ``DeterministicFixtureEmbedder`` and
+    ``scripts/seed_code_chunks.py --repo . --embedder-backend fixture`` are
+    both pure local computation. That is also what fixes the re-embed
+    churn a prior session's investigation found (see
+    ``TestRecallOnRealOpenAIEmbeddings``'s docstring for the full
+    mechanism): being unmarked keeps this class in the default
+    (``-m 'not live'``) suite, where it never runs alongside the
+    ``live``-marked OpenAI classes below (deselected by default), and being
+    excluded by ``-m live`` keeps it OUT of an explicit live run, where it
+    would otherwise force ``code_chunks`` back to fixture-backend content
+    and invalidate the OpenAI seed marker moments before those classes
+    read it.
     """
 
     def test_seeded_corpus_is_non_trivially_sized(
@@ -608,12 +635,39 @@ def real_openai_seeded_retriever() -> HybridRetriever:
     return HybridRetriever(_PGVECTOR_URL, embedder, settings=settings)
 
 
+@pytest.mark.live
 @pytest.mark.skipif(
     not _BASE_SETTINGS.openai_api_key,
     reason="OPENAI_API_KEY is not configured -- skipping the real-embedding recall measurement",
 )
 class TestRecallOnRealOpenAIEmbeddings:
     """PLAN.md's M9 success criteria, clause 2, on the REAL embedding backend the spec pins.
+
+    JOB 1 (this session) MARKER FIX: ``@pytest.mark.live`` (registered in
+    ``pyproject.toml``, deselected by default via that file's
+    ``addopts = "-ra -m 'not live'"``) means a plain ``pytest`` run never
+    collects this class -- and, crucially, never triggers
+    ``real_openai_seeded_retriever`` at all. That fixture is the one that
+    pays for a real re-embed; before this fix it ran on every ordinary
+    ``pytest`` invocation with ``OPENAI_API_KEY`` configured, silently.
+    It also fixes the re-embed CHURN this milestone's own investigation
+    found: ``TestRecallOnRealSeededCorpus`` above (the fixture-backend
+    class that shares this same physical ``code_chunks`` table) is
+    deliberately left UNMARKED -- it needs no key and makes no billable
+    call, so it stays in the default suite. Under the new default
+    (``-m 'not live'``), that fixture-backend class runs but this one does
+    not, so the fixture-backend class's own reseed can never invalidate
+    this class's seed marker mid-run. Under an explicit ``pytest -m live``,
+    the reverse holds: only this file's ``live``-marked classes run
+    (this one and ``TestFusionVsVectorAloneOnHeldOutQueries`` below, both
+    sharing the module-scoped ``real_openai_seeded_retriever`` fixture),
+    so ``TestRecallOnRealSeededCorpus``'s fixture-backend reseed never
+    fires either. Either way, the two backends' fixtures no longer fight
+    over one shared table WITHIN one invocation -- the contamination guard
+    itself (the ``(backend, source-signature, row-count)`` marker checked
+    by ``_table_already_seeded_for``) is untouched and still the thing
+    that decides, correctly, whether a reseed is needed; this fix only
+    changes WHICH tests get a chance to invalidate it in the same run.
 
     ``TestRecallOnRealSeededCorpus`` above measures recall@5 against
     ``DeterministicFixtureEmbedder`` (honest result: 4/10 -- see that
@@ -817,6 +871,7 @@ def _tuple_matches_expected(
     )
 
 
+@pytest.mark.live
 @pytest.mark.skipif(
     not _BASE_SETTINGS.openai_api_key,
     reason=(
@@ -826,6 +881,12 @@ def _tuple_matches_expected(
 )
 class TestFusionVsVectorAloneOnHeldOutQueries:
     """Does RRF fusion actually beat vector search alone? A held-out, once-only measurement.
+
+    Marked ``@pytest.mark.live`` (see ``TestRecallOnRealOpenAIEmbeddings``'s
+    docstring above for the full re-embed-churn fix this and that marker
+    together provide) -- this class shares the same module-scoped,
+    real-OpenAI-backed ``real_openai_seeded_retriever`` fixture, so it must
+    be deselected by default alongside it for the same reason.
 
     BACKGROUND: a prior session measured recall@5 on the original 10-query
     fixture (``tests/fixtures/retrieval_queries.json``) and found current

@@ -49,10 +49,11 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-ra"
+addopts = "-ra -m 'not live'"
 asyncio_mode = "auto"
 markers = [
     "redis: integration tests that need a real reachable Redis (see docker-compose.yml); skipped automatically when Redis is unreachable.",
+    "live: tests that make a real, billable call to a paid external API (Anthropic and/or OpenAI) once the corresponding key is configured. Deselected by default via addopts ('-m \"not live\"'), so a plain `pytest` run never spends money, regardless of what is in .env; run them explicitly with `pytest -m live -v`. A marker (not an env var) was chosen because pytest already has first-class, discoverable, `-ra`-summarized support for marker-based selection/deselection, and because it composes with `-k`/other `-m` expressions instead of requiring a second, parallel opt-in mechanism. Every `live`-marked test/class keeps its own pre-existing `skipif`-on-missing-key guard too (belt and braces): `pytest -m live` with no key configured still skips cleanly with a clear reason, rather than erroring or silently running nothing.",
 ]
 
 [tool.mypy]
