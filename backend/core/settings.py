@@ -162,6 +162,33 @@ _DEFAULT_EMBEDDING_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS = 30.0
 _DEFAULT_HYBRID_RETRIEVAL_TOP_K = 5
 _DEFAULT_RRF_K = 60
 
+# M11: which GitHubClient implementation backend.integrations.github_client.
+# build_github_client constructs by default, mirroring embedder_backend's
+# and job_queue_backend's own "safe local default, explicit opt-in for the
+# real thing" pattern. "mock" (default) needs no GitHub App credential at
+# all -- a keyless checkout of this repo, or every unit/e2e test, must
+# still work. "real" makes actual GitHub REST calls and requires
+# github_app_id/github_app_private_key_path to be set.
+_DEFAULT_GITHUB_CLIENT_BACKEND: Literal["mock", "real"] = "mock"
+_DEFAULT_GITHUB_API_BASE_URL = "https://api.github.com"
+
+# M11 reliability knobs for backend.integrations.github_client.
+# RealGitHubClient's outbound GitHub REST calls -- a FIFTH independent set,
+# alongside M6 (Redis), M7 (events Postgres), M8 (Anthropic), and M9
+# (OpenAI embeddings) above, per this project's established
+# one-dependency-one-set-of-knobs pattern. Slightly more generous timeout
+# and attempts than the Redis/events knobs: GitHub's REST API is a public
+# internet dependency (not a same-docker-network service), and a single
+# review can legitimately need several sequential calls (PR metadata, diff,
+# paginated changed files, post review) each subject to GitHub's own
+# request latency.
+_DEFAULT_GITHUB_TIMEOUT_SECONDS = 15.0
+_DEFAULT_GITHUB_RETRY_MAX_ATTEMPTS = 3
+_DEFAULT_GITHUB_RETRY_BASE_DELAY_SECONDS = 0.5
+_DEFAULT_GITHUB_RETRY_MAX_DELAY_SECONDS = 8.0
+_DEFAULT_GITHUB_CIRCUIT_BREAKER_FAILURE_THRESHOLD = 5
+_DEFAULT_GITHUB_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS = 30.0
+
 
 class Settings(BaseSettings):
     """Runtime configuration for the pr-review-agent backend.
@@ -652,6 +679,91 @@ class Settings(BaseSettings):
         description=(
             "Reciprocal rank fusion constant k in score = sum(1/(k+rank)). "
             "Default 60, the commonly cited RRF literature default."
+        ),
+    )
+
+    github_app_id: str | None = Field(
+        default=None,
+        description=(
+            "M11. This project's GitHub App id (the 'iss' claim of every "
+            "app-level JWT it mints). Deliberately optional with no "
+            "default, mirroring anthropic_api_key/openai_api_key -- every "
+            "test passes without it (MockGitHubClient stands in); only "
+            "github_client_backend='real' actually needs a real value."
+        ),
+    )
+
+    github_app_private_key_path: str | None = Field(
+        default=None,
+        description=(
+            "M11. Filesystem path to the GitHub App's PEM-encoded RSA "
+            "private key (e.g. secrets/github-app.pem -- see .gitignore). "
+            "Read fresh from disk by RealGitHubClient at construction, "
+            "never embedded in an environment variable or logged."
+        ),
+    )
+
+    github_client_backend: Literal["mock", "real"] = Field(
+        default=_DEFAULT_GITHUB_CLIENT_BACKEND,
+        description=(
+            "Which GitHubClient implementation "
+            "backend.integrations.github_client.build_github_client "
+            "constructs by default. 'mock' (default) needs no GitHub App "
+            "credential -- every test and a keyless checkout use it. "
+            "'real' makes actual GitHub REST calls and requires "
+            "github_app_id/github_app_private_key_path."
+        ),
+    )
+
+    github_api_base_url: str = Field(
+        default=_DEFAULT_GITHUB_API_BASE_URL,
+        min_length=1,
+        description="Base URL for the real GitHub REST API. Overridable for testing against a fake server.",
+    )
+
+    github_timeout_seconds: float = Field(
+        default=_DEFAULT_GITHUB_TIMEOUT_SECONDS,
+        gt=0,
+        description="Bound (seconds) on each individual outbound GitHub REST API call. Default 15.0.",
+    )
+
+    github_retry_max_attempts: int = Field(
+        default=_DEFAULT_GITHUB_RETRY_MAX_ATTEMPTS,
+        ge=1,
+        description=(
+            "Total attempts (including the first) RealGitHubClient makes "
+            "per GitHub REST call before giving up. Default 3."
+        ),
+    )
+
+    github_retry_base_delay_seconds: float = Field(
+        default=_DEFAULT_GITHUB_RETRY_BASE_DELAY_SECONDS,
+        gt=0,
+        description="Delay (seconds) before the 2nd GitHub retry attempt. Default 0.5.",
+    )
+
+    github_retry_max_delay_seconds: float = Field(
+        default=_DEFAULT_GITHUB_RETRY_MAX_DELAY_SECONDS,
+        gt=0,
+        description="Upper bound (seconds) the GitHub retry backoff is clamped to. Default 8.0.",
+    )
+
+    github_circuit_breaker_failure_threshold: int = Field(
+        default=_DEFAULT_GITHUB_CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+        ge=1,
+        description=(
+            "Consecutive failures required to trip RealGitHubClient's "
+            "circuit breaker to OPEN. Default 5."
+        ),
+    )
+
+    github_circuit_breaker_reset_timeout_seconds: float = Field(
+        default=_DEFAULT_GITHUB_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS,
+        gt=0,
+        description=(
+            "How long (seconds) RealGitHubClient's circuit breaker stays "
+            "OPEN before allowing a single HALF_OPEN probe through. "
+            "Default 30.0."
         ),
     )
 
