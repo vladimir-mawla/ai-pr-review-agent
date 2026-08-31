@@ -7,6 +7,16 @@ tolerant parser (``backend.agents.response_parsing``), and returns
 schema-valid ``Finding`` objects -- "the first point real model behavior
 enters the system", per PLAN.md's M8 outcome text.
 
+REMIT (M10): SECURITY reviews the diff for real, exploitable vulnerability
+classes ONLY -- injection, broken auth, hardcoded secrets, insecure
+deserialization, missing input validation, cryptographic misuse. It is
+explicitly told (see ``backend/prompts/templates/security/v1.md``) NOT to
+comment on code quality, test coverage, or documentation -- those are the
+other three specialists' distinct remits (see
+``backend.agents.{quality_agent,test_agent,docs_agent}`` for theirs), which
+is what keeps all four agents' findings from converging into interchangeable
+generic commentary on the same lines.
+
 FAILURE POLICY -- never silently drop, never crash the run: if the LLM's
 response cannot be parsed into any valid ``Finding`` at all (see
 ``backend.agents.response_parsing.ResponseParseError`` for exactly which
@@ -22,7 +32,7 @@ decorative: ``backend.hitl.queue.has_critical_finding`` forces ANY review
 containing a CRITICAL finding to human review UNCONDITIONALLY, regardless
 of every other specialist's confidence -- which is exactly "forces HITL
 review" in the most robust sense available (it does not depend on how the
-other three stub/real specialists happen to score that particular run; a
+other three real specialists happen to score that particular run; a
 lower-confidence-but-non-CRITICAL fallback could, in principle, still
 average out above the auto-post threshold if the other three specialists
 were confident enough, which would defeat the point).
@@ -34,51 +44,57 @@ resulting ``Finding``.
 
 M8 L2 DEBUG addition (post-L4-VERIFY): this module also exposes
 ``infrastructure_failure_fallback_finding``, a SECOND forced-HITL fallback
-builder for a DIFFERENT failure class than ``_parse_failure_fallback_finding``
+builder for a DIFFERENT failure class than the parse-failure fallback
 above. That one fires when the model answered but its answer was garbage
 (a parse failure); this one is for when the security specialist could not
 even attempt or complete its analysis at all -- a ``BudgetGuard`` block, a
-misconfigured API key, or the provider unreachable after every retry (see
-this class's ``analyze`` docstring for exactly which exceptions those are).
+misconfigured API key, or the provider unreachable after every retry.
 ``backend.orchestrator.nodes.security_node`` is the one caller: reusing
-this module's existing CRITICAL/confidence-0.000/forced-HITL mechanism
-(rather than inventing a second, differently-shaped "infrastructure error"
-signal) is deliberate -- both failure classes share the same real-world
-consequence (this run's security review did not happen, so a human must
-look at it), and ``backend.hitl.queue.has_critical_finding``'s unconditional
-routing already exists to guarantee exactly that.
+this mechanism (rather than inventing a second, differently-shaped
+"infrastructure error" signal) is deliberate -- both failure classes share
+the same real-world consequence (this run's security review did not
+happen, so a human must look at it), and
+``backend.hitl.queue.has_critical_finding``'s unconditional routing already
+exists to guarantee exactly that.
+
+M10 refactor: the actual orchestration logic (load prompt, ground with
+retrieval, call the LLM, parse the response, fall back on a parse failure)
+moved to ``backend.agents.base_agent.run_specialist_analysis`` once three
+more specialists needed the exact same sequence -- see that module's
+docstring. ``SecurityAgent`` itself is now a thin, domain-specific shell
+around that shared function. The total-parse-failure fallback (a private
+helper here in M8) is now handled inside ``run_specialist_analysis`` itself
+via ``base_agent.parse_failure_fallback_finding`` and no longer has a
+SECURITY-specific copy in this module. ``infrastructure_failure_fallback_
+finding`` IS kept here, under its original name, as a thin wrapper around
+``base_agent``'s generalized (any ``AgentType``) version -- for backward
+compatibility with this module's existing public API and its one caller
+(``backend.orchestrator.nodes.security_node``, which imports
+``infrastructure_failure_fallback_finding`` from this module by name).
+M10 also adds an optional ``retriever`` constructor argument -- SECURITY's
+prompt is now grounded with retrieved repository context exactly like the
+other three specialists, per this milestone's explicit instruction to wire
+retrieval into "each specialist's prompt", SECURITY included.
 """
 
 from __future__ import annotations
 
 import argparse
-import logging
 import sys
-from decimal import Decimal
 
-from backend.agents.base_agent import BaseAgent
-from backend.agents.response_parsing import ResponseParseError, parse_findings_from_llm_response
-from backend.models import AgentType, Finding, Severity
-from backend.prompts.registry import load_prompt
+from backend.agents.base_agent import (
+    BaseAgent,
+    RetrieverProtocol,
+    run_specialist_analysis,
+)
+from backend.agents.base_agent import (
+    infrastructure_failure_fallback_finding as _generic_infrastructure_failure_fallback_finding,
+)
+from backend.agents.response_parsing import ResponseParseError
+from backend.models import AgentType, Finding
 from backend.tools.llm_client import AnthropicLLMClient, LLMClientProtocol
 
-logger = logging.getLogger(__name__)
-
-_AGENT_NAME = "security"
 _PROMPT_VERSION = "v1"
-
-# The file/line a total-parse-failure fallback Finding is attributed to.
-# There is no real location to point at (the model's response, not the
-# diff, is what failed to parse) -- a fixed sentinel makes that fact
-# visible to a human reader rather than pointing at a plausible-looking but
-# meaningless line number.
-_PARSE_FAILURE_FILE_PATH = "<llm-response-unparseable>"
-
-# Same idea, for the OTHER forced-HITL fallback (see
-# infrastructure_failure_fallback_finding below): no real diff location
-# caused this failure either -- the specialist never got far enough to look
-# at one.
-_INFRASTRUCTURE_FAILURE_FILE_PATH = "<security-specialist-unavailable>"
 
 
 class SecurityAgent(BaseAgent):
@@ -95,6 +111,12 @@ class SecurityAgent(BaseAgent):
             load (``backend.prompts.registry.load_prompt``). Defaulted to
             "v1" rather than hardcoded inline so a future prompt revision
             is a one-argument change, not a new constructor signature.
+        _retriever: M10 addition. Anything satisfying
+            ``backend.agents.base_agent.RetrieverProtocol`` (a real
+            ``HybridRetriever`` by default in production, wired by
+            ``backend.orchestrator.nodes``, or a test-injected fake).
+            ``None`` (the default) means "no retrieval grounding for this
+            call" -- the exact pre-M10 behavior.
     """
 
     agent_type = AgentType.SECURITY
@@ -104,11 +126,13 @@ class SecurityAgent(BaseAgent):
         llm_client: LLMClientProtocol | None = None,
         *,
         prompt_version: str = _PROMPT_VERSION,
+        retriever: RetrieverProtocol | None = None,
     ) -> None:
         self._llm_client: LLMClientProtocol = (
             llm_client if llm_client is not None else AnthropicLLMClient()
         )
         self._prompt_version = prompt_version
+        self._retriever = retriever
 
     def analyze(self, diff: str, *, review_id: str | None = None) -> list[Finding]:
         """Analyze ``diff`` for security issues via a real (or fake) LLM call.
@@ -125,86 +149,27 @@ class SecurityAgent(BaseAgent):
         is where that distinction is handled -- see that module's own
         isolation behavior for a specialist's failure.
         """
-        system_prompt = load_prompt(_AGENT_NAME, version=self._prompt_version)
-        response = self._llm_client.complete(
-            system=system_prompt,
-            user=diff,
-            agent=_AGENT_NAME,
+        return run_specialist_analysis(
+            AgentType.SECURITY,
+            llm_client=self._llm_client,
+            retriever=self._retriever,
+            prompt_version=self._prompt_version,
+            diff=diff,
             review_id=review_id,
         )
-        try:
-            return parse_findings_from_llm_response(
-                response.text, default_agent_type=AgentType.SECURITY
-            )
-        except ResponseParseError as exc:
-            logger.warning(
-                "security agent: LLM response could not be parsed into any "
-                "valid Finding (%s) -- falling back to a forced-HITL CRITICAL "
-                "finding rather than dropping this specialist's contribution "
-                "silently",
-                exc,
-            )
-            return [_parse_failure_fallback_finding(exc)]
-
-
-def _parse_failure_fallback_finding(exc: ResponseParseError) -> Finding:
-    """Build the synthetic, forced-HITL Finding a total parse failure returns.
-
-    CRITICAL + confidence 0.000 -- see module docstring for why CRITICAL
-    (not merely "very low confidence") is the deliberate choice here.
-    """
-    return Finding(
-        agent_type=AgentType.SECURITY,
-        severity=Severity.CRITICAL,
-        category="llm_response_unparseable",
-        file_path=_PARSE_FAILURE_FILE_PATH,
-        line_start=1,
-        line_end=1,
-        confidence=Decimal("0.000"),
-        rationale=(
-            "The security specialist's LLM response could not be parsed into "
-            f"any valid finding ({exc}). Flagging as CRITICAL, confidence "
-            "0.000, purely to force mandatory human review of this run -- "
-            "this is NOT a claim that a real security issue exists."
-        ),
-    )
 
 
 def infrastructure_failure_fallback_finding(exc: BaseException) -> Finding:
     """Build the synthetic, forced-HITL Finding an infrastructure failure returns.
 
-    CRITICAL + confidence 0.000, exactly like
-    ``_parse_failure_fallback_finding`` -- see this module's docstring for
-    why this reuses that mechanism instead of inventing a second one. Used
-    by ``backend.orchestrator.nodes.security_node`` when ``SecurityAgent.
-    analyze`` raises one of the handful of exceptions that mean "the
-    analysis did not happen at all" (``backend.economics.budget.
-    BudgetExceededError``, ``backend.tools.llm_client.
-    LLMConfigurationError``/``LLMCallFailedError``) rather than "the model
-    answered but its answer was garbage" (that is
-    ``_parse_failure_fallback_finding``'s case, handled inside ``analyze``
-    itself and never reaches the node as an exception at all).
-
-    Deliberately public (unlike ``_parse_failure_fallback_finding``): its
-    one caller lives in a different module (``backend.orchestrator.nodes``),
-    whereas the parse-failure fallback's only caller is ``analyze`` right
-    here in the same class.
+    Thin, backward-compatible wrapper around ``backend.agents.base_agent.
+    infrastructure_failure_fallback_finding(AgentType.SECURITY, exc)`` -- see
+    this module's docstring ("M10 refactor") for why the generic version now
+    lives in ``base_agent`` (all four specialists need the identical
+    mechanism) while this SECURITY-specific name is kept for
+    ``backend.orchestrator.nodes.security_node``, its one existing caller.
     """
-    return Finding(
-        agent_type=AgentType.SECURITY,
-        severity=Severity.CRITICAL,
-        category="security_specialist_unavailable",
-        file_path=_INFRASTRUCTURE_FAILURE_FILE_PATH,
-        line_start=1,
-        line_end=1,
-        confidence=Decimal("0.000"),
-        rationale=(
-            "The security specialist could not complete its analysis "
-            f"({type(exc).__name__}: {exc}). Flagging as CRITICAL, confidence "
-            "0.000, purely to force mandatory human review of this run -- "
-            "this is NOT a claim that a real security issue exists."
-        ),
-    )
+    return _generic_infrastructure_failure_fallback_finding(AgentType.SECURITY, exc)
 
 
 def _read_diff(path: str) -> str:
@@ -240,3 +205,15 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
+
+
+# Re-exported purely so a caller (or a docstring elsewhere) that imports
+# ResponseParseError from this module for the total-parse-failure case
+# still finds it here -- the actual handling now lives in
+# backend.agents.base_agent.run_specialist_analysis.
+__all__ = [
+    "ResponseParseError",
+    "SecurityAgent",
+    "infrastructure_failure_fallback_finding",
+    "main",
+]
