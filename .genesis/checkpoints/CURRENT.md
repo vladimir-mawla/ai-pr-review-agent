@@ -1,27 +1,24 @@
 # CURRENT
-- active_loop: none -- M11 L1 BUILD done, awaiting L4 VERIFY
-- target: M11
+- active_loop: none -- M11 CLOSED (L4 VERIFY APPROVE); M12 not yet started
+- target: M12
 - iteration: 0
-- last_gate: L1 BUILD complete on M11 (this session, 2026-08-31); gates
-  (ruff, mypy --strict, pytest -v free, pytest -m live, lint-imports) all
-  green -- see this session's final report for full pasted output
-- last_action: real GitHub App auth + REST client built behind the M10
-  GitHubClient interface, diff-position mapping with degradation, real
-  live demo posted to vladimir-mawla/pr-review-agent-testbed#1, context
-  graph regenerated, granular commits pushed to main (see this session's
-  final report's COMMITS section for the exact list)
-- next_action: L4 VERIFY on M11 (separate session)
+- last_gate: L4 VERIFY APPROVE on M11
+- last_action: M11 POST-APPROVE bookkeeping closeout (DONE.html/PLAN.md/
+  implementation-notes.html/this file updated; explain-diff HTML written;
+  gates re-run; granular commits pushed to main) -- see this session's
+  final report for the exact command output
+- next_action: run G0 existence pre-flight on M12
 - model: claude-sonnet-5
 - tokens_used: not tracked this session
 - tokens_budget: 50000
 - skills_loaded: []
 
-## M11 final state (Real GitHub Integration) -- L1 BUILD DONE, awaiting L4 VERIFY
+## M11 final state (Real GitHub Integration) -- DONE, L4 VERIFY APPROVE
 
-Condensed; see `.genesis/PLAN.md`'s M11 entry in "## Progress" for the
-full narrative and this session's own final report for the complete
-G0/AUTH/DIFF-MAPPING/CONTRACT/LIVE-DEMO/GATE account with pasted command
-output.
+Condensed; see `.genesis/PLAN.md`'s M11 entries in "## Progress" (L1 BUILD,
+then a separate L4 VERIFY APPROVE entry) for the full narrative and
+`.genesis/explanations/`'s M11 explain-diff HTML for the teaching
+walkthrough.
 
 **Built:** real GitHub App auth (`backend/integrations/github_auth.py` --
 RS256 JWT, `InstallationTokenCache` refreshing ~5min before each token's
@@ -61,11 +58,19 @@ with zero duplicates) independently re-proves the same path with one
 mappable + one deliberately unmappable finding, confirming degradation
 survives a real GitHub round trip.
 
-**`ngrok` is not installed on this machine** and was not installed
-silently -- PLAN.md's own demo command's tunnel step could not run as
-literally written; everything else (auth, real diff fetch, the real
-pipeline, mapping, posting) ran for real without it. Flag for whoever
-next needs the actual webhook-triggered path end-to-end.
+**An independent L4 VERIFY session re-ran the above and APPROVEd M11.**
+Central ruling, both judged non-blocking: the ngrok webhook-tunnel leg was
+**never exercised** (`ngrok` not installed on this machine,
+`scripts/register_webhook.py` does not exist -- confirmed by
+`ls scripts/register_webhook.py` failing); and the live demo **bypassed
+the M5 HITL gate** by calling `post_review_comment` directly, because the
+real findings were correctly CRITICAL. Non-blocking because the
+production path structurally cannot bypass the gate (grep-verified:
+`arq_worker` and `review_local` call only `post_or_queue`, never
+`post_review_comment` directly) and because the webhook->queue->
+orchestrator path itself was already independently proven real at M10 --
+only the inbound-delivery leg specifically remains unexercised. Flag for
+whoever next needs the actual webhook-triggered path end-to-end.
 
 **A pre-existing, out-of-freeze-boundary test failure was found while
 running `pytest -m live -v`, not caused by this milestone and not fixed
@@ -355,6 +360,38 @@ New from M11 (L1 BUILD), non-blocking except where noted:
   -- `backend.job_queue.arq_worker` and `backend.cli.review_local` both
   still only ever call `post_or_queue`, never `post_review_comment`
   directly.
+
+New from M11 (L4 VERIFY), non-blocking, all confirmed directly against
+the code during this closeout session:
+- **The ngrok webhook-tunnel leg was never exercised** and
+  `scripts/register_webhook.py` does not exist -- restated here as L4
+  VERIFY's own central ruling (see the L1 BUILD entry above for the full
+  account; this is the same item, now doubly confirmed).
+- **`RealGitHubClient.__init__` raises a raw `FileNotFoundError`** instead
+  of the documented `GitHubAuthError` when
+  `settings.github_app_private_key_path` points at a missing file --
+  `backend/integrations/github_client.py`'s `open(...)` call at
+  construction time is not wrapped in a try/except, so the class's own
+  docstring promise (auth failures surface as `GitHubAuthError`) is broken
+  for exactly this one construction-time case.
+- **`_find_existing_review_id_marker` fetches only page 1 of a PR's
+  reviews** (`backend/integrations/github_client.py`, one `GET
+  .../reviews` call with no pagination loop) -- a PR with more than 100
+  reviews could have an earlier marker on a later page and double-post.
+  Not a risk for the testbed repo's real usage pattern, but a real
+  correctness gap on a busy PR.
+- **`RepositoryAuthorizer.authorize` string-matches `"HTTP 404"`** in the
+  raised exception's string representation (`backend/security/rbac.py`)
+  instead of checking a typed status code -- fragile if the underlying
+  exception's message format ever changes.
+- **The M9 real-embedding recall live test now FAILS**, not just drifted:
+  `TestRecallOnRealOpenAIEmbeddings` pins `expected_miss_ids = {3, 4, 7}`
+  (7/10 recall@5), and real-world recall has since improved to 8/10 --
+  a pinned-EXACT assertion that breaks on improvement, not regression.
+  Same class as the item already logged under "New from M11 (L1 BUILD)"
+  above; a future session should re-measure and re-pin with dated
+  reasoning, per this project's own established discipline for this test
+  class (see the M9 section below), not loosen the assertion to `>=`.
 
 New from M10 (L4 VERIFY), non-blocking except where noted:
 - **Adjacent-line cross-agent duplicates escape dedupe.** `dedupe_findings`'
