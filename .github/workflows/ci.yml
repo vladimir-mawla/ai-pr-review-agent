@@ -1,0 +1,162 @@
+name: CI
+
+# M13: the first milestone whose CI workflow actually exists and actually
+# runs. See .genesis/DONE.html section 2's "Every CI job references test
+# files that exist; CI is green on a clean checkout" gate -- every path a
+# `run:` step below references was verified to exist BEFORE this workflow
+# was committed (see the M13 build report's CI section for exactly how).
+#
+# NEVER an API key here: every job below is free. `pytest`'s own
+# `addopts = "-ra -m 'not live'"` (pyproject.toml) already deselects every
+# `live`-marked (billable) test by default, and this workflow additionally
+# never sets ANTHROPIC_API_KEY/OPENAI_API_KEY, so even a future accidental
+# removal of that addopts default would still find no credential to spend
+# against here. Billable eval-gate runs live in a SEPARATE, deliberately
+# not-on-every-push workflow -- see eval-gate.yml.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  lint:
+    name: lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+
+  typecheck:
+    name: typecheck (mypy --strict)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: mypy --strict backend/
+
+  imports:
+    name: imports (lint-imports)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: lint-imports --config .importlinter
+
+  tests:
+    name: tests (free suite, real Postgres/Redis/pgvector)
+    runs-on: ubuntu-latest
+    # Postgres and pgvector need no custom container command, so they use
+    # native GitHub Actions service containers, with the exact same
+    # image/port mapping docker-compose.yml uses locally (5433, 5434) so
+    # Settings' own defaults (backend/core/settings.py) work unmodified --
+    # no env overrides needed for DATABASE_URL/DATABASE_ADMIN_URL/PGVECTOR_URL.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pr_review_agent
+        ports:
+          - "5433:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pr_review_agent"
+          --health-interval 2s --health-timeout 2s --health-retries 15
+      pgvector:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pr_review_memory
+        ports:
+          - "5434:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pr_review_memory"
+          --health-interval 2s --health-timeout 2s --health-retries 15
+    env:
+      # Required, no default (Settings.github_webhook_secret) -- any
+      # non-empty value works, this is never a real GitHub secret.
+      GITHUB_WEBHOOK_SECRET: ci-test-secret
+      # Real Redis/ARQ, matching what the demo commands in PLAN.md's
+      # Progress log exercise -- the in-memory queue would skip the real
+      # integration coverage this job exists to provide.
+      JOB_QUEUE_BACKEND: redis
+      # Every other Settings default (redis_url=6380, database_url=5433,
+      # pgvector_url=5434, embedder_backend=fixture, github_client_backend=
+      # mock) already matches this job's service containers/Redis step
+      # below -- nothing else needs to be set.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+
+      # Redis needs docker-compose.yml's custom `--enable-debug-command
+      # yes` (see that file's own comment: tests/integration/
+      # test_queue_roundtrip.py's TestConcurrentWebhookEnqueuesAreNot...
+      # test uses DEBUG SLEEP to simulate a slow-but-not-down Redis).
+      # GitHub Actions' native `services:` key has no way to override a
+      # service container's command, so Redis is started explicitly with
+      # `docker run` instead, replicating docker-compose.yml's redis
+      # service exactly (same image, same command, same host port) --
+      # everything else about it behaves like a native service container.
+      - name: Start Redis (docker run -- see comment above for why not services:)
+        run: |
+          docker run -d --name redis -p 6380:6379 redis:7-alpine \
+            redis-server --enable-debug-command yes
+          for _ in $(seq 1 30); do
+            docker exec redis redis-cli ping && break
+            sleep 1
+          done
+
+      - name: Apply events-spine Postgres migrations
+        run: |
+          python -c "
+          from backend.core.settings import get_settings
+          from backend.database.postgres import apply_migrations
+          apply_migrations(get_settings().database_admin_url)
+          "
+
+      - name: Apply pgvector migrations
+        run: |
+          python -c "
+          from backend.core.settings import get_settings
+          from backend.memory.tiger_client import apply_migrations
+          apply_migrations(get_settings().pgvector_url)
+          "
+
+      - name: Run the free test suite (pytest -v)
+        run: pytest -v
+
+  frontend-build:
+    name: frontend build (Next.js)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - name: Lint (eslint)
+        run: npm run lint
+        working-directory: frontend
+      - name: Build (no backend required -- every page fetches client-side, see next.config.ts)
+        run: npm run build
+        working-directory: frontend

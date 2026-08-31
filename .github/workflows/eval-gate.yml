@@ -1,0 +1,66 @@
+name: Eval Gate (LLM-as-judge regression)
+
+# M13's billable regression gate (backend/evaluation/{golden_dataset,judge,
+# regression_gate}.py). Unlike ci.yml, this workflow makes REAL,
+# cost-incurring claude-sonnet-5 calls (the judge) -- see
+# backend/evaluation/judge.py's module docstring for why the judge is
+# deliberately a different, stronger model than the haiku-tier specialists.
+#
+# TRIGGER CHOICE -- workflow_dispatch (manual) + a weekly schedule, NOT
+# every push/PR:
+#   - Every push/PR would mean every commit, including trivial
+#     documentation or CSS edits, spends real money on sonnet calls. This
+#     project's own cost-discipline rule (a plain `pytest` run must stay
+#     FREE) extends naturally to "a plain push must stay free too" --
+#     nothing about routine development should require a credential or
+#     incur spend just to open a PR.
+#   - workflow_dispatch gives a human (or a future release-gating process)
+#     an explicit, deliberate way to run the real gate before a release or
+#     after a prompt/model change that plausibly affects review quality --
+#     exactly when spending money on it is actually worth it.
+#   - The weekly schedule (Monday 06:00 UTC) is a low-cost tripwire against
+#     silent drift between scheduled runs -- a prompt template edited on
+#     day 2 that regresses quality is caught by day 8 at the latest, not
+#     only whenever someone happens to remember to run this by hand.
+#   - A third common option -- a PR label (e.g. "run-eval") -- was
+#     considered and rejected for this milestone: it needs a maintainer to
+#     actively decide per-PR, same manual-decision cost as
+#     workflow_dispatch, but with more workflow-file complexity (a
+#     label-triggered job needs its own permissions/trigger-filtering
+#     logic) for no clear benefit over just dispatching it directly when
+#     it's actually wanted.
+#
+# CREDENTIAL: requires the repository secret ANTHROPIC_API_KEY to be
+# configured. If it is not, the job fails fast and visibly at the "Check
+# for ANTHROPIC_API_KEY" step -- deliberately not silently skipped, since a
+# manually-dispatched or scheduled run that silently does nothing would be
+# worse than one that fails loudly and says why.
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 6 * * 1" # every Monday at 06:00 UTC
+
+jobs:
+  eval-gate:
+    name: regression gate (real claude-sonnet-5 judge)
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_WEBHOOK_SECRET: eval-gate-ci-secret
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+
+      - name: Check for ANTHROPIC_API_KEY
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::ANTHROPIC_API_KEY secret is not configured -- the eval gate cannot run without it. Set it under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+      - name: Run the live regression gate (real, billable claude-sonnet-5 calls)
+        run: pytest -m live tests/eval/test_regression_gate.py -v
