@@ -13,12 +13,16 @@ M10 CLOSES THE GAP DEFERRED SINCE M4: this handler now actually runs a
 review through the real orchestrator graph (``backend.orchestrator.
 langgraph_engine.LangGraphWorkflowEngine`` -- the same compiled graph
 ``backend.cli.review_local`` drives), and dispatches the resulting
-``Review`` to the (still-mocked, per M10's own scope --
-``backend.integrations.github_client``) GitHub client. This was flagged as
-a known gap at M4 ("The orchestrator built at M4 is not yet wired into the
-webhook/queue path... expected to land in a later milestone") and reaffirmed
-unresolved at every milestone since (M5 through M9's own Deferred lists) --
-this is that later milestone.
+``Review`` to the (M10: always mocked; M11: settings-driven --
+``backend.integrations.github_client.build_github_client``) GitHub client.
+This was flagged as a known gap at M4 ("The orchestrator built at M4 is
+not yet wired into the webhook/queue path... expected to land in a later
+milestone") and reaffirmed unresolved at every milestone since (M5 through
+M9's own Deferred lists) -- M10 closed the orchestrator half; M11 closes
+the GitHub half (``_get_github_client`` below now returns a real,
+GitHub-App-authenticated client whenever ``Settings.github_client_backend
+== "real"``, and the same M10 ``MockGitHubClient`` otherwise -- default
+mock, so this worker still runs keyless out of the box).
 
 NON-BLOCKING INGRESS, STILL: this module runs as its OWN OS process (a
 dedicated ARQ worker, started separately from uvicorn -- see this file's
@@ -62,7 +66,7 @@ from arq.connections import RedisSettings
 
 from backend.core.settings import get_settings
 from backend.core.workflow_engine import WorkflowEngine
-from backend.integrations.github_client import GitHubClient, MockGitHubClient, post_or_queue
+from backend.integrations.github_client import GitHubClient, build_github_client, post_or_queue
 from backend.models import WebhookEvent
 from backend.orchestrator.langgraph_engine import LangGraphWorkflowEngine
 from backend.orchestrator.state import GraphState
@@ -93,8 +97,9 @@ def set_github_client_for_testing(client: GitHubClient | None) -> None:
     """Test-only: override which ``GitHubClient`` the worker dispatches completed reviews to.
 
     Production code never calls this. Pass ``None`` to clear a previously
-    installed override and fall back to the real (still mock-backed, per
-    M10's own scope) default.
+    installed override and fall back to the settings-driven default (mock
+    unless ``Settings.github_client_backend == "real"`` -- see
+    ``_get_github_client``).
     """
     global _github_client_override
     _github_client_override = client
@@ -114,11 +119,18 @@ def set_workflow_engine_for_testing(engine: WorkflowEngine[GraphState] | None) -
 
 
 def _get_github_client() -> GitHubClient:
+    """M11: settings-driven -- ``build_github_client`` returns the real client when
+    ``Settings.github_client_backend == "real"`` (a configured GitHub App),
+    and the same M10 ``MockGitHubClient`` otherwise. Defaults to mock (see
+    ``backend.core.settings.Settings.github_client_backend``'s docstring),
+    so a keyless checkout of this repo still runs the worker without ever
+    attempting a real network call.
+    """
     if _github_client_override is not None:
         return _github_client_override
     global _real_github_client
     if _real_github_client is None:
-        _real_github_client = MockGitHubClient()
+        _real_github_client = build_github_client(get_settings())
     return _real_github_client
 
 
@@ -182,10 +194,12 @@ async def process_webhook_event(ctx: dict[str, Any], event: dict[str, Any]) -> d
     review_id = f"webhook-{webhook_event.delivery_id}"
     github_client = _get_github_client()
 
-    # M11 will replace this with a real GitHub API call for the PR's actual
-    # patch; today's MockGitHubClient.fetch_diff returns whatever diff was
-    # pre-configured for this PR number (or an empty diff by default) --
-    # see backend.integrations.github_client's module docstring.
+    # M11: a real GitHub-App-authenticated RealGitHubClient.fetch_diff makes
+    # an actual GitHub API call for the PR's real patch when
+    # Settings.github_client_backend == "real"; the default MockGitHubClient
+    # still returns whatever diff was pre-configured for this PR number (or
+    # an empty diff by default) -- see backend.integrations.github_client's
+    # module docstring.
     diff = github_client.fetch_diff(
         repository_owner=webhook_event.repository_owner,
         repository_name=webhook_event.repository_name,
