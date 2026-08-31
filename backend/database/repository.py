@@ -59,7 +59,7 @@ rather than being free to block a worker thread indefinitely.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from math import ceil
 
@@ -140,6 +140,42 @@ _SUM_LLM_COST_FOR_DAY_SQL = """
 # buckets query) -- the call site
 # (backend.api.dashboard.get_agent_metrics) and this method's return shape
 # (AgentMetrics) would not need to change at all.
+#
+# M13 (L2 DEBUG, post-L4-REJECT -- synthetic spend counted as real spend):
+# an independent L4 VERIFY session found this query, unfiltered, summed 19
+# 2030-dated `budget-guard-*` fixture rows (~$40,261, at the SAME
+# (agent='security', model='claude-haiku-4-5') key genuine calls use)
+# straight into the dashboard's "Total spend across every agent" figure --
+# rendering it as real, current spend. The real production ``agent_events``
+# table would exhibit the exact same defect, since nothing about this bug
+# was specific to this local database: any row with a future ``ts``, or any
+# row written by this project's own test suite (which -- see
+# ``tests/integration/test_budget_guard_events.py``'s and
+# ``tests/integration/test_events_spine.py``'s own module docstrings --
+# still writes some fixture rows directly into this table, not only into a
+# disposable schema) would count the same way against a real deployment.
+#
+# TWO independent exclusion mechanisms, deliberately BOTH, not either:
+#   1. Future-dated (`ts > now`): nothing in this system's real call path
+#      can ever produce a `ts` ahead of `datetime.now(UTC)` (see
+#      `backend.observability.events`) -- nothing else needs to be true
+#      about a row for a future timestamp alone to prove it is not real
+#      spend. Catches exactly the 19 2030-dated rows above.
+#   2. Known test/fixture `review_id` prefixes (`_TEST_FIXTURE_REVIEW_ID_
+#      PREFIXES` below): a future-dated check alone would NOT have caught
+#      these same 19 rows' 151 SIBLING `budget-guard-*` rows, pinned to
+#      2020-06-14/15 (in the PAST) by the same fixture generator before
+#      this project's M8 schema-isolation fix landed -- a past-dated test
+#      row is just as synthetic as a future-dated one, and a date-only
+#      filter would still silently sum it into real spend. Conversely, a
+#      prefix-only filter would not catch a future-dated row carrying an
+#      unrecognized prefix (a wrong clock, a new/renamed fixture generator,
+#      a bug). Each mechanism covers exactly the gap the other leaves open.
+#
+# See ``ExclusionSummary`` and ``_EXCLUDED_LLM_CALLS_SUMMARY_SQL`` below for
+# the transparency half of this fix: excluded rows are never silently
+# dropped -- their count and dollar total are computed and surfaced
+# alongside the (now-honest) totals, not hidden from the operator.
 _AGGREGATE_LLM_CALLS_BY_AGENT_SQL = """
     SELECT
         agent,
@@ -150,10 +186,86 @@ _AGGREGATE_LLM_CALLS_BY_AGENT_SQL = """
         COALESCE(SUM(tokens_in), 0) AS total_tokens_in,
         COALESCE(SUM(tokens_out), 0) AS total_tokens_out
     FROM agent_events
-    WHERE event_type = %s
+    WHERE event_type = %(event_type)s
+      AND ts <= %(now)s
+      AND NOT (review_id LIKE ANY(%(test_prefixes)s))
     GROUP BY agent, model
     ORDER BY agent, model
 """
+
+# The mirror image of the query above: every row EXCLUDED from the
+# dashboard's totals, broken down by which of the two mechanisms excluded
+# it (a row can match both -- ``overlap_count``/``overlap_cost_usd`` says
+# how many/how much so the three FILTER'd counts are never mistaken for
+# summing cleanly to the total). Run in the same connection as the
+# aggregate query above so a caller gets one consistent snapshot.
+_EXCLUDED_LLM_CALLS_SUMMARY_SQL = """
+    SELECT
+        COUNT(*) FILTER (
+            WHERE ts > %(now)s OR review_id LIKE ANY(%(test_prefixes)s)
+        ) AS excluded_count,
+        COALESCE(SUM(cost_usd) FILTER (
+            WHERE ts > %(now)s OR review_id LIKE ANY(%(test_prefixes)s)
+        ), 0) AS excluded_cost_usd,
+        COUNT(*) FILTER (WHERE ts > %(now)s) AS future_dated_count,
+        COALESCE(SUM(cost_usd) FILTER (WHERE ts > %(now)s), 0) AS future_dated_cost_usd,
+        COUNT(*) FILTER (
+            WHERE review_id LIKE ANY(%(test_prefixes)s)
+        ) AS test_fixture_count,
+        COALESCE(SUM(cost_usd) FILTER (
+            WHERE review_id LIKE ANY(%(test_prefixes)s)
+        ), 0) AS test_fixture_cost_usd,
+        COUNT(*) FILTER (
+            WHERE ts > %(now)s AND review_id LIKE ANY(%(test_prefixes)s)
+        ) AS overlap_count
+    FROM agent_events
+    WHERE event_type = %(event_type)s
+"""
+
+# Grep-verified (2026-08-31, L2 DEBUG on L4 VERIFY's rejection of M13) test-
+# and-fixture-only ``review_id`` prefixes: every one of these strings is
+# generated ONLY by code under ``tests/`` in this repository, never by any
+# production call path. Production's real review_id shape is
+# ``webhook-{delivery_id}`` (``backend.job_queue.arq_worker.
+# process_review_job``); the two legitimate non-webhook ways to generate a
+# real, billed review are ``backend.cli.review_local`` (defaults to
+# ``local-{uuid4}``) and ``scripts/run_fixture_review.py`` (an
+# operator-supplied string, e.g. ``m8-closeout-demo2``) -- both genuine,
+# operator-initiated LLM spend, and deliberately NOT in this list.
+#
+#   "budget-guard-"        tests/integration/test_budget_guard_events.py
+#   "precision-"            tests/integration/test_events_spine.py (TestNumericPrecision)
+#   "trace-reconstruction-" tests/integration/test_events_spine.py (TestTraceReconstruction)
+#   "orchestrator-run-"     tests/integration/test_events_spine.py (TestOrchestratorProducesSpansAndDecision)
+#   "append-only-"          tests/integration/test_events_spine.py (TestAppendOnlyEnforcement, 5 variants)
+#   "live-test-"            tests/integration/test_all_agents_live.py, test_security_agent_live.py (real, billable `-m live` spend)
+#   "m11-live-"             tests/integration/test_github_live_demo.py (real, billable `-m live` spend)
+#
+# `live-test-`/`m11-live-` rows are genuine dollars (real Anthropic API
+# calls made by `-m live` tests), not fabricated numbers -- they are
+# excluded from "production spend" for the same reason a company's internal
+# QA/staging spend is excluded from a customer-spend dashboard: real money,
+# wrong bucket. This is a best-effort, code-level allowlist-complement, not
+# a database-level guarantee -- a future test file that invents a new,
+# unlisted prefix and writes to production (rather than an isolated schema,
+# the pattern this project's own M8 fix established) would slip through
+# undetected. A schema-level provenance flag on ``agent_events`` would close
+# that gap structurally; see this session's final report's
+# ROOT_CAUSE_JUDGEMENT for why that is judged out of scope here and the real
+# root cause is tests writing fixtures into the production table at all.
+_TEST_FIXTURE_REVIEW_ID_PREFIXES: tuple[str, ...] = (
+    "budget-guard-",
+    "precision-",
+    "trace-reconstruction-",
+    "orchestrator-run-",
+    "append-only-",
+    "live-test-",
+    "m11-live-",
+)
+
+_TEST_FIXTURE_REVIEW_ID_LIKE_PATTERNS: list[str] = [
+    f"{prefix}%" for prefix in _TEST_FIXTURE_REVIEW_ID_PREFIXES
+]
 
 # Name every EventRepository instance's circuit breaker is registered
 # under. Mirrors RedisJobQueue's pattern (backend/job_queue/redis_arq.py):
@@ -189,6 +301,49 @@ class AgentMetrics:
     avg_latency_ms: int
     total_tokens_in: int
     total_tokens_out: int
+
+
+@dataclass(frozen=True)
+class ExclusionSummary:
+    """What ``aggregate_llm_calls_by_agent`` excluded from the totals above, and why.
+
+    Exists so the dashboard is TRANSPARENT about exclusions rather than
+    silently dropping rows -- a dashboard that quietly hides data is its
+    own honesty problem, the same class of defect as counting synthetic
+    rows as real spend in the first place. Every field here is a real
+    count/sum computed by ``_EXCLUDED_LLM_CALLS_SUMMARY_SQL`` in the same
+    query round as the metrics themselves, not an estimate.
+
+    Attributes:
+        excluded_row_count: Total ``llm.call`` rows excluded for EITHER
+            reason (future-dated OR a recognized test-fixture prefix).
+        excluded_cost_usd: Total ``cost_usd`` of those excluded rows.
+        future_dated_count: Of those, how many had ``ts`` in the future.
+        future_dated_cost_usd: Their total ``cost_usd``.
+        test_fixture_count: Of those, how many matched a known test/fixture
+            ``review_id`` prefix (see ``_TEST_FIXTURE_REVIEW_ID_PREFIXES``).
+        test_fixture_cost_usd: Their total ``cost_usd``.
+        overlap_count: Rows matching BOTH reasons (counted once, not twice,
+            in ``excluded_row_count``/``excluded_cost_usd``) -- present so
+            ``future_dated_count + test_fixture_count`` is never silently
+            mistaken for ``excluded_row_count`` when this is nonzero.
+    """
+
+    excluded_row_count: int
+    excluded_cost_usd: Decimal
+    future_dated_count: int
+    future_dated_cost_usd: Decimal
+    test_fixture_count: int
+    test_fixture_cost_usd: Decimal
+    overlap_count: int
+
+
+@dataclass(frozen=True)
+class AgentMetricsAggregate:
+    """``aggregate_llm_calls_by_agent``'s full result: the honest totals plus what was excluded."""
+
+    metrics: list[AgentMetrics]
+    exclusions: ExclusionSummary
 
 
 class EventRepository:
@@ -388,27 +543,49 @@ class EventRepository:
             return Decimal("0")
         return Decimal(row[0])
 
-    def aggregate_llm_calls_by_agent(self) -> list[AgentMetrics]:
-        """Cost/latency aggregated across every ``llm.call`` event, grouped by ``(agent, model)``.
+    def aggregate_llm_calls_by_agent(self, *, now: datetime | None = None) -> AgentMetricsAggregate:
+        """Cost/latency aggregated across every REAL ``llm.call`` event, grouped by ``(agent, model)``.
 
         The dashboard's per-agent cost/latency view -- see
         ``_AGGREGATE_LLM_CALLS_BY_AGENT_SQL``'s comment for the M12
-        continuous-aggregate adaptation this query stands in for. Returns
-        an empty list on a fresh/empty database rather than raising --
-        "no llm.call events recorded yet" is a real, valid answer the
-        dashboard must render honestly (see
+        continuous-aggregate adaptation this query stands in for, AND (L2
+        DEBUG, post-L4-REJECT) for why "REAL" above is load-bearing: this
+        method used to sum every ``llm.call`` row unconditionally,
+        including synthetic future-dated and test-fixture rows that share
+        the same ``(agent, model)`` key as genuine calls -- see that
+        query's comment for the concrete 19-row, ~$40,261 defect an
+        independent L4 VERIFY session found. Every row excluded for either
+        reason is still counted and summed, in ``ExclusionSummary``, rather
+        than silently vanishing.
+
+        Returns an empty ``metrics`` list on a fresh/empty database rather
+        than raising -- "no real llm.call events recorded yet" is a real,
+        valid answer the dashboard must render honestly (see
         ``backend.api.dashboard.get_agent_metrics``), not an error.
+
+        Args:
+            now: The instant "future-dated" is measured against. Defaults
+                to ``datetime.now(UTC)``; overridable so a test can seed a
+                row on a fixed future date without waiting for real clock
+                time to catch up (mirrors ``sum_llm_cost_for_day``'s own
+                explicit ``day_start`` argument, for the same testability
+                reason).
         """
+        resolved_now = now if now is not None else datetime.now(UTC)
+        params = {
+            "event_type": EventType.LLM_CALL.value,
+            "now": resolved_now,
+            "test_prefixes": _TEST_FIXTURE_REVIEW_ID_LIKE_PATTERNS,
+        }
         with psycopg.connect(
             self._dsn,
             connect_timeout=self._connect_timeout_seconds,
             autocommit=True,
             options=self._connect_options,
         ) as conn:
-            rows = conn.execute(
-                _AGGREGATE_LLM_CALLS_BY_AGENT_SQL, (EventType.LLM_CALL.value,)
-            ).fetchall()
-        return [
+            rows = conn.execute(_AGGREGATE_LLM_CALLS_BY_AGENT_SQL, params).fetchall()
+            excluded_row = conn.execute(_EXCLUDED_LLM_CALLS_SUMMARY_SQL, params).fetchone()
+        metrics = [
             AgentMetrics(
                 agent=row[0] if row[0] is not None else "unknown",
                 model=row[1] if row[1] is not None else "unknown",
@@ -420,3 +597,14 @@ class EventRepository:
             )
             for row in rows
         ]
+        assert excluded_row is not None  # a bare aggregate always returns exactly one row
+        exclusions = ExclusionSummary(
+            excluded_row_count=int(excluded_row[0]),
+            excluded_cost_usd=Decimal(excluded_row[1]),
+            future_dated_count=int(excluded_row[2]),
+            future_dated_cost_usd=Decimal(excluded_row[3]),
+            test_fixture_count=int(excluded_row[4]),
+            test_fixture_cost_usd=Decimal(excluded_row[5]),
+            overlap_count=int(excluded_row[6]),
+        )
+        return AgentMetricsAggregate(metrics=metrics, exclusions=exclusions)

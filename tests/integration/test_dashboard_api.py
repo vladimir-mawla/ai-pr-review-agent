@@ -184,6 +184,149 @@ class TestAgentMetricsAggregation:
         assert Decimal(body["total_cost_usd"]) == Decimal("0")
 
 
+class TestSyntheticRowsExcludedFromTotals:
+    """L2 DEBUG (post-L4-REJECT): proves the concrete defect L4 VERIFY found is fixed.
+
+    L4 VERIFY's finding: ``/costs`` summed 19 2030-dated ``budget-guard-*``
+    fixture rows (~$40,261) into "Total spend across every agent" at the
+    SAME ``(agent, model)`` key genuine calls use, with no date filter, no
+    test-prefix exclusion, and no disclosure. Each test below seeds one
+    real row plus one synthetic row that would have been silently summed
+    together under the old, unfiltered query, and asserts the real row
+    alone is counted while the synthetic one is reported as an exclusion,
+    not merely absent.
+    """
+
+    def test_future_dated_row_is_excluded_and_disclosed(
+        self, event_repository: EventRepository, client: TestClient
+    ) -> None:
+        now = datetime.now(UTC)
+        event_repository.insert_event(
+            AgentEvent(
+                review_id=_unique_id("r"),
+                event_type=EventType.LLM_CALL,
+                ts=now,
+                agent="security",
+                model="claude-haiku-4-5",
+                tokens_in=100,
+                tokens_out=50,
+                cost_usd=Decimal("0.000350"),
+                latency_ms=400,
+            )
+        )
+        event_repository.insert_event(
+            AgentEvent(
+                # Not a recognized test-fixture prefix -- proves the
+                # future-dated mechanism alone catches this row, independent
+                # of the prefix mechanism.
+                review_id=_unique_id("webhook"),
+                event_type=EventType.LLM_CALL,
+                ts=datetime(2030, 6, 15, tzinfo=UTC),
+                agent="security",
+                model="claude-haiku-4-5",
+                tokens_in=1000,
+                tokens_out=500,
+                cost_usd=Decimal("2119.000446"),
+                latency_ms=100,
+            )
+        )
+
+        response = client.get("/api/agent-metrics")
+        assert response.status_code == 200
+        body = response.json()
+
+        assert body["is_empty"] is False
+        by_agent = {row["agent"]: row for row in body["metrics"]}
+        assert by_agent["security"]["call_count"] == 1
+        assert Decimal(by_agent["security"]["total_cost_usd"]) == Decimal("0.000350")
+        assert Decimal(body["total_cost_usd"]) == Decimal("0.000350")
+
+        exclusions = body["exclusions"]
+        assert exclusions["excluded_row_count"] == 1
+        assert Decimal(exclusions["excluded_cost_usd"]) == Decimal("2119.000446")
+        assert exclusions["future_dated_count"] == 1
+        assert Decimal(exclusions["future_dated_cost_usd"]) == Decimal("2119.000446")
+        assert exclusions["test_fixture_count"] == 0
+        assert "2119.000446" in exclusions["note"]
+
+    def test_past_dated_test_fixture_prefix_row_is_excluded_and_disclosed(
+        self, event_repository: EventRepository, client: TestClient
+    ) -> None:
+        """A past-dated row with a recognized test prefix -- the case a date-only filter would miss.
+
+        This mirrors the real 151 non-future ``budget-guard-*`` rows found
+        sitting in this project's own production database: pinned to a day
+        in the PAST (2020-06-15, exactly the fixture day
+        ``test_budget_guard_events.py`` uses), so ``ts > now()`` alone
+        would never catch them -- only the review_id prefix does.
+        """
+        real_id = _unique_id("r")
+        event_repository.insert_event(
+            AgentEvent(
+                review_id=real_id,
+                event_type=EventType.LLM_CALL,
+                ts=datetime.now(UTC),
+                agent="quality",
+                model="claude-haiku-4-5",
+                tokens_in=80,
+                tokens_out=40,
+                cost_usd=Decimal("0.000280"),
+                latency_ms=1000,
+            )
+        )
+        event_repository.insert_event(
+            AgentEvent(
+                review_id=f"budget-guard-{real_id}-synthetic",
+                event_type=EventType.LLM_CALL,
+                ts=datetime(2020, 6, 15, tzinfo=UTC),  # in the PAST -- not future-dated
+                agent="quality",
+                model="claude-haiku-4-5",
+                tokens_in=1000,
+                tokens_out=500,
+                cost_usd=Decimal("2119.000446"),
+                latency_ms=100,
+            )
+        )
+
+        response = client.get("/api/agent-metrics")
+        assert response.status_code == 200
+        body = response.json()
+
+        by_agent = {row["agent"]: row for row in body["metrics"]}
+        assert by_agent["quality"]["call_count"] == 1
+        assert Decimal(by_agent["quality"]["total_cost_usd"]) == Decimal("0.000280")
+
+        exclusions = body["exclusions"]
+        assert exclusions["excluded_row_count"] == 1
+        assert Decimal(exclusions["excluded_cost_usd"]) == Decimal("2119.000446")
+        assert exclusions["future_dated_count"] == 0
+        assert exclusions["test_fixture_count"] == 1
+        assert Decimal(exclusions["test_fixture_cost_usd"]) == Decimal("2119.000446")
+
+    def test_no_exclusions_reports_zero_and_a_clean_note(
+        self, event_repository: EventRepository, client: TestClient
+    ) -> None:
+        event_repository.insert_event(
+            AgentEvent(
+                review_id=_unique_id("webhook"),
+                event_type=EventType.LLM_CALL,
+                ts=datetime.now(UTC),
+                agent="docs",
+                model="claude-haiku-4-5",
+                tokens_in=10,
+                tokens_out=5,
+                cost_usd=Decimal("0.000010"),
+                latency_ms=50,
+            )
+        )
+        response = client.get("/api/agent-metrics")
+        body = response.json()
+        exclusions = body["exclusions"]
+        assert exclusions["excluded_row_count"] == 0
+        assert Decimal(exclusions["excluded_cost_usd"]) == Decimal("0")
+        assert exclusions["note"] == "No rows were excluded from the totals above."
+
+
 class TestHitlQueueEndpoint:
     def test_returns_queued_reviews_and_excludes_posted_ones(
         self, review_repository: ReviewRepository, client: TestClient
@@ -305,7 +448,14 @@ class TestEmptyDatabaseHonestState:
     def test_agent_metrics_on_a_fresh_database_says_so_explicitly(self, client: TestClient):
         response = client.get("/api/agent-metrics")
         body = response.json()
-        assert body == {"metrics": [], "total_cost_usd": "0", "is_empty": True}
+        assert body["metrics"] == []
+        assert body["total_cost_usd"] == "0"
+        assert body["is_empty"] is True
+        # A fresh, empty database has nothing to exclude either -- the
+        # exclusions disclosure itself must also render an honest empty
+        # state, not omit itself or error.
+        assert body["exclusions"]["excluded_row_count"] == 0
+        assert body["exclusions"]["note"] == "No rows were excluded from the totals above."
 
     def test_recent_reviews_on_a_fresh_database_is_an_empty_list(self, client: TestClient):
         response = client.get("/api/reviews")

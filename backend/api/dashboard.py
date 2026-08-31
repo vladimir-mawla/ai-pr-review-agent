@@ -32,7 +32,7 @@ import psycopg
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from backend.database.repository import AgentMetrics, EventRepository
+from backend.database.repository import AgentMetrics, EventRepository, ExclusionSummary
 from backend.database.review_store import PersistedReview, ReviewRepository
 from backend.models import Finding
 
@@ -120,10 +120,59 @@ class AgentMetricRow(BaseModel):
         )
 
 
+class ExclusionSummaryOut(BaseModel):
+    excluded_row_count: int
+    excluded_cost_usd: Decimal
+    future_dated_count: int
+    future_dated_cost_usd: Decimal
+    test_fixture_count: int
+    test_fixture_cost_usd: Decimal
+    overlap_count: int
+    note: str
+
+    @classmethod
+    def from_summary(cls, summary: ExclusionSummary) -> ExclusionSummaryOut:
+        # A fixed, honest explanation of what was excluded and why -- not
+        # marketing copy. See ``backend.database.repository.
+        # _AGGREGATE_LLM_CALLS_BY_AGENT_SQL``'s comment for the concrete
+        # defect (an L4 VERIFY-caught ~$40,261 of 2030-dated
+        # `budget-guard-*` fixture rows counted as real spend) this
+        # disclosure exists to make impossible to repeat unnoticed.
+        if summary.excluded_row_count == 0:
+            note = "No rows were excluded from the totals above."
+        else:
+            overlap_clause = (
+                f", {summary.overlap_count} of which matched both reasons"
+                if summary.overlap_count
+                else ""
+            )
+            note = (
+                f"{summary.excluded_row_count} row(s) totalling "
+                f"${summary.excluded_cost_usd} were excluded from the totals "
+                f"above: {summary.future_dated_count} future-dated "
+                f"(${summary.future_dated_cost_usd}, a timestamp ahead of now "
+                "is never real spend) and "
+                f"{summary.test_fixture_count} matching a known test/fixture "
+                f"review_id prefix (${summary.test_fixture_cost_usd}, e.g. "
+                f"budget-guard-, precision-, live-test-){overlap_clause}."
+            )
+        return cls(
+            excluded_row_count=summary.excluded_row_count,
+            excluded_cost_usd=summary.excluded_cost_usd,
+            future_dated_count=summary.future_dated_count,
+            future_dated_cost_usd=summary.future_dated_cost_usd,
+            test_fixture_count=summary.test_fixture_count,
+            test_fixture_cost_usd=summary.test_fixture_cost_usd,
+            overlap_count=summary.overlap_count,
+            note=note,
+        )
+
+
 class AgentMetricsResponse(BaseModel):
     metrics: list[AgentMetricRow]
     total_cost_usd: Decimal
     is_empty: bool
+    exclusions: ExclusionSummaryOut
 
 
 class TraceEventOut(BaseModel):
@@ -202,14 +251,16 @@ def get_agent_metrics(request: Request) -> AgentMetricsResponse:
     """
     repository = _event_repository(request)
     try:
-        metrics = repository.aggregate_llm_calls_by_agent()
+        aggregate = repository.aggregate_llm_calls_by_agent()
     except (psycopg.Error, OSError) as exc:
         raise _db_unavailable(exc) from exc
+    metrics = aggregate.metrics
     total = sum((m.total_cost_usd for m in metrics), start=Decimal("0"))
     return AgentMetricsResponse(
         metrics=[AgentMetricRow.from_metrics(m) for m in metrics],
         total_cost_usd=total,
         is_empty=len(metrics) == 0,
+        exclusions=ExclusionSummaryOut.from_summary(aggregate.exclusions),
     )
 
 

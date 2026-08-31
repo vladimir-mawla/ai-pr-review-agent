@@ -54,10 +54,22 @@ export interface AgentMetricRow {
   total_tokens_out: number;
 }
 
+export interface ExclusionSummaryOut {
+  excluded_row_count: number;
+  excluded_cost_usd: string;
+  future_dated_count: number;
+  future_dated_cost_usd: string;
+  test_fixture_count: number;
+  test_fixture_cost_usd: string;
+  overlap_count: number;
+  note: string;
+}
+
 export interface AgentMetricsResponse {
   metrics: AgentMetricRow[];
   total_cost_usd: string;
   is_empty: boolean;
+  exclusions: ExclusionSummaryOut;
 }
 
 export interface TraceEventOut {
