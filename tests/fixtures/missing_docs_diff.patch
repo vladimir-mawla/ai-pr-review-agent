@@ -1,0 +1,50 @@
+diff --git a/app/services/inventory.py b/app/services/inventory.py
+new file mode 100644
+index 0000000..8f9e0a1
+--- /dev/null
++++ b/app/services/inventory.py
+@@ -0,0 +1,23 @@
++class InventoryAdjuster:
++    def __init__(self, warehouse_client, threshold=10):
++        self.warehouse_client = warehouse_client
++        self.threshold = threshold
++        self._cache = {}
++
++    def adjust(self, sku, delta, reason_code):
++        current = self._cache.get(sku)
++        if current is None:
++            current = self.warehouse_client.get_quantity(sku)
++            self._cache[sku] = current
++        new_qty = current + delta
++        self._cache[sku] = new_qty
++        self.warehouse_client.set_quantity(sku, new_qty, reason_code)
++        return new_qty
++
++    def bulk_adjust(self, adjustments):
++        results = {}
++        for sku, delta, reason_code in adjustments:
++            results[sku] = self.adjust(sku, delta, reason_code)
++        return results
++
++    def needs_reorder(self, sku):
++        return self._cache.get(sku, 0) < self.threshold
+diff --git a/app/api/inventory_routes.py b/app/api/inventory_routes.py
+new file mode 100644
+index 0000000..2c3d4e5
+--- /dev/null
++++ b/app/api/inventory_routes.py
+@@ -0,0 +1,17 @@
++from flask import Blueprint, request
++
++from app.services.inventory import InventoryAdjuster
++from app.services.warehouse_client import WarehouseClient
++
++inventory_bp = Blueprint("inventory", __name__)
++adjuster = InventoryAdjuster(WarehouseClient())
++
++
++@inventory_bp.route("/inventory/adjust", methods=["POST"])
++def adjust_inventory():
++    payload = request.get_json()
++    new_qty = adjuster.adjust(payload["sku"], payload["delta"], payload["reason_code"])
++    return {"sku": payload["sku"], "new_quantity": new_qty}

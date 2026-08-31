@@ -49,6 +49,17 @@ MODEL_PRICES: dict[str, ModelPrice] = {
         input_usd_per_million_tokens=Decimal("1.00"),
         output_usd_per_million_tokens=Decimal("5.00"),
     ),
+    # M13: the LLM-as-judge model (backend.evaluation.judge.JUDGE_MODEL) --
+    # deliberately a different, stronger tier than the haiku-tier
+    # specialists above, never the model being judged. Priced here so
+    # AnthropicLLMClient.complete's cost accounting (and therefore
+    # BudgetGuard, which the judge shares a daily cap with -- see
+    # backend.evaluation.judge.judge_settings) works for real judge calls
+    # instead of raising UnknownModelPriceError.
+    "claude-sonnet-5": ModelPrice(
+        input_usd_per_million_tokens=Decimal("2.00"),
+        output_usd_per_million_tokens=Decimal("10.00"),
+    ),
 }
 
 # cost_usd is stored as NUMERIC(10, 6) in agent_events (see

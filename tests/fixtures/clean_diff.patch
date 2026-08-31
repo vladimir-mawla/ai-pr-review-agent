@@ -1,0 +1,56 @@
+diff --git a/app/utils/formatting.py b/app/utils/formatting.py
+new file mode 100644
+index 0000000..1a2b3c4
+--- /dev/null
++++ b/app/utils/formatting.py
+@@ -0,0 +1,24 @@
++"""Small, pure text-formatting helpers shared across the app."""
++
++from __future__ import annotations
++
++
++def truncate_with_ellipsis(text: str, max_length: int) -> str:
++    """Truncate ``text`` to at most ``max_length`` characters.
++
++    If truncation is needed, the last three characters of the returned
++    string are ``...`` so the total length never exceeds ``max_length``.
++    Raises ``ValueError`` if ``max_length`` is too small to fit the
++    ellipsis at all, rather than silently returning something misleading.
++    """
++    if max_length < 3:
++        raise ValueError(f"max_length must be >= 3 to fit an ellipsis, got {max_length}")
++    if len(text) <= max_length:
++        return text
++    return text[: max_length - 3] + "..."
++
++
++def snake_to_title_case(identifier: str) -> str:
++    """Convert ``some_identifier`` to ``"Some Identifier"``."""
++    words = [word for word in identifier.split("_") if word]
++    return " ".join(word.capitalize() for word in words)
+diff --git a/tests/unit/test_formatting.py b/tests/unit/test_formatting.py
+new file mode 100644
+index 0000000..5d6e7f8
+--- /dev/null
++++ b/tests/unit/test_formatting.py
+@@ -0,0 +1,17 @@
++import pytest
++
++from app.utils.formatting import snake_to_title_case, truncate_with_ellipsis
++
++
++def test_truncate_no_op_when_short_enough():
++    assert truncate_with_ellipsis("hello", 10) == "hello"
++
++
++def test_truncate_adds_ellipsis():
++    assert truncate_with_ellipsis("hello world", 8) == "hello..."
++
++
++def test_truncate_rejects_too_small_max_length():
++    with pytest.raises(ValueError):
++        truncate_with_ellipsis("hello", 2)
++
++
++def test_snake_to_title_case():
++    assert snake_to_title_case("user_id") == "User Id"

@@ -1,0 +1,78 @@
+{
+  "$schema_note": "Loaded by backend.evaluation.golden_dataset.load_golden_dataset. Every diff_path must exist relative to the repo root -- the loader fails loudly (does not skip) if one is missing, the same 'every referenced file must exist' discipline DONE.html section 2's CI gate names for workflow files, applied here to the dataset itself.",
+  "cases": [
+    {
+      "case_id": "sqli-basic",
+      "description": "Two SQL-injection sinks introduced via string concatenation and f-string interpolation into a raw query -- the textbook case a security reviewer must never miss.",
+      "diff_path": "tests/fixtures/sqli_diff.patch",
+      "expected_clean": false,
+      "expected_findings": [
+        {
+          "category": "sql_injection",
+          "severity": "CRITICAL",
+          "file_path": "app/db.py",
+          "must_detect": true,
+          "notes": "find_by_username's string-concatenated query and/or find_by_id_unsafe's f-string query -- either sink alone is enough to satisfy this expectation."
+        }
+      ]
+    },
+    {
+      "case_id": "mixed-security-and-quality",
+      "description": "A new admin endpoint with a SQL-injection sink and a hard-coded live-looking secret, plus a pricing module with a bare except and heavily duplicated branching logic.",
+      "diff_path": "tests/fixtures/sample_pr_diff.patch",
+      "expected_clean": false,
+      "expected_findings": [
+        {
+          "category": "sql_injection",
+          "severity": "CRITICAL",
+          "file_path": "app/api/user_routes.py",
+          "must_detect": true,
+          "notes": "get_user_by_id concatenates request.args.get('id') directly into a SQL string."
+        },
+        {
+          "category": "hardcoded_secret",
+          "severity": "HIGH",
+          "file_path": "app/api/user_routes.py",
+          "must_detect": true,
+          "notes": "AUDIT_WEBHOOK_TOKEN is a hard-coded, live-looking credential (sk_live_... prefix)."
+        },
+        {
+          "category": "bare_except",
+          "severity": "MEDIUM",
+          "file_path": "app/services/pricing.py",
+          "must_detect": false,
+          "notes": "calculate_order_total's bare except silently swallows every error, including the NameError it would raise if the try body failed before assigning total. Nice-to-catch, not mandatory for a passing score."
+        }
+      ]
+    },
+    {
+      "case_id": "clean-pure-helpers",
+      "description": "Two small, pure, well-documented, well-tested formatting helpers with no security or correctness issues -- a review that fabricates CRITICAL/HIGH findings here is hallucinating.",
+      "diff_path": "tests/fixtures/clean_diff.patch",
+      "expected_clean": true,
+      "expected_findings": []
+    },
+    {
+      "case_id": "missing-docs-and-tests",
+      "description": "A new public class and endpoint with no docstrings, unclear naming, and no accompanying tests -- a DOCS/TESTS-flavored diff, not a security one.",
+      "diff_path": "tests/fixtures/missing_docs_diff.patch",
+      "expected_clean": false,
+      "expected_findings": [
+        {
+          "category": "missing_docstring",
+          "severity": "LOW",
+          "file_path": "app/services/inventory.py",
+          "must_detect": false,
+          "notes": "InventoryAdjuster and its methods have no docstrings at all. Soft expectation -- a reasonable DOCS agent should flag this, but missing it alone should not fail the case."
+        },
+        {
+          "category": "missing_test_coverage",
+          "severity": "LOW",
+          "file_path": "app/services/inventory.py",
+          "must_detect": false,
+          "notes": "No tests accompany InventoryAdjuster. Soft expectation, same reasoning as missing_docstring above."
+        }
+      ]
+    }
+  ]
+}
