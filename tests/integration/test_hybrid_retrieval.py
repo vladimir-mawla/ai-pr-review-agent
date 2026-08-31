@@ -94,6 +94,7 @@ _PGVECTOR_URL = _BASE_SETTINGS.pgvector_url
 # tests/integration/test_hybrid_retrieval.py -> tests/integration -> tests -> repo root
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _RETRIEVAL_FIXTURE_PATH = _REPO_ROOT / "tests" / "fixtures" / "retrieval_queries.json"
+_HOLDOUT_FIXTURE_PATH = _REPO_ROOT / "tests" / "fixtures" / "retrieval_queries_holdout.json"
 
 # The real seed produces 373 chunks as of this writing; this is a loose
 # floor (not pinned to 373, which would break the moment this repo's own
@@ -802,6 +803,146 @@ class TestRecallOnRealOpenAIEmbeddings:
         ), (
             "expected backend/webhook_receiver/parser.py::parse_pull_request_payload in the "
             f"top-3 real-embedding fused results; got paths {[r.path for r in results]}"
+        )
+
+
+def _tuple_matches_expected(
+    row: tuple[int, str, str], expected_path: str, expected_symbol: str
+) -> bool:
+    """Same identity check as ``_chunk_matches_expected``, for the raw ``(id, path, content)``
+    tuples ``search_vector``/``search_fulltext`` return, rather than a ``RetrievedChunk``."""
+    _chunk_id, path, content = row
+    return path == expected_path and bool(
+        _symbol_declaration_pattern(expected_symbol).search(content)
+    )
+
+
+@pytest.mark.skipif(
+    not _BASE_SETTINGS.openai_api_key,
+    reason=(
+        "OPENAI_API_KEY is not configured -- skipping the held-out "
+        "fusion-vs-vector-alone validation"
+    ),
+)
+class TestFusionVsVectorAloneOnHeldOutQueries:
+    """Does RRF fusion actually beat vector search alone? A held-out, once-only measurement.
+
+    BACKGROUND: a prior session measured recall@5 on the original 10-query
+    fixture (``tests/fixtures/retrieval_queries.json``) and found current
+    RRF fusion (k=60, pool=20) TIED vector-search-alone at 7/10 each --
+    fusion rescued id 10 but lost id 3, and on id 7 the fused rank (37th)
+    was worse than either individual ranker. That raised a real question:
+    does fusion, as configured, earn its complexity at all?
+
+    METHODOLOGY (to avoid fitting noise on a 10-query sample): a SECOND,
+    held-out 15-query set (``tests/fixtures/retrieval_queries_holdout.json``)
+    was written and committed BEFORE running a single fusion variant
+    against it (see that file's own docstring for how its queries were
+    chosen). Every tuning/variant-selection step -- weighted RRF at a few
+    vector:fts ratios, larger candidate pools (up to the full 387-chunk
+    corpus), several k values, and a score-based fusion normalizing raw
+    cosine similarity and ts_rank_cd onto a comparable scale -- used ONLY
+    the original 10. A single winner (weighted RRF, vector:fts = 3:1,
+    k=60, pool=20 -- chosen because it had the best recall@5 among all 13
+    variants tried on the original 10, 8/10, with the best recall@3 as the
+    tie-break among several variants tied at recall@5) was selected and
+    frozen BEFORE this held-out set was ever queried, per a selection rule
+    stated in this session's own final report before this test file was
+    written.
+
+    THE HELD-OUT RESULT, measured exactly once: vector-alone recall@5 =
+    9/15 (60%); current UNWEIGHTED RRF (the config actually shipped in
+    ``HybridRetriever``) = 11/15 (73%); the tuned weighted-3:1 "winner" =
+    11/15 (73%), IDENTICAL to the untuned default at recall@5 and actually
+    WORSE at recall@10 (12/15 vs the default's 13/15). The tuning that
+    looked like an improvement on 10 queries did not generalize -- exactly
+    the overfitting risk this methodology exists to catch, now caught for
+    real. The weighted variant was therefore REJECTED; ``HybridRetriever``
+    and ``reciprocal_rank_fusion`` are UNCHANGED by this investigation.
+
+    THE ACTUAL FINDING: the CURRENT, unmodified RRF configuration clearly
+    beats vector-alone on this larger, blindly-chosen sample -- 73% vs 60%
+    recall@5, 87% vs 67% recall@10 -- a gap the original 10-query fixture
+    was simply too small to see (it happened to tie 7/10 there). Fusion,
+    as already shipped, earns its complexity; this session's attempt to
+    improve on it further did not succeed, and no further change was made.
+
+    Both tests below lock in this session's real, measured miss sets as
+    regression baselines, mirroring
+    ``TestRecallOnRealOpenAIEmbeddings``'s own discipline: if a future
+    rerun finds a different miss set, that is a genuine behavior change
+    (corpus content, model update, etc.) needing re-investigation, not a
+    silently loosened assertion.
+    """
+
+    def test_vector_alone_recall_at_five_on_held_out_set(
+        self, real_openai_seeded_retriever: HybridRetriever
+    ) -> None:
+        """Vector search alone (no fusion): recall@5 on the 15 held-out queries.
+
+        Measured: 9/15 (60%). Misses: ids 11 (RetryPolicy), 13
+        (TimeoutPolicy), 14 (the _get_executor paraphrase), 18
+        (InMemoryJobQueue), 19 (WebhookEvent), 25 (get_job_queue).
+        """
+        payload = json.loads(_HOLDOUT_FIXTURE_PATH.read_text(encoding="utf-8"))
+        entries = payload["queries"]
+        assert len(entries) == 15, "the held-out set must have exactly 15 queries"
+
+        expected_miss_ids = {11, 13, 14, 18, 19, 25}
+
+        misses: list[dict[str, object]] = []
+        for entry in entries:
+            results = real_openai_seeded_retriever.search_vector(entry["query"], top_k=5)
+            hit = any(
+                _tuple_matches_expected(r, entry["expected_path"], entry["expected_symbol"])
+                for r in results
+            )
+            if not hit:
+                misses.append({"id": entry["id"], "query": entry["query"]})
+
+        actual_miss_ids = {miss["id"] for miss in misses}
+        hits = len(entries) - len(misses)
+        assert actual_miss_ids == expected_miss_ids, (
+            f"vector-alone recall@5 on the held-out set = {hits}/{len(entries)} "
+            f"({hits / len(entries):.0%}). Expected miss set {sorted(expected_miss_ids)}, got "
+            f"{sorted(actual_miss_ids)}. Full miss detail:\n{json.dumps(misses, indent=2)}"
+        )
+
+    def test_current_rrf_recall_at_five_on_held_out_set(
+        self, real_openai_seeded_retriever: HybridRetriever
+    ) -> None:
+        """Current, unmodified hybrid_search (unweighted RRF, k=60, pool=20): recall@5 on the held-out 15.
+
+        Measured: 11/15 (73%) -- clearly ahead of vector-alone's 9/15
+        (60%) on this same set (see the class docstring above for the full
+        investigation, including why a further-tuned weighted variant was
+        tried and rejected). Misses: ids 13 (TimeoutPolicy), 14 (the
+        _get_executor paraphrase), 19 (WebhookEvent), 25 (get_job_queue) --
+        two fewer than vector-alone's miss set (ids 11 and 18 are rescued
+        by fusion; no vector-alone hit is lost by fusing in full-text).
+        """
+        payload = json.loads(_HOLDOUT_FIXTURE_PATH.read_text(encoding="utf-8"))
+        entries = payload["queries"]
+        assert len(entries) == 15, "the held-out set must have exactly 15 queries"
+
+        expected_miss_ids = {13, 14, 19, 25}
+
+        misses: list[dict[str, object]] = []
+        for entry in entries:
+            results = real_openai_seeded_retriever.hybrid_search(entry["query"], top_k=5)
+            hit = any(
+                _chunk_matches_expected(r, entry["expected_path"], entry["expected_symbol"])
+                for r in results
+            )
+            if not hit:
+                misses.append({"id": entry["id"], "query": entry["query"]})
+
+        actual_miss_ids = {miss["id"] for miss in misses}
+        hits = len(entries) - len(misses)
+        assert actual_miss_ids == expected_miss_ids, (
+            f"current-RRF recall@5 on the held-out set = {hits}/{len(entries)} "
+            f"({hits / len(entries):.0%}). Expected miss set {sorted(expected_miss_ids)}, got "
+            f"{sorted(actual_miss_ids)}. Full miss detail:\n{json.dumps(misses, indent=2)}"
         )
 
 
