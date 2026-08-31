@@ -1064,3 +1064,108 @@ number with dated reasoning, don't just loosen the assertion").
   APPROVE leaves for whoever picks up next (branch protection, the eval
   gate's partial golden-case coverage, the denylist-not-allowlist limit,
   and the `test_events_spine.py` production-table test-isolation gap).
+
+- **2026-08-31 — M12 (Tiger Cloud Migration) — L4 VERIFY APPROVE.** An
+  independent L4 VERIFY session ran this milestone's amended demo command
+  and its own additional probes against the real, paid Tiger Cloud
+  instance (PostgreSQL 18.4, `timescaledb` 2.29.2 pre-installed) and
+  **APPROVEd** M12 — this is the milestone's final disposition; M12 is
+  DONE, and every milestone in this plan (M1–M13) is now built and
+  independently verified.
+
+  **Stage A (infra):** `CREATE EXTENSION` confirmed `vector` 0.8.6 and
+  `vectorscale` 0.9.0 present on the instance, alongside the
+  pre-installed `timescaledb`/`timescaledb_toolkit`.
+
+  **Stage B (events):** `agent_events` is a real TimescaleDB hypertable,
+  chunked on `ts` at a 1-day interval, with `PRIMARY KEY (id, ts)` — the
+  composite key TimescaleDB requires because `create_hypertable` rejects
+  a bare-`id` primary key on the partitioning table outright. Two
+  continuous aggregates exist and refresh on a policy: `agent_health_1m`
+  (1-minute buckets, `count`/`sum(cost_usd)`/`sum(latency_ms)`/
+  `sum(tokens_in)`/`sum(tokens_out)` plus a `percentile_agg` sketch for
+  p95 latency) and `pr_cost_hourly` (hourly per-review rollup). Both
+  views bake the synthetic-row exclusion (the same `_TEST_FIXTURE_
+  REVIEW_ID_PREFIXES` list `backend.database.repository` uses, mirrored
+  by hand as literal `NOT LIKE` clauses in each view's own `WHERE`) into
+  the view definition itself, not applied later by a reader.
+
+  **THE CRITICAL FINDING (this milestone's centerpiece):** a
+  statement-level `BEFORE TRUNCATE ... FOR EACH STATEMENT` trigger does
+  **not** propagate from a hypertable to its chunks — only row-level
+  (`FOR EACH ROW`) triggers do. The parent table's own `TRUNCATE
+  agent_events` correctly raised the append-only exception (making the
+  gap invisible from the obvious test), but `TRUNCATE` issued directly
+  against a real chunk's own internal name
+  (`_timescaledb_internal._hyper_N_M_chunk`) as the `tsdbadmin`
+  connection silently succeeded, no exception, rows gone. L4 VERIFY
+  independently reproduced this itself, inside a transaction it rolled
+  back rather than leaving destructive evidence in the real database: 34
+  seeded rows in a target chunk went to 0 after the direct-chunk
+  `TRUNCATE`, root-caused by querying `pg_trigger` directly and
+  confirming the statement-level trigger's `tgrelid` was the hypertable
+  only, never the chunk's own relation — and confirmed the same absence
+  on a brand-new chunk created after the trigger already existed, ruling
+  out "the chunk just predates the trigger" as an alternate explanation.
+  The gap is closed not by a trigger but by privilege propagation: the
+  restricted `agent_events_writer` role's `REVOKE UPDATE, DELETE,
+  TRUNCATE` **does** propagate to every chunk, existing and future,
+  because PostgreSQL GRANT/REVOKE on a hypertable is propagated by
+  TimescaleDB itself — verified live, `TRUNCATE` against a real chunk as
+  `agent_events_writer` failed with `permission denied for table ...`,
+  rejected by the privilege system before any trigger could even run.
+  The disclosed, accepted residual: the owning `tsdbadmin` role can still
+  `TRUNCATE` a specific chunk directly (an owner is immune to its own
+  REVOKEs, and no statement-level trigger reaches a chunk) — judged
+  acceptable because no production code path ever connects as
+  `tsdbadmin` (grep-confirmed: every real write goes through
+  `agent_events_writer`), so the gap is structurally unreachable in
+  practice, not merely unlikely.
+
+  **Stage C (memory):** `code_chunks` exists on Tiger with a real DiskANN
+  (pgvectorscale) index in place of local's HNSW. L4 VERIFY's own planner
+  probe, independent of this milestone's own 2,000-row build-time test,
+  seeded 2,500 rows and confirmed `EXPLAIN` shows the planner actually
+  choosing `idx_code_chunks_embedding_diskann` for an `ORDER BY embedding
+  <=> ... LIMIT` query, not a sequential scan.
+
+  **M13's cost aggregation, swapped and re-verified:**
+  `EventRepository.aggregate_llm_calls_by_agent` now reads
+  `agent_health_1m` on `events_backend='tiger'`. The swap is narrow in
+  effect but, corrected from M13's own anticipatory comment, not
+  literally "one method's `FROM`/`GROUP BY` only" — the `SELECT` list
+  also changes (summing already-summed per-bucket partials, not a second
+  `AVG()`), and the test-fixture-prefix half of the exclusion filter
+  moved into the continuous aggregate's own view definition rather than
+  staying a `WHERE` clause repeated at read time. L4 VERIFY independently
+  confirmed there is no avg-of-averages weighting bug in the swapped
+  query: `SUM(latency_ms_sum) / SUM(call_count)` over real seeded buckets
+  returned 182ms, against a true weighted average of 181.8ms computed
+  directly from the underlying rows — where naively averaging the
+  per-minute bucket means themselves (treating every bucket as equally
+  weighted regardless of how many calls it contains) would have returned
+  550ms.
+
+  **A real regression, caught mid-build, re-confirmed by L4 VERIFY:**
+  adding `migrations/scripts/2026-06-tiger-init.sql` alongside
+  `dev-pgvector-init.sql` in the same `migrations/scripts/` directory
+  broke `backend.memory.tiger_client.apply_migrations`'s directory-wide
+  glob, which started silently applying Tiger-only DDL (DiskANN,
+  hypertable calls) against local pgvector. Fixed by applying each
+  migration file by explicit name rather than a glob. L4 VERIFY confirmed
+  no Tiger-only DDL exists in either local database (Postgres 5433,
+  pgvector 5434) by inspecting their schemas directly.
+
+  **Local-only development still works with no Tiger account and no API
+  keys:** the free suite (396 tests) was proven green with `.env` entirely
+  absent — `EVENTS_BACKEND`/`MEMORY_BACKEND` default to `local`, and
+  nothing in the credential-free path imports or requires
+  `vectorscale`/DiskANN/hypertable-only SQL.
+
+  See `.genesis/explanations/2026-08-31-explanation-m12.html` for the
+  full account of the hypertable/append-only/continuous-aggregate
+  mechanics, and `checkpoints/CURRENT.md` for the open items this APPROVE
+  leaves behind (the admin-TRUNCATE residual, L4 VERIFY's own leftover
+  probe rows, `code_chunks` needing a re-seed on Tiger, and the `reviews`
+  table's deliberate non-migration).
+
