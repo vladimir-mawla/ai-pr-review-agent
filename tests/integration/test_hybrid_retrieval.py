@@ -36,6 +36,16 @@ Structure:
   design -- see the ``retriever`` fixture's docstring), this class's own
   ``seeded_corpus_retriever`` fixture deliberately never truncates, so it
   queries exactly what the demo command's seed step just inserted.
+- ``TestRecallOnRealOpenAIEmbeddings``: the same clause-2 recall@5
+  measurement as the class above, but against REAL
+  ``text-embedding-3-large`` embeddings (``EMBEDDER_BACKEND=openai``)
+  instead of ``DeterministicFixtureEmbedder`` -- the config PLAN.md's M9
+  outcome text actually pins. Gated on ``OPENAI_API_KEY`` being configured
+  (skips cleanly, mirroring ``tests/integration/test_security_agent_live.py``'s
+  ``ANTHROPIC_API_KEY`` gate, when it is not); runs for real, making a real
+  paid API call, when it is -- see that class's own docstring for why it
+  deliberately does not also probe whether the key has spendable credit
+  before deciding to run.
 
 These tests need a real reachable pgvector-enabled Postgres (``docker
 compose up -d pgvector`` from the repo root). They are skipped -- not
@@ -53,6 +63,7 @@ first.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -68,7 +79,11 @@ from backend.memory.context_retriever import (
     RetrievedChunk,
     reciprocal_rank_fusion,
 )
-from backend.memory.embedder import DeterministicFixtureEmbedder, EmbeddingDimensionError
+from backend.memory.embedder import (
+    DeterministicFixtureEmbedder,
+    EmbeddingDimensionError,
+    OpenAIEmbedder,
+)
 from backend.memory.tiger_client import apply_migrations, connect
 
 _BASE_SETTINGS = get_settings()
@@ -393,6 +408,164 @@ class TestRecallOnRealSeededCorpus:
             f"missed query ids changed from the investigated baseline {sorted(expected_miss_ids)} "
             f"to {sorted(actual_miss_ids)} -- a real change in retrieval behavior (better or "
             "worse) that needs re-investigation, not a silent pass/fail. Full miss detail:\n"
+            f"{json.dumps(misses, indent=2)}"
+        )
+
+
+@pytest.fixture(scope="module")
+def real_openai_seeded_retriever() -> HybridRetriever:
+    """Re-seeds ``code_chunks`` with REAL OpenAI embeddings, via the real seed script.
+
+    Always truncates and reseeds -- ``code_chunks`` carries no append-only
+    invariant (unlike ``agent_events``; see ``scripts/seed_code_chunks.py``'s
+    own docstring) -- by running ``EMBEDDER_BACKEND=openai python
+    scripts/seed_code_chunks.py --repo .`` as a subprocess, the exact same
+    script PLAN.md's demo command and ``TestRecallOnRealSeededCorpus``'s own
+    self-seed path use, just with the real backend forced via an environment
+    override rather than reimplementing chunking/seeding a second time in
+    this test file (the same reuse principle ``seeded_corpus_retriever``'s
+    docstring states above). Deliberately clobbers whatever
+    ``seeded_corpus_retriever`` left in the table -- harmless, since
+    ``TestRecallOnRealOpenAIEmbeddings`` is the last class in this file to
+    depend on ``code_chunks``' contents, and it is defined after
+    ``TestRecallOnRealSeededCorpus`` so that class's tests (which consume
+    the fixture-embedder corpus) have already run first. Module-scoped
+    (like ``seeded_corpus_retriever``), not class-scoped-as-a-method, to
+    avoid pytest's own "class-scoped fixture defined as instance method"
+    deprecation.
+
+    Only ever invoked when ``TestRecallOnRealOpenAIEmbeddings``'s own
+    module-level ``skipif`` has already let collection past the
+    ``OPENAI_API_KEY`` presence check -- see that class's docstring for why
+    this fixture does not ALSO probe spendable credit before running: an
+    unfunded key must fail this fixture loudly (a real
+    ``EmbeddingCallFailedError``/``pytest.fail``), not be silently
+    downgraded to a skip.
+    """
+    env = {**os.environ, "EMBEDDER_BACKEND": "openai"}
+    result = subprocess.run(
+        [sys.executable, "scripts/seed_code_chunks.py", "--repo", "."],
+        cwd=_REPO_ROOT,
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    if result.returncode != 0:
+        pytest.fail(
+            "Real OpenAI re-seed failed: `EMBEDDER_BACKEND=openai python "
+            f"scripts/seed_code_chunks.py --repo .` exited {result.returncode}. This is "
+            "expected to fail with an insufficient_quota / credit_balance_exhausted error "
+            "if the configured OPENAI_API_KEY has no spendable credit -- see "
+            "TestRecallOnRealOpenAIEmbeddings's own docstring.\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+    settings = _BASE_SETTINGS.model_copy(update={"embedder_backend": "openai"})
+    embedder = OpenAIEmbedder(settings=settings)
+    return HybridRetriever(_PGVECTOR_URL, embedder, settings=settings)
+
+
+@pytest.mark.skipif(
+    not _BASE_SETTINGS.openai_api_key,
+    reason="OPENAI_API_KEY is not configured -- skipping the real-embedding recall measurement",
+)
+class TestRecallOnRealOpenAIEmbeddings:
+    """PLAN.md's M9 success criteria, clause 2, on the REAL embedding backend the spec pins.
+
+    ``TestRecallOnRealSeededCorpus`` above measures recall@5 against
+    ``DeterministicFixtureEmbedder`` (honest result: 4/10 -- see that
+    class's own docstring). But PLAN.md's M9 outcome text is explicit:
+    "Embeddings use OpenAI text-embedding-3-large at 256 dims, per the
+    spec's pinned config" -- the fixture embedder is a credential-free
+    stand-in for local development and CI, never the config the milestone
+    actually specifies. This class measures the real thing.
+
+    Gating mirrors ``tests/integration/test_security_agent_live.py``'s
+    ``ANTHROPIC_API_KEY`` pattern exactly: skip cleanly (module-level
+    ``skipif`` above, checked once at collection time) when
+    ``OPENAI_API_KEY`` is not configured; run for real, making a real paid
+    API call, when it is. Deliberately does NOT probe whether the key
+    actually has spendable credit before deciding to run -- that would let
+    a configured-but-unusable key quietly downgrade a real gate into a
+    skip, which is exactly the "must never silently pass on the wrong
+    backend" failure this milestone's own instructions warn against. If
+    the key cannot actually pay for the call, this test FAILS loudly, with
+    the real vendor error in the failure output, not a masked skip.
+
+    HONEST STATE AS OF 2026-08-31 (the session that added this class): the
+    configured ``OPENAI_API_KEY`` authenticates for real (``GET
+    /v1/models`` returns HTTP 200) but the account behind it has zero
+    spendable credit -- three independent raw HTTPS calls to ``POST
+    /v1/embeddings``, made outside this project's own retry/breaker layer
+    to rule out that layer masking anything, all returned a stable (not
+    transient) ``429 insufficient_quota`` / ``credit_balance_exhausted``.
+    So THIS test, run today, is expected to fail at the re-seed step below
+    with that same real error surfaced via ``EmbeddingCallFailedError`` --
+    that failure IS this milestone's real, current, honest result for the
+    real-embedding path, not a defect in this test, in ``HybridRetriever``,
+    or in ``OpenAIEmbedder`` (see ``backend/memory/embedder.py`` and
+    ``.genesis/checkpoints/CURRENT.md`` for the full verification of the
+    embedder's own request shape, dimension, and reliability-layer wiring,
+    all confirmed correct independently of this billing block).
+
+    ONCE THE ACCOUNT IS FUNDED: re-run this class. It will re-seed
+    ``code_chunks`` for real (see ``real_openai_seeded_retriever`` below)
+    and measure recall@5 on the IDENTICAL 10 queries in
+    ``tests/fixtures/retrieval_queries.json`` -- the same queries, never
+    swapped, per this whole milestone's integrity rule. The assertion
+    below targets PLAN.md's literal 100% criterion; if a real run does not
+    reach it, follow ``test_recall_at_five_across_the_ten_query_fixture_
+    set``'s own precedent exactly: do not loosen this assertion to match
+    whatever number comes back -- instead pin ``expected_miss_ids`` here to
+    the real, investigated miss set (even if empty is what's hoped for),
+    the same way that test pins its own baseline, so a future regression
+    or improvement is caught explicitly rather than absorbed into a bare
+    percentage.
+    """
+
+    def test_recall_at_five_with_real_openai_embeddings(
+        self, real_openai_seeded_retriever: HybridRetriever
+    ) -> None:
+        """PLAN.md's clause 2, literally, on the real ``text-embedding-3-large`` backend.
+
+        See this class's own docstring for the honest current state (this
+        assertion is expected to never even be reached today -- the
+        ``real_openai_seeded_retriever`` fixture's re-seed step fails
+        first, for real, with the account's real billing error).
+        """
+        payload = json.loads(_RETRIEVAL_FIXTURE_PATH.read_text(encoding="utf-8"))
+        entries = payload["queries"]
+        assert len(entries) == 10, "PLAN.md names a 10-query fixture set; this file must have 10"
+
+        expected_miss_ids: set[int] = set()  # PLAN.md's literal target: 100% (no misses)
+
+        misses: list[dict[str, object]] = []
+        for entry in entries:
+            results = real_openai_seeded_retriever.hybrid_search(entry["query"], top_k=5)
+            hit = any(
+                _chunk_matches_expected(r, entry["expected_path"], entry["expected_symbol"])
+                for r in results
+            )
+            if not hit:
+                misses.append(
+                    {
+                        "id": entry["id"],
+                        "query": entry["query"],
+                        "expected": f"{entry['expected_path']}::{entry['expected_symbol']}",
+                        "top5_paths": [r.path for r in results],
+                    }
+                )
+
+        actual_miss_ids = {miss["id"] for miss in misses}
+        hits = len(entries) - len(misses)
+        assert actual_miss_ids == expected_miss_ids, (
+            f"recall@5 with REAL OpenAI embeddings = {hits}/{len(entries)} "
+            f"({hits / len(entries):.0%}). Expected miss set {sorted(expected_miss_ids)}, got "
+            f"{sorted(actual_miss_ids)}. If this is a genuine first real measurement (not yet "
+            "documented anywhere), do NOT just loosen this assertion -- pin expected_miss_ids "
+            "above to this real result, investigate each miss the same way "
+            "test_recall_at_five_across_the_ten_query_fixture_set's docstring does for the "
+            f"fixture path, and update PLAN.md's M9 Status line to match. Full miss detail:\n"
             f"{json.dumps(misses, indent=2)}"
         )
 
