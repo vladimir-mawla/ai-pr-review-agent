@@ -530,3 +530,54 @@ milestones needing a paid/external credential (M8, M10, M11, M12, M13) are order
   `.genesis/explanations/2026-08-31-explanation-m9.html` for the full
   account, including the RRF magnitude-discarding cost and the fixture
   embedder's real-corpus-scale collapse.
+
+**2026-08-31 — M10 L1 BUILD (this session; NOT yet independently
+verified — see `checkpoints/CURRENT.md`'s "M10 L1 BUILD" section for the
+full summary a cold L4 VERIFY session should read first).** All four
+specialists made real (`backend/agents/{security_agent,quality_agent,
+test_agent,docs_agent}.py`), sharing one orchestration path
+(`backend.agents.base_agent.run_specialist_analysis`) so each concrete
+agent module differs only in its own domain prompt and `AgentType`.
+Retrieval wired into every specialist's prompt (M9's `HybridRetriever`;
+query = changed-symbol names from the diff, falling back to truncated
+diff text; top_k=5, ≤6000 injected characters; a retrieval failure
+degrades to diff-only rather than blocking the call). M8's SECURITY-only
+infrastructure-failure-forces-HITL fix generalized to all four specialist
+nodes (one shared body, `backend.orchestrator.nodes._specialist_node`) —
+exactly the gap M8's own L4 VERIFY flagged would bite once the other
+three became real. BudgetGuard proven hit independently by all four
+calls, and a mid-review exhaustion (2 of 4 blocked) forces
+`QUEUED_FOR_HITL`, never a review that silently looks complete
+(`tests/integration/test_budget_guard_across_four_agents.py`). The
+ARQ worker wired into the orchestrator (`backend/job_queue/
+arq_worker.py`), closing the queue→orchestrator gap deferred since M4,
+offloaded via `asyncio.to_thread` (the same fix for the same event-loop-
+blocking defect class applied three times before in this project).
+`backend/integrations/github_client.py` (mock-backed) and
+`backend/cli/review_local.py` (PLAN.md's named demo command) built per
+this milestone's freeze boundary; `tests/fixtures/sample_pr_diff.patch`
+(did not exist before this milestone) is a 3-file diff engineered to
+give each specialist genuinely distinct, correct material. Two real,
+disclosed regressions found and fixed in pre-existing, out-of-freeze-
+boundary test files, both caused by M10 legitimately making
+QUALITY/TESTS/DOCS real by default: `test_events_spine.py`'s M7
+orchestrator-spans test was about to silently quadruple its real,
+unbudgeted Anthropic spend on every ordinary `pytest` run (confirmed via
+`agent_events` before the fix); `test_hybrid_retrieval.py`'s held-out
+vector-alone recall@5 baseline shifted by one query because M10's own new
+source files grew the real-embedded corpus from 382 to 471/473 chunks
+(the same single-occurrence-identifier dilution M9 already measured, now
+re-confirmed by a second corpus-growth event) — re-baselined with full
+dated reasoning, not silently loosened. Demo command run for real
+(`ANTHROPIC_API_KEY` configured): 14 schema-valid findings (SECURITY 5,
+QUALITY 2, TESTS 4, DOCS 3), `status=QUEUED_FOR_HITL`,
+`overall_confidence=0.896`, real cost $0.026943 across the four calls —
+judged honestly: all 14 land on real, correctly-identified defects, with
+one disclosed minor remit-bleed imperfection (TESTS also flagged the
+hardcoded-credential issue SECURITY already covers) and expected,
+defensible overlap between SECURITY and QUALITY on the same bare-except
+bug from their own distinct angles. All four gates green: `ruff check .`,
+`mypy --strict backend/`, `pytest -v` run twice with identical 317-passed
+results, `lint-imports`. See `checkpoints/CURRENT.md` for the full
+account and this session's final report for the complete per-finding
+breakdown.

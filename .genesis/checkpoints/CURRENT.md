@@ -1,20 +1,98 @@
 # CURRENT
-- active_loop: none (between milestones)
+- active_loop: L1 BUILD complete on M10, awaiting L4 VERIFY (separate session)
 - target: M10
-- iteration: 0
-- last_gate: L4 VERIFY APPROVE on M9 (2026-08-31, POST-APPROVE CLOSEOUT
-  session) -- see "M9 final state" below for the honest summary; do not
-  re-litigate M9, it is independently verified and closed.
-- next_action: run G0 existence pre-flight on M10 (Full Local Dry-Run
-  Review -- wires the real SecurityAgent plus three now-real specialists
-  through the orchestrator/aggregator/HITL gate end-to-end against a
-  fixture PR diff, with GitHub posting mocked). See `.genesis/PLAN.md`'s
-  M10 section for the exact freeze boundary, demo command, and success
-  criteria before starting L1 BUILD.
+- iteration: 1
+- last_gate: L1 BUILD on M10 (2026-08-31, this session) -- all four gates
+  green (`ruff check .`, `mypy --strict backend/`, `pytest -v` run twice
+  with identical 317-passed results, `lint-imports`); PLAN.md's exact demo
+  command run for real (`ANTHROPIC_API_KEY` configured, real 4-call cost
+  $0.026943) -- see "M10 L1 BUILD" below for the full honest summary. NOT
+  independently verified yet -- do not treat as APPROVEd.
+- next_action: L4 VERIFY on M10 (separate session). Read "M10 L1 BUILD"
+  below first, then `.genesis/PLAN.md`'s M10 section for the freeze
+  boundary/demo command/success criteria, then judge the demo output's
+  actual finding quality honestly (this session's own final report flags
+  one real, disclosed remit-bleed imperfection to check).
 - model: claude-sonnet-5
-- tokens_used: 0
+- tokens_used: not tracked this session
 - tokens_budget: 50000
 - skills_loaded: []
+
+## M10 L1 BUILD (this session, 2026-08-31) -- summary for a cold L4 VERIFY session
+
+**Built:** all four specialists real (`backend/agents/{security_agent,
+quality_agent,test_agent,docs_agent}.py`, sharing orchestration logic via
+new `backend.agents.base_agent.run_specialist_analysis` -- prompt load,
+retrieval grounding, LLM call, parse, forced-HITL fallback on parse
+failure); retrieval wired into all four prompts (query = changed-symbol
+names, falling back to truncated diff text; top_k=5, ≤6000 chars injected,
+a retrieval failure degrades to diff-only rather than blocking); M8's
+SECURITY-only infrastructure-failure-forces-HITL fix generalized to all
+four nodes (`backend/orchestrator/nodes.py`'s `_specialist_node`, one
+shared body); `backend/integrations/github_client.py` (mock-backed,
+`post_or_queue` guarantees exactly one of post/queue never both);
+`backend/cli/review_local.py` (PLAN.md's named demo command);
+`backend/job_queue/arq_worker.py` wired into the orchestrator, closing the
+gap deferred since M4 (offloaded via `asyncio.to_thread`, same fix applied
+three times before in this project for the identical event-loop-blocking
+defect class); `tests/fixtures/sample_pr_diff.patch` (3 files, genuinely
+targets all four remits).
+
+**BudgetGuard across four agents:** each of the 4 calls independently
+calls `BudgetGuard.check_and_raise()` (unchanged M8 mechanism, no
+review-scoped fast path) -- proven per-call, and a mid-review exhaustion
+(2 of 4 blocked) forces `QUEUED_FOR_HITL` via the same CRITICAL-fallback
+mechanism, never a review that silently looks complete
+(`tests/integration/test_budget_guard_across_four_agents.py`).
+
+**Two real, disclosed regressions found and fixed in pre-existing,
+out-of-M10-freeze-boundary test files** (both caused by M10 legitimately
+making QUALITY/TESTS/DOCS real by default): (1)
+`tests/integration/test_events_spine.py`'s M7 orchestrator-spans test was
+about to silently quadruple its real, unbudgeted Anthropic spend on every
+ordinary `pytest` run with a key configured -- confirmed via `agent_events`
+before the fix, fixed by installing fake LLM clients for all four
+specialists. (2) `tests/integration/test_hybrid_retrieval.py`'s held-out
+vector-alone recall@5 baseline shifted by one query (id 16,
+`reconstruct_review_trace`) because M10's own new source files grew the
+real-OpenAI-embedded corpus from 382 to 471/473 chunks -- the same
+single-occurrence-identifier dilution-at-scale limitation M9 already
+measured, re-confirmed by a second corpus-growth event; re-baselined with
+full dated reasoning in place, per that test class's own stated
+amendment discipline. See `git log` (both fixes are their own commits)
+for the full reasoning; neither is a silent loosening.
+
+**Demo output, judged honestly:** 14 real, schema-valid findings
+(SECURITY 5, QUALITY 2, TESTS 4, DOCS 3), `status=QUEUED_FOR_HITL`,
+`overall_confidence=0.896` (forced HITL by two CRITICAL findings despite
+high average confidence -- gate working correctly). All 14 land on real,
+correctly-identified defects in the fixture diff (SQL injection, hardcoded
+secret, missing authz, bare-except swallowing an `UnboundLocalError`,
+three genuine test-coverage gaps, the `is_member` signature/docstring
+drift, plus two reasonable unplanted DOCS observations) -- not generic
+filler. One real imperfection worth L4 VERIFY's attention: TESTS flagged
+the hardcoded-credential issue too (a mild remit bleed into SECURITY's
+territory, framed through a "this should be validated by a test" angle);
+and SECURITY/QUALITY both separately flagged the same bare-except/
+uninitialized-variable bug from their own angles (defensible -- it is
+genuinely both a security-relevant and a quality-relevant defect -- but
+real overlap, not zero). Full per-finding list and reasoning in this
+session's final report.
+
+**API spend (real, this session):** demo command four calls, measured
+exactly via `agent_events`: $0.026943 (haiku-4-5, 12,843 in / 2,820 out
+tokens). `tests/integration/test_all_agents_live.py`'s 4 calls ran twice
+(once per full-suite `pytest` run) since `ANTHROPIC_API_KEY` was
+configured -- not measured exactly (no `review_id` passed, matching
+`test_security_agent_live.py`'s own pre-existing pattern), estimated small
+(haiku-tier, ~1-2K tokens each). `test_hybrid_retrieval.py`'s real-OpenAI
+corpus re-embed (473 chunks) ran once per full traversal of that file's
+two test classes in the same process (~5 times across this session's
+debugging) at an estimated ~$0.024 each -- unavoidable by that fixture's
+own documented design (the fixture-backend class always runs first within
+one process and contaminates the marker), not something this session
+could have prevented without touching M9's own file more invasively. See
+final report's API_SPEND section for the full breakdown.
 
 ## Housekeeping note (2026-08-31 POST-APPROVE CLOSEOUT)
 
