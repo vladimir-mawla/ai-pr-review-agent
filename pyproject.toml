@@ -108,6 +108,11 @@ ignore = [
 # scripts/** already gets, scoped to just this one file rather than all of
 # backend/agents/.
 "backend/agents/security_agent.py" = ["T20"]
+# M10: backend/cli/review_local.py is PLAN.md's named M10 demo command's
+# entry point (`python -m backend.cli.review_local --diff ... --out ...`),
+# which must print its result summary to stdout/stderr -- the identical
+# CLI-entry-point exception already granted to security_agent.py above.
+"backend/cli/review_local.py" = ["T20"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["backend"]
