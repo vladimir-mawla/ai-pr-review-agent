@@ -38,3 +38,10 @@ var/
 # The spine itself IS tracked (it is the project's memory).
 # Only the sed backup files it can leave behind are ignored.
 .genesis/**/*.bak
+
+# ---- GitHub App credentials ----
+# The GitHub App private key (.pem) authenticates as the app itself. Never
+# commit it: anyone holding it can act as the app on every repo it is
+# installed on. Kept on disk only, path supplied via GITHUB_APP_PRIVATE_KEY_PATH.
+secrets/
+*.pem
