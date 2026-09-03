@@ -77,15 +77,21 @@ Owns two independent things:
      Task 4 real-trace verification) to run explicitly before/alongside
      the M10 demo command, without coupling it to ``review_local.main``'s
      own already-tested startup path.
-
-   It is deliberately NOT called from ``backend.cli.review_local.main``
-   itself, for the same reason it is not in the FastAPI lifespan:
-   ``tests/e2e/test_full_local_review.py``'s
-   ``TestCliMainWritesTheDemoCommandsOutputFile`` drives the real
-   ``main()`` with unmodified, ``.env``-backed ``Settings`` (no injected
-   engine/settings override), so unconditionally running this guard there
-   would make that existing, currently-free test make a real network call
-   the moment ``.env`` has tracing turned on.
+   - An OPT-IN ``--verify-tracing`` flag on ``backend.cli.review_local``
+     itself (``review_local.verify_tracing_before_review``, called from
+     ``main`` before ``run_review_locally`` -- i.e. before any of the
+     four real LLM calls). This closes the actual demo-day gap: an
+     operator can run ``review_local`` with ``LANGSMITH_TRACING=true`` and
+     a broken endpoint/workspace id, get a perfectly successful-looking
+     review (findings, exit 0), and see zero traces with zero indication
+     anything was wrong -- LangSmith's ingestion swallows that class of
+     failure by design (see above). ``--verify-tracing`` is UNCONDITIONALLY
+     off by default (bare ``review_local`` never imports/constructs a
+     ``Client`` for this at all unless the flag is passed), which is
+     exactly why this is safe to add: it does not touch
+     ``TestCliMainWritesTheDemoCommandsOutputFile``'s existing, currently-
+     free assertion that plain ``main()`` makes no network call, because
+     that test never passes ``--verify-tracing``.
 """
 
 from __future__ import annotations
@@ -95,6 +101,7 @@ import re
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import cast
 from uuid import uuid4
 
 from langsmith import Client
@@ -335,6 +342,53 @@ def assert_tracing_healthy(settings: Settings, *, client: Client | None = None) 
     message = _diagnose(last_exc, settings, readback_failed=True)
     logger.error(message)
     raise TracingConfigurationError(message)
+
+
+def resolve_project_url(settings: Settings, *, client: Client | None = None) -> str | None:
+    """Best-effort: the LangSmith project URL an operator can click straight through to.
+
+    Used by ``backend.cli.review_local``'s ``--verify-tracing`` flag right
+    after a successful ``assert_tracing_healthy`` call, so a demo run that
+    just proved tracing is landing also hands the operator the exact
+    project to look at -- "genuinely the thing they want at demo time"
+    (this project's own M10-follow-up notes), rather than making them go
+    guess the project name/workspace in the LangSmith UI.
+
+    Deliberately returns ``None`` instead of raising when the project
+    cannot be resolved (e.g. the SDK's ``read_project`` call itself fails
+    for an unrelated reason) -- this is a convenience lookup that runs
+    strictly AFTER ``assert_tracing_healthy`` has already confirmed
+    tracing is healthy; a caller whose run already succeeded should not
+    have that success turned into a failure merely because a follow-up
+    "resolve the pretty URL" call hit its own, unrelated hiccup. Never
+    raises, and (per this module's redaction policy) never includes key
+    material -- the LangSmith SDK's project/session objects carry no
+    credential fields at all, so there is nothing to redact here.
+
+    Args:
+        settings: Supplies the LangSmith connection details and
+            ``langsmith_project`` (the project name to resolve).
+        client: Test-only injection point, mirroring
+            ``assert_tracing_healthy``'s own ``client`` parameter -- a
+            caller that already built/was given a ``Client`` for the
+            health check can reuse it here instead of constructing a
+            second one. Production call sites pass the same client the
+            preceding ``assert_tracing_healthy`` call used.
+
+    Returns:
+        The project's web URL, or ``None`` if it could not be resolved.
+    """
+    resolved_client = client if client is not None else _build_client(settings)
+    try:
+        project = resolved_client.read_project(project_name=settings.langsmith_project)
+    except Exception:  # noqa: BLE001 -- best-effort lookup, see docstring
+        return None
+    # The LangSmith SDK ships no inline type information for
+    # `read_project`'s return value from mypy's point of view, so `.url`
+    # resolves to `Any` -- this cast states the actual, documented type
+    # (`TracerSessionResult.url: Optional[str]`) rather than letting `Any`
+    # silently propagate out of this function's own declared signature.
+    return cast("str | None", project.url)
 
 
 def main(argv: list[str] | None = None) -> int:
