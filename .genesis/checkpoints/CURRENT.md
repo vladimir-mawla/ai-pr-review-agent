@@ -39,6 +39,29 @@
   recorded output already carries the routing decision +
   overall_confidence, with no extra wiring needed). All 5 gates green;
   `pytest -q` (404 passed) makes zero LangSmith calls.
+- last_action (2): **Ad hoc: `HybridRetrieverAdapter`, a LangChain
+  `BaseRetriever` wrapper over M9's `HybridRetriever`**
+  (`backend/memory/langchain_retriever.py`). Delegates ALL ranking
+  (vector search, full-text search, RRF, k=60, candidate-pool sizing) to
+  `HybridRetriever.hybrid_search` unchanged -- adapter, not
+  reimplementation, since M9's RRF config was validated against a
+  held-out query set and must not drift. `_aget_relevant_documents` uses
+  `asyncio.to_thread` (this codebase's established idiom), verified
+  non-blocking via the same heartbeat-coroutine pattern
+  `tests/unit/test_embedder.py` uses for `embed_async`. Faithfulness
+  (identical chunks/order vs. calling `HybridRetriever` directly),
+  `Document` mapping, top_k, empty corpus, and `.invoke`/`.ainvoke`/`|`
+  composition all covered in `tests/integration/test_langchain_retriever.py`
+  (default-free, `DeterministicFixtureEmbedder`). A free composition demo:
+  `scripts/demo_langchain_retriever_composition.py`. Side effect: adding
+  these files to the repo grew the real seeded corpus (674->689 chunks),
+  which tipped one query (id 9, "apply_migrations") in
+  `test_hybrid_retrieval.py`'s frozen 10-query recall@5 baseline from a
+  hit to a miss -- investigated and recorded there (`expected_miss_ids`
+  updated {1,3,4,5,7,8}->{1,3,4,5,7,8,9}), not a change to retrieval logic.
+  All 5 gates green; `pytest -q` (416 passed, 31 deselected) stays free.
+  `lint-imports` confirms no contract impact (`backend.memory` is not a
+  `source_modules` entry in either `.importlinter` contract).
 - next_action: **Work the Deferred list below.** Every milestone in the
   plan is built and verified; there is no next milestone to target.
 - model: claude-sonnet-5
