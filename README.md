@@ -168,6 +168,65 @@ rather than silently accepting a well-known secret.
   measured directly — see `checkpoints/CURRENT.md`'s M9 history); the
   fixture backend (`DeterministicFixtureEmbedder`, the default) costs
   nothing.
+- **In `zsh`, `env $SOME_VAR command` silently drops everything after the
+  first variable — it does NOT word-split like bash.** This bit real, live
+  debugging: reconstructing several `LANGSMITH_*` vars from `.env` and
+  handing them to `env` as one unquoted expansion,
+  ```bash
+  LS_ENV=$(grep '^LANGSMITH_' .env | tr '\n' ' '); env $LS_ENV python -m backend.observability.tracing
+  ```
+  looks like it exports five variables, but in `zsh` an unquoted `$VAR`
+  expansion is a single word, not five — `env` sees ONE argument shaped
+  like `LANGSMITH_API_KEY=... LANGSMITH_ENDPOINT=... ...` and only sets the
+  first `NAME=value` pair (`LANGSMITH_API_KEY`), silently dropping
+  `LANGSMITH_ENDPOINT` (and everything else). The child process then falls
+  back to the LangSmith SDK's default endpoint instead of this org's AWS
+  host, which 403s identically to a bad key — and because LangSmith's
+  ingestion swallows that failure by design (see
+  `backend/observability/tracing.py`'s module docstring), nothing at the
+  call site notices. Confirmed directly:
+  `zsh -c 'LS_ENV=$(grep "^LANGSMITH_" .env | tr "\n" " "); env $LS_ENV .venv/bin/python -c "import os; print([k for k in os.environ if k.startswith(\"LANGSMITH\")])"'`
+  prints `['LANGSMITH_API_KEY']` — one variable, not five. (`bash` word-splits
+  the same unquoted expansion and would set all five; this is a `zsh`-specific
+  footgun, and this project's documented shell is `zsh`.) Prefer not
+  reconstructing env vars into a string at all: pydantic-settings
+  (`backend/core/settings.py`) already reads `.env` directly, with no shell
+  export needed — see the verified command below.
+- **`set -a && source .env && set +a` exports the Tiger Cloud `PG*` vars
+  globally and can break a LOCAL Postgres/psql connection.** `.env` has a
+  non-empty `PGUSER=tsdbadmin` (Tiger Cloud's admin user, for the M12
+  `TIGER_DATABASE_URL`/native-`PG*` connection path — see `.env.example`'s
+  M12 block) alongside the M7 events Postgres and M9 pgvector, both on
+  different ports (5433/5434) with their own credentials baked into
+  `DATABASE_URL`/`PGVECTOR_URL`. Exporting the whole file into the shell
+  (rather than letting pydantic-settings read it directly) puts `PGUSER`
+  into the environment, and any *bare* `psql`/libpq call made afterward
+  with no explicit user in its connection string picks that up instead of
+  the local role it should be using. This project's own M7 demo command
+  already works around exactly this by using an explicit DSN
+  (`psql "$DATABASE_URL"`, not a bare `psql`) every time `.env` is
+  sourced — keep doing that if you ever `source .env`, or better, don't
+  source it at all (see below).
+- **The verified, working way to run `review_local` with LangSmith tracing
+  on: don't export anything — just run it.** `Settings` (pydantic-settings)
+  reads `.env` on its own; no `source`/`env`/`set -a` dance is needed or
+  recommended for `review_local` itself. Confirmed working in this exact
+  shell, in both directions:
+  ```bash
+  # Real config from .env (tracing verified, prints the LangSmith project URL, makes 4 real Anthropic calls):
+  .venv/bin/python -m backend.cli.review_local --diff tests/fixtures/sample_pr_diff.patch --out out/review.json --verify-tracing
+  ```
+  To reproduce the wrong-endpoint failure on purpose (e.g. to prove
+  `--verify-tracing` actually catches it) without touching `.env`, override
+  exactly one variable with a plain, single `NAME=value` prefix — never a
+  reconstructed multi-var string — which is safe in both `zsh` and `bash`:
+  ```bash
+  LANGSMITH_ENDPOINT=https://api.smith.langchain.com .venv/bin/python -m backend.cli.review_local --diff tests/fixtures/sample_pr_diff.patch --out out/review.json --verify-tracing
+  ```
+  This fails fast (before any LLM call — see `backend/cli/review_local.py`'s
+  module docstring) with a clear `LANGSMITH_ENDPOINT is currently
+  'https://api.smith.langchain.com'` diagnosis and exit code 1, rather than
+  a silently-empty LangSmith project.
 
 ## Running the checks
 
