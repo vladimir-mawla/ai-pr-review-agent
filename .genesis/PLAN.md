@@ -1266,3 +1266,49 @@ leftover probe rows, `code_chunks` needing a Tiger re-seed, no branch
 protection on `main`, `test_events_spine.py` still writing fixtures into
 the production `agent_events` table) — picked up ad hoc by whoever works
 this project next, not tracked as a numbered milestone.
+
+---
+
+### 2026-09-03 — ad hoc: the live webhook trigger finally fired
+
+Recorded here because it happened outside the milestone loop and was
+therefore invisible to the project's own records. A later documentation
+pass read those records, found no evidence of it, checked for `ngrok`
+specifically (never installed), and concluded — reasonably but wrongly —
+that no real webhook had ever been received. This entry exists so that
+does not recur.
+
+**What happened.** `cloudflared` (not PLAN.md's named `ngrok`) was
+installed via Homebrew and a quick tunnel opened to `localhost:8000`. The
+GitHub App's webhook URL was repointed at it through
+`PATCH /app/hook/config`; before that it still held the
+`https://example.com/webhook` placeholder set at registration, and
+GitHub's delivery log showed every prior attempt failing with
+`failed to connect to host 502`. `scripts/register_webhook.py` was never
+written — the App API was called directly instead.
+
+Two settings had to be overridden at launch, and both fail silently if
+missed: `.env` ships `JOB_QUEUE_BACKEND=in_memory` (so the webhook would
+enqueue into an in-process dict the separate ARQ worker cannot see) and
+the GitHub client defaults to `mock`. With either left alone the webhook
+returns 200 and nothing happens at all.
+
+**The result.** Opening `pr-review-agent-testbed#2` produced a genuine
+`pull_request` delivery from GitHub's servers. `POST /webhook` returned
+200, the job passed through Redis, and the ARQ worker ran the full
+four-agent graph in **9.9 s**. The review then **auto-posted after
+genuinely clearing the confidence gate** — 6 findings, overall confidence
+0.933, no CRITICAL, all 6 anchored inline, 0 degraded to the summary. The
+posted body carries `review_id=webhook-65691f50-a579-11f1-86bf-66e62e2d87cd`;
+the `webhook-` prefix is generated only by `arq_worker` from a delivery
+id, which is what makes it provable that the review came from the webhook
+path rather than a local CLI run.
+
+This closed the two capabilities that M10 and M11 had both left
+unexercised: an external trigger, and autonomous posting. Neither is
+continuously available — the tunnel URL changes on every restart, so the
+ingress is only reachable while someone is running it.
+
+**Stale plan wording, deliberately not rewritten:** M11's demo command
+still names `ngrok` and `scripts/register_webhook.py`. Both are
+inaccurate; the working sequence is in README.md's *Try it* section.

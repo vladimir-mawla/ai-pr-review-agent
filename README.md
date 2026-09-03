@@ -42,37 +42,38 @@ milestones.
   the review to `QUEUED_FOR_HITL` — a CRITICAL finding is never auto-posted,
   by design.
 
-**Two things that framing above could make you assume, and that are not
-true — stated plainly, because this project's whole discipline is code and
-docs agreeing:**
+- **A real inbound GitHub webhook has triggered a review, unattended.**
+  Opening `vladimir-mawla/pr-review-agent-testbed#2` produced a genuine
+  `pull_request` delivery from GitHub's servers over a `cloudflared` tunnel.
+  The ingress verified the signature and returned 200, the job went through
+  Redis, and the ARQ worker drove the full four-agent graph — 9.9 seconds end
+  to end, with no manual step anywhere in the chain.
+- **That review then auto-posted after genuinely clearing the confidence
+  gate.** 6 findings at overall confidence 0.933 with no CRITICAL present;
+  all 6 anchored inline, 0 degraded to the summary. The posted review body
+  carries `review_id=webhook-65691f50-…`, and the `webhook-` prefix is
+  generated only by `arq_worker` from a delivery id — so that review provably
+  came from the webhook path, not a local CLI run.
 
-- **No real review has ever been auto-posted after genuinely clearing the
-  confidence gate.** The one real post to a real PR (above) happened
-  because a human deliberately called the posting function directly,
-  *bypassing* the gate, specifically to prove posting works — the gate
-  itself correctly said "route to a human" for that PR's real defect and
-  would have blocked the post otherwise. `backend/job_queue/arq_worker.py`
-  and `backend/cli/review_local.py`, the only two production call sites,
-  structurally cannot call the direct-post method — both call only
-  `post_or_queue` (grep-verified) — so this bypass cannot happen outside a
-  deliberate demo.
-- **No real, inbound GitHub webhook delivery has ever been received.**
-  `ngrok` (PLAN.md's own named tunnel tool) has never been installed on any
-  machine this project has been built on, and `scripts/register_webhook.py`
-  (the script that would register a tunnel URL with GitHub) does not
-  exist. The webhook → queue → orchestrator wiring is real and proven (see
-  above), but only via a direct enqueue, never via an actual HTTP POST from
-  GitHub's servers. A PR triggering a review unattended, via a genuine
-  external delivery, has not happened yet — every piece of that path has
-  been proven except that one link.
+`backend/job_queue/arq_worker.py` and `backend/cli/review_local.py` are the
+only two production call sites, and both call `post_or_queue` exclusively,
+never the direct-post method (grep-verified) — so the gate cannot be bypassed
+outside a deliberate one-off demo, which is how the earlier PR #1 post was
+made before the tunnel existed.
 
-**This is not deployable today, and isn't trying to be:** it runs on one
+Note that `.genesis/PLAN.md` names `ngrok` as the tunnel tool and refers to a
+`scripts/register_webhook.py` that was never written; the live run used
+`cloudflared` and the GitHub App API directly. The plan's wording is stale,
+not the capability.
+
+**This is still not deployable, and isn't trying to be:** it runs on one
 developer's machine, against one throwaway test repository
-(`vladimir-mawla/pr-review-agent-testbed`), with no ingress open to the
-internet by default (a real deployment would need a tunnel like `ngrok`,
-whose URL changes every restart, or real hosting — neither exists here), no
+(`vladimir-mawla/pr-review-agent-testbed`), behind a `cloudflared` quick
+tunnel whose URL changes on every restart — so the ingress is only reachable
+while someone is sitting there running it. There is no hosting, no
 authentication on the dashboard, and no branch-protection rule that lets any
-CI gate actually block a merge (see **Limitations**).
+CI gate actually block a merge (see **Limitations**). The gap between this and
+something a team could adopt is deployment, not capability.
 
 ## Architecture
 
