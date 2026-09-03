@@ -164,7 +164,21 @@ class TestAssertTracingHealthyDetectsMisconfiguration:
         # No real sleeping -- this test proves the retry-then-fail control
         # flow, not the real ~1.5-3s LangSmith ingestion latency.
         monkeypatch.setattr("backend.observability.tracing.time.sleep", lambda _seconds: None)
-        settings = _settings(langsmith_tracing=True, langsmith_api_key="fake-key-not-real")
+        # Explicit endpoint/workspace id -- NOT left to inherit whatever
+        # (if anything) a real .env happens to have -- so this test's
+        # assertion below is deterministic across machines/CI, where no
+        # ambient LangSmith config exists at all. This test's whole point
+        # is proving the "read-back never succeeds" diagnostic path
+        # specifically, not the (separately tested, below) "workspace id
+        # is unset" one -- a run of this suite on a machine with a real,
+        # correctly-configured .env silently masked exactly this gap
+        # before this fix (see this project's own build notes).
+        settings = _settings(
+            langsmith_tracing=True,
+            langsmith_api_key="fake-key-not-real",
+            langsmith_endpoint="https://aws.api.smith.langchain.com",
+            langsmith_workspace_id="ci-test-workspace-id",
+        )
         client = _SilentlyDroppingClient()
 
         with pytest.raises(TracingConfigurationError) as exc_info:
