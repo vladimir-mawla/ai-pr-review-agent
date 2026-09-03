@@ -191,6 +191,23 @@ _DEFAULT_GITHUB_CIRCUIT_BREAKER_FAILURE_THRESHOLD = 5
 _DEFAULT_GITHUB_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS = 30.0
 
 
+# LangSmith tracing integration (opt-in). "Opt-in" mirrors every other
+# backend-selection flag in this file (job_queue_backend/embedder_backend/
+# events_backend/github_client_backend) -- a checkout with no LangSmith
+# config at all must behave exactly as it did before this integration
+# existed, which is why this defaults to False rather than "on whenever a
+# key happens to be present". See backend/observability/tracing.py's
+# module docstring for the silent-failure guard this backs, and
+# .env.example's LangSmith block for the concrete AWS-endpoint +
+# missing-workspace-id gotcha that cost a long debugging session: this
+# org's LangSmith account is on the AWS deployment
+# (aws.api.smith.langchain.com, not the default api.smith.langchain.com),
+# and a service-account key there returns a bare 403 Forbidden on EVERY
+# endpoint unless LANGSMITH_WORKSPACE_ID is set explicitly -- LangSmith's
+# own setup snippet omits that variable entirely.
+_DEFAULT_LANGSMITH_PROJECT = "pr-review"
+
+
 # M12: which backend agent_events (Stage B) / code_chunks (Stage C)
 # actually live on. "local" (the default) needs no Tiger Cloud account at
 # all -- a keyless checkout, and every test/demo command that doesn't
@@ -374,6 +391,20 @@ class Settings(BaseSettings):
         tiger_events_writer_password: M12. The restricted
             ``agent_events_writer`` role's password, set out of band.
             Required for ``events_backend='tiger'`` application runtime.
+        langsmith_tracing: LangSmith tracing opt-in flag. See its own
+            ``Field`` description for the full "opt-in, off by default,
+            independent of the ambient environment" reasoning.
+        langsmith_api_key: LangSmith service-account API key. Optional,
+            no default -- mirrors ``anthropic_api_key``.
+        langsmith_endpoint: LangSmith API base URL. ``None`` falls back to
+            the SDK's own default, which is the wrong region for this
+            project's org -- see the AWS-deployment gotcha documented on
+            its own ``Field``.
+        langsmith_workspace_id: LangSmith workspace id. Required on this
+            project's AWS-hosted LangSmith deployment or every call 403s;
+            see its own ``Field`` for the full gotcha.
+        langsmith_project: LangSmith project (session) name. Default
+            ``"pr-review"``.
     """
 
     github_webhook_secret: str = Field(
@@ -884,6 +915,76 @@ class Settings(BaseSettings):
             "How long (seconds) RealGitHubClient's circuit breaker stays "
             "OPEN before allowing a single HALF_OPEN probe through. "
             "Default 30.0."
+        ),
+    )
+
+    langsmith_tracing: bool = Field(
+        default=False,
+        description=(
+            "Whether LangGraph/LangChain callbacks actually emit traces to "
+            "LangSmith. Opt-in, off by default -- a checkout with no "
+            "LangSmith config behaves exactly as before this integration "
+            "existed. Setting this alone is not sufficient for real traces "
+            "to land: the LangSmith SDK's own tracing machinery reads "
+            "LANGSMITH_TRACING/LANGSMITH_API_KEY/LANGSMITH_ENDPOINT/"
+            "LANGSMITH_WORKSPACE_ID/LANGSMITH_PROJECT from the process "
+            "environment directly (that is how LangChain's global callback "
+            "manager decides whether to attach a tracer at all) -- this "
+            "field is this project's OWN gate for whether "
+            "backend.observability.tracing.assert_tracing_healthy runs, "
+            "kept independent of the ambient environment so the guard "
+            "itself is deterministic and testable."
+        ),
+    )
+
+    langsmith_api_key: str | None = Field(
+        default=None,
+        description=(
+            "LangSmith service-account API key (an lsv2_sk_... value). "
+            "Deliberately optional with no default, mirroring "
+            "anthropic_api_key/openai_api_key -- every test passes without "
+            "it; only langsmith_tracing=True actually needs a real value. "
+            "Never logged or printed by any code in this project."
+        ),
+    )
+
+    langsmith_endpoint: str | None = Field(
+        default=None,
+        description=(
+            "LangSmith API base URL. None (unset) lets the LangSmith SDK "
+            "fall back to its own default (api.smith.langchain.com) -- "
+            "which is the WRONG endpoint for any org whose LangSmith "
+            "account lives on a regional deployment. This project's own "
+            "org is on the AWS deployment, "
+            "https://aws.api.smith.langchain.com -- see .env.example."
+        ),
+    )
+
+    langsmith_workspace_id: str | None = Field(
+        default=None,
+        description=(
+            "LangSmith workspace id. THE GOTCHA THIS FIELD EXISTS TO "
+            "DOCUMENT: on this project's AWS-hosted LangSmith deployment, "
+            "a service-account key returns a bare 403 Forbidden on EVERY "
+            "endpoint (create a run, read a run, everything) unless this "
+            "is set -- even though the key itself is valid and LangSmith's "
+            "own quickstart snippet does not mention this variable at "
+            "all. Also note: /api/v1/api-key/current returns a "
+            "DIFFERENT, unrelated 401 ('User ID required for this "
+            "endpoint. Cannot use a service account.') even with a "
+            "correct key + workspace id -- that endpoint is not a usable "
+            "health check for a service key; "
+            "backend.observability.tracing.assert_tracing_healthy uses a "
+            "real probe run instead, precisely because of this footgun."
+        ),
+    )
+
+    langsmith_project: str = Field(
+        default=_DEFAULT_LANGSMITH_PROJECT,
+        min_length=1,
+        description=(
+            "LangSmith project (session) name traces and the startup "
+            "probe run are grouped under. Default 'pr-review'."
         ),
     )
 
