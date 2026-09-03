@@ -1,85 +1,127 @@
 # pr-review-agent
 
-An AI pull-request review agent. Four specialist LLM reasoners — security,
-quality, tests, and docs — fan out over a PR diff, grounded in retrieved
-codebase context, merged by an aggregator, and gated by a confidence-weighted
-human-in-the-loop check before anything is posted back to GitHub.
+Four specialist LLM reviewers — security, quality, tests, and docs — read a
+GitHub pull-request diff in parallel, each grounded in codebase context
+retrieved from a hybrid vector/full-text index. Their findings are merged
+and deduplicated, and a confidence-weighted gate decides whether the
+resulting review posts itself to GitHub or goes to a human queue instead.
 
-## Status: EARLY
+## Status: all 13 planned milestones built and independently verified
 
-This is under active, milestone-by-milestone construction using a
-[genesis-kit](.genesis/) loop (plan, build, verify, repeat). It is **not**
-close to reviewing a real pull request yet.
+This was built loop-by-loop under a [genesis-kit](.genesis/) plan/build/verify
+process. `.genesis/PLAN.md`'s milestone list (M1–M13) and
+[`.genesis/DONE.html`](.genesis/DONE.html) are both complete: every milestone
+has a status pill of `done`, each with at least one independent L4 VERIFY
+APPROVE recorded in `.genesis/PLAN.md`'s Progress log. No M14 exists; nothing
+in the original plan is left to build. Remaining work lives in a Deferred
+list (`.genesis/checkpoints/CURRENT.md`), worked ad hoc, not as new
+milestones.
 
-**Done:**
+**What is genuinely true, end to end:**
 
-- **M1 — Project Skeleton & Core Contracts.** The package layout exists with
-  an inward-only dependency rule enforced by `import-linter`, and the
-  `Finding` / `Review` / `WebhookEvent` Pydantic contracts are defined and
-  unit-tested.
-- **M2 — Webhook Ingress: HMAC + Idempotency.** A FastAPI endpoint verifies
-  GitHub's HMAC-SHA256 webhook signature over the raw request body and
-  de-duplicates retried deliveries by `X-GitHub-Delivery` before anything is
-  enqueued.
-- **M3 — Queue + Worker (Dockerized Redis/ARQ).** A validated webhook enqueues
-  a job to Redis via ARQ (`backend/job_queue/redis_arq.py`), and a separate
-  worker process dequeues and logs it — behind the same `JobQueue` interface
-  M2 already coded against, so the router needed zero changes.
-- **M4 — Orchestrator Fan-Out (Stub Agents).** A LangGraph `StateGraph`
-  (`backend/orchestrator/`) fans out to four parallel stub specialist nodes
-  via the Send API and fans back in through a join node, checkpointed with a
-  file-backed SQLite saver so a crashed run resumes from where it left off
-  instead of re-running completed nodes. See the note under Architecture
-  below: this orchestrator exists and is tested in isolation, but nothing
-  yet calls it from the webhook/queue path.
+- The full chain — webhook ingress → queue → LangGraph orchestrator → four
+  real, LLM-backed specialists grounded by retrieval → aggregator → HITL
+  gate → GitHub client — exists, is wired together, and has been run for
+  real. `backend/cli/review_local.py` sends a real fixture diff through all
+  four real Anthropic calls, an aggregator, and the confidence gate, and
+  writes a schema-valid `Review` to disk (see **Try it** below for the
+  exact command and its real, measured cost).
+- The queue → orchestrator wiring is exercised end to end by
+  `tests/integration/test_queue_to_orchestrator.py`: an enqueued webhook
+  job is picked up by the real ARQ worker and driven all the way into a
+  completed orchestrator run, with no manual step in between.
+- A real review was posted to a real GitHub pull request
+  (`vladimir-mawla/pr-review-agent-testbed#1`) through the real GitHub App
+  integration: 2 findings, both mapped inline via diff-position anchoring,
+  0 degraded to the summary. Re-running the same `review_id` against the
+  same PR was confirmed not to create a duplicate (the hidden idempotency
+  marker check works).
+- The confidence gate has been proven correct on a real run, not just in
+  unit tests: the same testbed PR contains a genuine SQL-injection defect,
+  and the real four-agent pipeline correctly found it and correctly routed
+  the review to `QUEUED_FOR_HITL` — a CRITICAL finding is never auto-posted,
+  by design.
 
-**Not built yet:** the aggregator and confidence-weighted HITL gate (M5), the
-reliability layer (M6), the events/audit spine (M7), the four *real*
-LLM-backed specialist agents (M8, M10), hybrid retrieval/memory (M9), real
-GitHub posting (M11), the Tiger Cloud migration (M12), and the dashboard
-(M13). None of those exist in this repository today — see
-[`.genesis/PLAN.md`](.genesis/PLAN.md) for the full milestone list and demo
-commands. Right now this repo can accept and validate a signed webhook, queue
-it in Redis, and — as a separate, not-yet-wired-in capability — run a
-LangGraph graph that fans a job out to four canned stub agents and merges
-their (fake) findings back. It does not review anything yet, and enqueuing a
-webhook does not currently trigger the orchestrator.
+**Two things that framing above could make you assume, and that are not
+true — stated plainly, because this project's whole discipline is code and
+docs agreeing:**
+
+- **No real review has ever been auto-posted after genuinely clearing the
+  confidence gate.** The one real post to a real PR (above) happened
+  because a human deliberately called the posting function directly,
+  *bypassing* the gate, specifically to prove posting works — the gate
+  itself correctly said "route to a human" for that PR's real defect and
+  would have blocked the post otherwise. `backend/job_queue/arq_worker.py`
+  and `backend/cli/review_local.py`, the only two production call sites,
+  structurally cannot call the direct-post method — both call only
+  `post_or_queue` (grep-verified) — so this bypass cannot happen outside a
+  deliberate demo.
+- **No real, inbound GitHub webhook delivery has ever been received.**
+  `ngrok` (PLAN.md's own named tunnel tool) has never been installed on any
+  machine this project has been built on, and `scripts/register_webhook.py`
+  (the script that would register a tunnel URL with GitHub) does not
+  exist. The webhook → queue → orchestrator wiring is real and proven (see
+  above), but only via a direct enqueue, never via an actual HTTP POST from
+  GitHub's servers. A PR triggering a review unattended, via a genuine
+  external delivery, has not happened yet — every piece of that path has
+  been proven except that one link.
+
+**This is not deployable today, and isn't trying to be:** it runs on one
+developer's machine, against one throwaway test repository
+(`vladimir-mawla/pr-review-agent-testbed`), with no ingress open to the
+internet by default (a real deployment would need a tunnel like `ngrok`,
+whose URL changes every restart, or real hosting — neither exists here), no
+authentication on the dashboard, and no branch-protection rule that lets any
+CI gate actually block a merge (see **Limitations**).
 
 ## Architecture
 
-Planned end-to-end shape:
-
 ```
-GitHub webhook --> FastAPI ingress --> queue --> LangGraph orchestrator --> [security | quality | tests | docs] agents --> aggregator --> HITL gate --> GitHub
+GitHub webhook (HMAC-signed)
+  -> FastAPI ingress (backend/webhook_receiver/, backend/api/)
+  -> Redis / ARQ queue (backend/job_queue/)
+  -> ARQ worker
+  -> LangGraph orchestrator (backend/orchestrator/) -- Send-API fan-out, SQLite checkpointing
+       -> security / quality / tests / docs specialists (backend/agents/)
+            each grounded by HybridRetriever (backend/memory/) -- pgvector + full-text, RRF fusion
+       -> aggregator (severity-first dedupe, backend/agents/base_agent.py + orchestrator/nodes.py)
+       -> confidence-weighted HITL gate (route_review)
+  -> GitHubClient: post_review_comment (inline diff-position mapping) or queue_for_hitl
 ```
 
-**This is the target shape, not the current wiring.** Ingress, the queue,
-and the orchestrator each exist and are independently tested today, but the
-arrows into and out of the orchestrator in that diagram are not implemented
-yet: nothing in `backend/webhook_receiver/` or `backend/job_queue/` calls
-`LangGraphWorkflowEngine`, and the orchestrator's four specialists are canned
-stubs, not real agents. Treat every component below as real in isolation,
-and the connections between them as still planned unless marked otherwise.
+Every arrow above is a real, tested call, not merely a diagram — see
+**Status** above for exactly which links have been exercised via a genuine
+external trigger versus a direct or mocked call.
 
-What exists today vs. what's planned:
-
-| Component | Status | Notes |
+| Layer | What it is | Runs |
 |---|---|---|
-| FastAPI webhook ingress (`backend/webhook_receiver/`, `backend/api/`) | **Built (M2)** | HMAC-SHA256 verification, idempotency, job queue behind an interface |
-| Queue (Redis / ARQ) | **Built (M3)** | `RedisJobQueue` (`backend/job_queue/redis_arq.py`) behind the same `JobQueue` interface the router codes against, plus an ARQ worker (`backend/job_queue/arq_worker.py`) whose job handler is still a stub |
-| Orchestrator (LangGraph) | **Built (M4), not wired in** | `backend/orchestrator/` fans out to four stub agent nodes via the Send API with file-backed SQLite checkpointing; crash-resumable and covered by integration tests, but nothing in the webhook/queue path invokes it yet — that wiring is a later milestone |
-| Specialist agents (security, quality, tests, docs) | Planned (M5, M8, M10) | M4's four nodes are canned stubs (no LLM call); real LLM-backed reasoners, each validated against the `Finding` schema, land in M8/M10 |
-| Retrieval / memory (TimescaleDB + pgvector, later Tiger Cloud) | Planned (M9, M12) | Hybrid vector + full-text search over codebase chunks |
-| Aggregator + confidence-weighted HITL gate | Planned (M5) | M4's join node is an intentional no-op; dedup, confidence scoring, and HITL routing land in M5 |
-| Dashboard (Next.js) | Planned (M13) | Renders the HITL queue and per-agent cost/latency |
+| Webhook ingress | FastAPI route verifying GitHub's HMAC-SHA256 signature (constant-time) and de-duplicating by `X-GitHub-Delivery` before anything is enqueued | Local only |
+| Queue | Redis + ARQ, atomic `SET NX EX` idempotency keys, retry → circuit-breaker → timeout composition around every real Redis call | Local Docker Redis, port 6380 |
+| Orchestrator | LangGraph `StateGraph`, fans out to four specialists via the Send API (genuinely concurrent, not sequential), file-backed SQLite checkpointing that resumes a crashed run without re-executing finished nodes | Local process |
+| Specialists | Four Claude-Haiku-backed reasoners (`SecurityAgent`, `QualityAgent`, `TestsAgent`, `DocsAgent`), one versioned prompt each, a drift-tolerant JSON parser, forced-HITL fallback on any parse or infrastructure failure | Real Anthropic API calls |
+| Retrieval | `HybridRetriever`: pgvector ANN search + Postgres full-text search over AST-chunked source, merged by Reciprocal Rank Fusion (k=60); `OpenAIEmbedder` (real `text-embedding-3-large`) or a free deterministic fixture embedder | Local pgvector, port 5434 (or Tiger Cloud, see below) |
+| Aggregator + HITL gate | Severity-first dedupe on `(file_path, line_start)` — a CRITICAL finding can never lose a collision to a lower-severity one — then `route_review`: auto-post iff `overall_confidence >= threshold` **and** no CRITICAL finding | Pure Python, in-process |
+| GitHub posting | Real GitHub App auth (RS256 JWT, cached installation tokens), inline comments anchored by `line`+`side`, an unmappable finding degrades into the summary instead of 422ing the whole review, a hidden HTML-comment marker prevents double-posting | Real GitHub REST API |
+| Events spine | Append-only `agent_events` table, enforced by database triggers (not convention) against UPDATE/DELETE/TRUNCATE, even for a superuser | Local Postgres, port 5433, **or** a real TimescaleDB hypertable on Tiger Cloud |
+| Continuous aggregates | `agent_health_1m` (per-minute latency/cost), `pr_cost_hourly` | **Tiger Cloud only** — locally, the same numbers come from a plain SQL query over `agent_events`, structured so the swap is a change to one method's SQL |
+| Dashboard | Next.js 15 (`frontend/`), three client-fetched views: HITL queue, cost/latency, review trace reconstruction, reading a JSON API (`backend/api/dashboard.py`) | Local `next dev`, no auth |
+| Tracing | LangSmith, opt-in (`LANGSMITH_TRACING=true`), attaches review/PR/model metadata to each orchestrator run; actively verifies traces land (a probe run, not just checking for an SDK error) | Real LangSmith API, when enabled |
 
-Domain contracts (`Finding`, `Review`, `WebhookEvent`) already live in
-`backend/models/` and are shared by every layer above them; `backend/core/`
-holds cross-cutting base abstractions (`Settings`, and now the ADR-001
-`WorkflowEngine` Protocol that `LangGraphWorkflowEngine` structurally
-satisfies) that nothing else may depend outward from, per ADR-002's
-inward-only dependency rule (mechanically enforced by `import-linter`, see
-`.importlinter`).
+Domain contracts (`Finding`, `Review`, `WebhookEvent`) live in
+`backend/models/` and are shared by every layer above; `backend/core/` holds
+the cross-cutting `Settings` and the `WorkflowEngine` Protocol that
+`LangGraphWorkflowEngine` satisfies structurally. Dependency direction is
+inward-only and mechanically enforced by `import-linter` (`.importlinter`) —
+see `.genesis/decisions/0001-local-simulation-first.md` for the ADR
+recording why this project builds credentialed pieces last.
+
+**What runs locally vs. on the managed instance:** `EVENTS_BACKEND` and
+`MEMORY_BACKEND` (`local` by default) select plain local Postgres/pgvector
+or the real Tiger Cloud TimescaleDB instance for events and retrieval,
+respectively. `reviews` (the HITL-queue table) was deliberately never
+migrated to Tiger and always stays local, regardless of that setting. Tiger
+Cloud's `code_chunks` table is currently empty — there's no Tiger-side
+seeding script yet, only the local `scripts/seed_code_chunks.py`.
 
 ## Setup
 
@@ -121,53 +163,39 @@ cp .env.example .env
 
 Then edit `.env` and set `GITHUB_WEBHOOK_SECRET` to any non-empty string for
 local development (it just has to match whatever secret you sign test
-payloads with — see the demo below). There is no default value on purpose:
-`backend/core/settings.py` fails fast at startup if it's missing or blank,
-rather than silently accepting a well-known secret.
+payloads with — see **Try it** below). There is no default value on
+purpose: `backend/core/settings.py` fails fast at startup if it's missing or
+blank, rather than silently accepting a well-known secret.
 
 ## Local development notes
 
 - **`docker compose down && docker compose up` wipes Redis, including the
   idempotency store.** The `redis` service in `docker-compose.yml` has no
-  volume, so a recreate always starts it empty. That's fine for M3's queue
+  volume, so a recreate always starts it empty. That's fine for the queue
   (no orphaned jobs survive a restart, which is the point), but it also
-  means replay protection resets: a `X-GitHub-Delivery` id this process
+  means replay protection resets: an `X-GitHub-Delivery` id this process
   already saw before the recreate will be treated as new and re-enqueued
   after it. A volume would fix this but isn't configured today.
-- **The 9 queue integration tests need a real Redis and skip cleanly without
-  one.** `tests/integration/test_queue_roundtrip.py` checks for a reachable
-  Redis at collection time and skips (not fails) if it can't connect. Run
-  `docker compose up -d redis` first if you want them to actually execute;
-  otherwise `pytest -v` still passes, just with those 9 reported as
-  `skipped` rather than `passed` — check the summary line, since a skip is
-  not the same thing as a pass.
-- **The M4 orchestrator has no CLI demo yet.** Unlike M2/M3, there is no
-  script that runs a LangGraph review end-to-end from the command line — its
-  behavior (parallel fan-out, crash/resume) is proven entirely by
-  `tests/integration/test_orchestrator_fanout.py`, which needs no Docker and
-  no external services (its checkpoint database is a plain local SQLite
-  file).
-- **The `pgvector` service (M9) has no volume, by design, and its corpus
-  vanishes on every container recreate.** `docker compose down && up` (or
-  any event that recreates the container — a host reboot, a Docker prune,
-  simply never having started it before) leaves `code_chunks` at zero rows,
-  even though `var/retrieval_seed_marker.json` (gitignored local state) may
-  still claim a corpus is already seeded — the marker file is host-side and
+- **The `pgvector` service has no volume, by design, and its corpus vanishes
+  on every container recreate.** `docker compose down && up` (or any event
+  that recreates the container — a host reboot, a Docker prune, simply
+  never having started it before) leaves `code_chunks` at zero rows, even
+  though `var/retrieval_seed_marker.json` (gitignored local state) may still
+  claim a corpus is already seeded — the marker file is host-side and
   outlives the container, so a stale marker plus an empty table is a real,
-  observed trap, not a hypothetical one: it has cost two separate
-  verification sessions a surprise re-seed and real API spend already. The
-  test fixtures handle this correctly on their own (they compare the
-  marker's claimed row count against a live `SELECT count(*)` before
-  trusting it, and re-seed if they disagree), so a `pytest -v` run is always
-  safe — but a human running `docker compose up -d pgvector` by hand and
-  trusting the marker file is not protected by that check. If you've
-  recreated the container, re-seed explicitly before relying on retrieval
-  results: `python scripts/seed_code_chunks.py --repo .`. Re-seeding with
-  the real OpenAI backend (`EMBEDDER_BACKEND=openai`) costs roughly **$0.02**
-  per full run (~150k tokens of `text-embedding-3-large` at $0.13/M,
-  measured directly — see `checkpoints/CURRENT.md`'s M9 history); the
-  fixture backend (`DeterministicFixtureEmbedder`, the default) costs
-  nothing.
+  observed trap, not a hypothetical one: it has cost multiple verification
+  sessions a surprise re-seed and real API spend already, most recently on
+  2026-09-03. The test fixtures handle this correctly on their own (they
+  compare the marker's claimed row count against a live `SELECT count(*)`
+  before trusting it, and re-seed if they disagree), so a `pytest -v` run
+  is always safe — but a human running `docker compose up -d pgvector` by
+  hand and trusting the marker file is not protected by that check. If
+  you've recreated the container, re-seed explicitly before relying on
+  retrieval results: `python scripts/seed_code_chunks.py --repo .`.
+  Re-seeding with the real OpenAI backend (`EMBEDDER_BACKEND=openai`) costs
+  roughly **$0.02** per full run (~150k tokens of `text-embedding-3-large`
+  at $0.13/M, measured directly); the fixture backend
+  (`DeterministicFixtureEmbedder`, the default) costs nothing.
 - **In `zsh`, `env $SOME_VAR command` silently drops everything after the
   first variable — it does NOT word-split like bash.** This bit real, live
   debugging: reconstructing several `LANGSMITH_*` vars from `.env` and
@@ -196,17 +224,32 @@ rather than silently accepting a well-known secret.
   globally and can break a LOCAL Postgres/psql connection.** `.env` has a
   non-empty `PGUSER=tsdbadmin` (Tiger Cloud's admin user, for the M12
   `TIGER_DATABASE_URL`/native-`PG*` connection path — see `.env.example`'s
-  M12 block) alongside the M7 events Postgres and M9 pgvector, both on
-  different ports (5433/5434) with their own credentials baked into
+  M12 block) alongside the events Postgres and pgvector, both on different
+  ports (5433/5434) with their own credentials baked into
   `DATABASE_URL`/`PGVECTOR_URL`. Exporting the whole file into the shell
   (rather than letting pydantic-settings read it directly) puts `PGUSER`
   into the environment, and any *bare* `psql`/libpq call made afterward
   with no explicit user in its connection string picks that up instead of
-  the local role it should be using. This project's own M7 demo command
-  already works around exactly this by using an explicit DSN
+  the local role it should be using. Use an explicit DSN
   (`psql "$DATABASE_URL"`, not a bare `psql`) every time `.env` is
-  sourced — keep doing that if you ever `source .env`, or better, don't
-  source it at all (see below).
+  sourced — or better, don't source it at all (see below).
+- **LangSmith's AWS-deployment orgs need `LANGSMITH_WORKSPACE_ID` set, or
+  every call 403s with a bare `Forbidden` that looks identical to a bad
+  key.** This org's LangSmith account is on the AWS deployment
+  (`https://aws.api.smith.langchain.com`, not the SDK's default
+  `https://api.smith.langchain.com`), and a service-account key 403s on
+  every endpoint there — create a run, read a run, everything — unless
+  `LANGSMITH_WORKSPACE_ID` is also set, even though the key itself is
+  completely valid. LangSmith's own quickstart doesn't mention this
+  variable, so following it verbatim silently fails. `GET
+  /api/v1/api-key/current` is *not* a usable health check for a service
+  key either — it returns a different, unrelated 401 even with a fully
+  correct key and workspace id. `backend.observability.tracing.
+  assert_tracing_healthy` verifies tracing is actually working with a real
+  probe run (write, flush, read back by id) instead of trusting the SDK's
+  own error reporting, because a misconfigured deployment produces zero
+  traces **and** zero errors. See `.env.example`'s LangSmith block for the
+  full account.
 - **The verified, working way to run `review_local` with LangSmith tracing
   on: don't export anything — just run it.** `Settings` (pydantic-settings)
   reads `.env` on its own; no `source`/`env`/`set -a` dance is needed or
@@ -227,6 +270,218 @@ rather than silently accepting a well-known secret.
   module docstring) with a clear `LANGSMITH_ENDPOINT is currently
   'https://api.smith.langchain.com'` diagnosis and exit code 1, rather than
   a silently-empty LangSmith project.
+
+## Try it
+
+Four things are actually runnable here, in increasing order of cost. Run
+each from an activated venv, or prefix commands with `.venv/bin/`.
+
+### Free: the test suite (no credentials, no network calls)
+
+```bash
+pytest -v
+```
+
+Verified today: **422 passed, 31 deselected**, exit 0, with no
+`ANTHROPIC_API_KEY`/`OPENAI_API_KEY` set and Docker's Redis/Postgres/pgvector
+up. The 31 deselected tests are everything marked `@pytest.mark.live` — real,
+billable Anthropic/OpenAI/GitHub calls, opted out of by `pyproject.toml`'s
+`addopts = "-ra -m 'not live'"`. Run them for real with `pytest -m live -v` —
+that costs money and is out of scope for this document (see
+`pyproject.toml`'s `live` marker docstring for the exact mechanism).
+
+### ~$0.02–0.03: the local four-agent review CLI (needs `ANTHROPIC_API_KEY`)
+
+```bash
+.venv/bin/python -m backend.cli.review_local --diff tests/fixtures/sample_pr_diff.patch --out out/review.json
+```
+
+This is the real pipeline — four real Anthropic calls, one per specialist,
+grounded by retrieval, aggregated, and gated — writing one schema-valid
+`Review` to `out/review.json`. Real measured costs from past runs of this
+exact command: $0.026943 for 14 findings, $0.021348 for a later run that
+also verified tracing. GitHub posting is mocked
+(`GITHUB_CLIENT_BACKEND` defaults to `mock`), so nothing is sent anywhere —
+this proves the pipeline, not the GitHub integration.
+
+### Free: the dashboard (no credentials, reads whatever's in your local DB)
+
+```bash
+npm --prefix frontend run build
+```
+
+Verified today: builds and lints clean (`npm run lint` exits 0). Run
+`npm --prefix frontend run dev` and open `http://localhost:3000` for three
+views — the HITL queue, per-agent cost/latency, and review trace
+reconstruction — fetched client-side from `backend/api/dashboard.py`. There
+is no login: anyone who can reach the port sees everything.
+
+### Real infrastructure required: the live webhook path
+
+This is the one link never yet exercised (see **Status**). To actually try
+it, you need two environment overrides beyond `.env.example`'s defaults,
+plus a tunnel:
+
+```bash
+JOB_QUEUE_BACKEND=redis
+```
+
+```bash
+GITHUB_CLIENT_BACKEND=real
+```
+
+`JOB_QUEUE_BACKEND` defaults to `in_memory` and `GITHUB_CLIENT_BACKEND`
+defaults to `mock` — both deliberately safe defaults so tests and a keyless
+checkout never touch real infrastructure. Forget either one and the webhook
+demo below still returns `200`/`"accepted"` and looks like it worked — it
+just quietly queues in an in-process list that vanishes on restart, or would
+post nowhere real, instead of failing loudly. There is no warning printed
+either way; the silent no-op is the actual, current behavior, not a bug
+being flagged for a future fix.
+
+With both set, `GITHUB_APP_ID`/`GITHUB_APP_PRIVATE_KEY_PATH` configured, and
+a tunnel (e.g. `ngrok http 8000`, not installed on any machine this project
+has been built on so far) registered as the app's webhook URL in GitHub's
+App settings, a real `pull_request` event would flow ingress → queue →
+orchestrator → GitHub, unattended, for the first time. Short of that, you
+can prove every piece except the actual inbound delivery:
+
+```bash
+uvicorn backend.api.main:app --port 8000
+```
+
+```bash
+python scripts/send_signed_webhook.py --secret change-me-to-a-real-shared-secret --url http://localhost:8000/webhook
+```
+
+A successful run prints `POST ... -> 200` and a JSON body with
+`"status": "accepted"`. Run it again with the same `--delivery-id` (a
+well-formed UUID) and you get `"status": "duplicate"` instead — that's the
+idempotency check.
+
+## How it was built
+
+13 milestones (M1–M13), each with an executable demo command recorded in
+`.genesis/DONE.html` and `.genesis/PLAN.md`, built and verified in a
+plan → build → verify loop. Every milestone was independently verified by a
+separate model session with no memory of building it — the same discipline
+this README is being held to right now.
+
+**Four milestones were formally REJECTed by an independent L4 VERIFY
+session at least once**, each fixed in a follow-up L2 DEBUG loop and
+re-APPROVEd by a second independent session:
+
+- **M5** (Aggregator + HITL gate): the original dedupe tie-break compared
+  confidence only, so a lower-confidence CRITICAL finding could lose to a
+  higher-confidence, lower-severity one at the same collision key — a real
+  safety bug, not a nitpick. Fixed by making dedupe severity-first.
+- **M7** (Events spine): a synchronous events write on uvicorn's
+  event-loop thread serialized every concurrent webhook request behind a
+  locked table (~4.4s each, measured). Fixed by offloading the write onto
+  a thread.
+- **M9** (Hybrid retrieval): the named recall fixture from the plan had
+  never actually been built, and the demo's own test truncated the corpus
+  it had just seeded. Fixed by building the fixture for real and reporting
+  the honest number — 4/10 (40%) on the free fixture embedder, 7/10 (70%)
+  once measured against real OpenAI embeddings — rather than the literal
+  100% the plan had asked for.
+- **M13** (Dashboard + eval gate): `/costs` summed ~$40,261 of 2030-dated
+  fixture rows into "real" spend with no filter, alongside a false "nothing
+  here is fabricated" claim; and the eval-gate CI workflow never triggered
+  on a pull request, so it could never block a merge. Both fixed.
+
+**Two further defects were caught downstream of their own milestone's
+original APPROVE**, in a later L2 DEBUG pass — genuine defects the passing
+test suite had missed, distinct from the four formal REJECTs above:
+
+- **M8**: an invalid Anthropic API key crashed the orchestrator outright,
+  while a *missing* key correctly triggered the safe fallback — exposed
+  only once a real credential was rotated in.
+- **M6/M7**: the same event-loop-blocking defect class M7 had just fixed
+  on the events-write path turned out to also apply to the queue's Redis
+  enqueue call, missed by M6's own verification because it tested the
+  retry/breaker/timeout primitives without asking whether their caller
+  blocked the loop.
+
+That is six defects the plan's own Progress log (`.genesis/PLAN.md`,
+"Milestones an independent L4 VERIFY session REJECTED at least once")
+explicitly tallies by name — four formal L4 REJECTs and two more found in
+later debug passes. Several additional non-blocking findings were raised
+and closed at individual milestones (see
+`.genesis/checkpoints/CURRENT.md`'s Deferred/Resolved sections for the
+full, dated account), but they are not folded into this count.
+
+Several success criteria were **amended** after the fact — always with the
+original text preserved above the correction, never silently rewritten.
+Notable ones: M9's literal "100% recall@5" bar was retired in favor of a
+statistically-honest fusion-vs-vector-alone comparison; M11's literal "post
+within 60 seconds" bar was retired because the test PR's real CRITICAL
+finding correctly forced a human-review route instead, and the operative
+bar became proving the posting mechanism itself works.
+
+## Limitations
+
+Drawn from `.genesis/checkpoints/CURRENT.md`'s Deferred list — not
+invented, and not exhaustive (see that file for the complete, dated
+account). Highlights:
+
+- **Not deployed anywhere.** Runs on one machine, against one throwaway
+  test repository. No tunnel is currently set up, no hosting exists, and
+  (see **Status**) no real inbound webhook has ever actually been
+  delivered.
+- **`main` has no branch protection.** `gh api .../branches/main/protection`
+  returns 404, so the eval gate (`eval-gate.yml`) cannot actually block a
+  merge even though it now runs on every pull request — that requires a
+  repo-admin setting this project hasn't configured.
+- **The eval gate live-scores only 1 of the 4 golden cases** on every
+  trigger, including the weekly cron. Regressions in the other three
+  (clean-code false-positive avoidance, docs/test detection) would go
+  uncaught by the live judge; the free, canned-judge classes still cover
+  all 4 cases structurally, but that's not the same as a real model
+  re-scoring them.
+- **LLM line attribution was two lines off on a real run.** Not
+  independently re-measured beyond that one observation.
+- **Adjacent-line duplicate findings from different agents escape
+  dedupe.** `dedupe_findings`'s key is exact-match `(file_path,
+  line_start)` — two different agents' findings on adjacent, not identical,
+  lines both survive as separate findings instead of colliding. Real
+  interval-overlap detection would be needed to close this.
+- **`tests/integration/test_events_spine.py` still writes fixture rows
+  into the real, production, append-only `agent_events` table on every
+  free `pytest` run** (~4 rows/run, permanently, since the table can never
+  be cleaned by design). Other test files in the same suite use per-run
+  disposable schemas; this one was never migrated to that pattern.
+- **No dashboard authentication.** Anyone who can reach the port sees the
+  HITL queue, cost data, and trace reconstruction.
+- **The synthetic-row cost exclusion is a denylist, not a provenance
+  flag.** A today-dated row with an unlisted `review_id` prefix counts as
+  real spend on `/costs` — proven directly by a rolled-back-transaction
+  probe.
+- **A high-severity `postcss` npm advisory** (transitive, via `next@15.5.24`)
+  remains unresolved — fixable only by a breaking Next 16 upgrade,
+  deliberately not taken mid-milestone.
+- **No frontend test suite** (no Jest/Vitest/Playwright) — `npm run
+  build`/`npm run lint` and a real browser check are the only frontend
+  verification.
+
+## Development process
+
+This project is built loop-by-loop following a genesis-kit-style
+plan/build/verify methodology: an implementation plan lives
+in [`.genesis/PLAN.md`](.genesis/PLAN.md) (mirrored, for humans, in
+[`.genesis/DONE.html`](.genesis/DONE.html)), and the binary definition of
+done for every milestone — dependency direction, schema validation, security
+review, a passing `mypy --strict` + `pytest`, and an independent verify pass
+— is in [`.genesis/DONE.html`](.genesis/DONE.html). Rolling session state and
+what's actually live right now are tracked in
+[`.genesis/checkpoints/CURRENT.md`](.genesis/checkpoints/CURRENT.md) and
+[`.genesis/implementation-notes.html`](.genesis/implementation-notes.html).
+Architecture decisions live in [`.genesis/decisions/`](.genesis/decisions/)
+(one ADR recorded so far,
+[`0001-local-simulation-first`](.genesis/decisions/0001-local-simulation-first.md));
+a rich, teaching-oriented walkthrough of each milestone's build exists in
+[`.genesis/explanations/`](.genesis/explanations/) (13 pages, one per
+milestone, M1 through M13).
 
 ## Running the checks
 
@@ -250,72 +505,6 @@ lint-imports --config .importlinter
 
 (If you didn't activate the venv, prefix each with `.venv/bin/`, e.g.
 `.venv/bin/pytest -v`.)
-
-## Running the webhook demo
-
-This proves the M2 slice end-to-end: a correctly-signed `pull_request`
-payload is accepted and enqueued; a tampered one is rejected.
-
-Start the server (needs `.env` set up as above):
-
-```bash
-uvicorn backend.api.main:app --port 8000
-```
-
-In a second terminal, with the same venv activated, sign and send the sample
-fixture payload (the secret here must match `GITHUB_WEBHOOK_SECRET` in your
-`.env`):
-
-```bash
-python scripts/send_signed_webhook.py --secret change-me-to-a-real-shared-secret --url http://localhost:8000/webhook
-```
-
-A successful run prints `POST ... -> 200` and a JSON body with
-`"status": "accepted"`. By default the script generates a fresh random
-delivery ID every time it runs, so running the exact command above twice
-produces two `"accepted"` responses, not a duplicate. To see the idempotency
-check itself, pass the same `--delivery-id` (a well-formed UUID) both times:
-
-```bash
-python scripts/send_signed_webhook.py --secret change-me-to-a-real-shared-secret --url http://localhost:8000/webhook --delivery-id 11111111-1111-1111-1111-111111111111
-```
-
-Run that exact line again and you'll get `"status": "duplicate"` instead —
-that's the idempotency check.
-
-You can also run the webhook test suite directly, without starting a server:
-
-```bash
-pytest tests/unit/test_webhook_validator.py -v
-```
-
-## Running the orchestrator tests
-
-This proves the M4 slice: fan-out to four stub agents is genuinely parallel
-(not a sequential chain), their findings merge correctly, and a simulated
-worker crash mid-run resumes from a checkpoint instead of re-doing completed
-work. No Docker, API key, or running server is needed — every test uses a
-temporary, per-test SQLite checkpoint file:
-
-```bash
-pytest tests/integration/test_orchestrator_fanout.py -v -k "fanout or checkpoint_resume"
-```
-
-This is the orchestrator's own test suite, not a webhook-to-review demo —
-nothing currently connects it to the `/webhook` endpoint above.
-
-## Development process
-
-This project is built loop-by-loop following a genesis-kit-style
-plan/build/verify methodology: an implementation plan lives
-in [`.genesis/PLAN.md`](.genesis/PLAN.md) (mirrored, for humans, in
-[`.genesis/DONE.html`](.genesis/DONE.html)), and the binary definition of
-done for every milestone — dependency direction, schema validation, security
-review, a passing `mypy --strict` + `pytest`, and an independent verify pass
-— is in [`.genesis/DONE.html`](.genesis/DONE.html). Rolling session state and
-what's actually live right now are tracked in
-[`.genesis/checkpoints/CURRENT.md`](.genesis/checkpoints/CURRENT.md) and
-[`.genesis/implementation-notes.html`](.genesis/implementation-notes.html).
 
 ## License
 
