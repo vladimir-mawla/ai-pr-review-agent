@@ -14,10 +14,31 @@
   free-suite-with-no-.env proof) and
   `.genesis/explanations/2026-08-31-explanation-m12.html` for a full
   walkthrough.
-- last_action: M12 post-APPROVE closeout (this session) -- bookkeeping
-  (DONE.html all 13 pills flipped to done, PLAN.md Progress + closing
-  summary, implementation-notes.html M12 row, this checkpoint), the
-  explain-diff page, gates re-run, granular commits, push.
+- last_action: **Ad hoc (post-M13, no new milestone): LangSmith tracing
+  wired into the LangGraph orchestrator.** Opt-in (`Settings.
+  langsmith_tracing`, default `False` -- a checkout with no LangSmith
+  config behaves exactly as before). `backend/observability/tracing.py`'s
+  `assert_tracing_healthy` actively verifies traces land (write a probe
+  run, flush, read it back by id) rather than trusting `client.flush()`,
+  because a misconfigured deployment produces zero traces AND zero
+  errors -- verified empirically. **The gotcha:** this org's LangSmith
+  account is on the AWS deployment (`aws.api.smith.langchain.com`, not
+  the SDK default), and a service-account key 403s on EVERY endpoint
+  there unless `LANGSMITH_WORKSPACE_ID` is also set -- see
+  `.env.example`'s LangSmith block for the full account. Wired into the
+  ARQ worker's `on_startup` + a standalone CLI check
+  (`python -m backend.observability.tracing`), deliberately NOT into the
+  FastAPI app or `review_local.main` (both are exercised by existing
+  tests with unmodified, `.env`-backed `Settings`, which would make the
+  free suite touch the network the moment `.env` has tracing on).
+  `LangGraphWorkflowEngine` now attaches review_id/pr_number/repo/
+  head_sha/model as trace metadata. Real end-to-end trace verified
+  against the live API: root "LangGraph" run fanning out to four
+  genuinely-concurrent, clearly-named child spans
+  ("security"/"quality"/"tests"/"docs"), converging on "aggregate" (whose
+  recorded output already carries the routing decision +
+  overall_confidence, with no extra wiring needed). All 5 gates green;
+  `pytest -q` (404 passed) makes zero LangSmith calls.
 - next_action: **Work the Deferred list below.** Every milestone in the
   plan is built and verified; there is no next milestone to target.
 - model: claude-sonnet-5
