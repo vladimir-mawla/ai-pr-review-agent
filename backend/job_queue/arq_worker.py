@@ -68,6 +68,7 @@ from backend.core.settings import get_settings
 from backend.core.workflow_engine import WorkflowEngine
 from backend.integrations.github_client import GitHubClient, build_github_client, post_or_queue
 from backend.models import WebhookEvent
+from backend.observability.tracing import assert_tracing_healthy
 from backend.orchestrator.langgraph_engine import LangGraphWorkflowEngine
 from backend.orchestrator.state import GraphState
 
@@ -245,6 +246,43 @@ async def process_webhook_event(ctx: dict[str, Any], event: dict[str, Any]) -> d
     }
 
 
+async def _on_worker_startup(ctx: dict[str, Any]) -> None:
+    """ARQ ``on_startup`` hook: the real production "at application startup" LangSmith check.
+
+    Of this project's three processes (the webhook FastAPI app, this ARQ
+    worker, and the M10 CLI), this worker is the only one that actually
+    executes ``graph.invoke`` unattended in production (see
+    ``process_webhook_event``/``_run_review_blocking`` above) -- which is
+    exactly why ``backend.observability.tracing``'s module docstring
+    chose this hook, and not the FastAPI app's lifespan, as the wired-in
+    startup check: the webhook app never runs the graph at all, so
+    checking tracing health there would verify the wrong process while
+    creating a real hazard for the free pytest suite (see that module's
+    docstring for the full reasoning).
+
+    A no-op when ``settings.langsmith_tracing`` is ``False`` (the default
+    -- ``assert_tracing_healthy`` itself is a no-op in that case). Offloads
+    the check via ``asyncio.to_thread`` for the same reason
+    ``process_webhook_event`` offloads the orchestrator run itself: this
+    is a blocking, network-bound call (a real probe run write + a short
+    read-back retry loop), and running it directly on this coroutine
+    would block the worker's own event loop for its duration.
+
+    No test in this project drives this function: ``tests/integration/
+    test_queue_to_orchestrator.py``/``test_queue_roundtrip.py`` construct
+    a bare ``arq.worker.Worker(functions=[process_webhook_event], ...)``
+    directly, never referencing ``WorkerSettings`` (and therefore never
+    ``on_startup``) at all -- so this hook only ever runs against a real
+    ``arq backend.job_queue.arq_worker.WorkerSettings`` process, never
+    during ``pytest``.
+    """
+    settings = get_settings()
+    if not settings.langsmith_tracing:
+        return
+    logger.info("LangSmith tracing enabled -- running startup health check.")
+    await asyncio.to_thread(assert_tracing_healthy, settings)
+
+
 class WorkerSettings:
     """ARQ ``WorkerSettings``: what ``arq backend.job_queue.arq_worker.WorkerSettings`` runs.
 
@@ -253,8 +291,10 @@ class WorkerSettings:
     ``RedisJobQueue`` enqueues onto (``Settings.redis_url``, read fresh at
     class-definition/import time from the environment, matching how ARQ's
     CLI expects to find this attribute on the class itself rather than an
-    instance).
+    instance). ``on_startup`` is the real production wiring for the
+    LangSmith silent-failure guard -- see ``_on_worker_startup``.
     """
 
     functions = [process_webhook_event]
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
+    on_startup = _on_worker_startup

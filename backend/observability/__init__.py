@@ -24,7 +24,11 @@ from backend.observability.events import (
     emit_span_start,
     emit_tool_call,
 )
-from backend.observability.tracing import traced_span
+from backend.observability.tracing import (
+    TracingConfigurationError,
+    assert_tracing_healthy,
+    traced_span,
+)
 from backend.observability.workflow_context import get_event_repository, run_id_for_delivery
 
 __all__ = [
@@ -35,6 +39,8 @@ __all__ = [
     "emit_llm_call",
     "emit_tool_call",
     "traced_span",
+    "assert_tracing_healthy",
+    "TracingConfigurationError",
     "reconstruct_review_trace",
     "get_event_repository",
     "run_id_for_delivery",

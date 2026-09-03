@@ -42,6 +42,14 @@ dependencies = [
     # makes it a genuine runtime dependency, not merely a test tool.
     "pyjwt[crypto]>=2.8,<3",
     "httpx>=0.27,<1",
+    # LangSmith tracing (backend/observability/tracing.py). Already present
+    # transitively (a langchain-core dependency, pinned in practice by that
+    # package's own resolver -- observed at 0.11.2 in this project's .venv)
+    # but declared explicitly here now that backend code imports it
+    # directly (langsmith.Client, in assert_tracing_healthy's probe-run
+    # check) rather than only relying on langgraph/langchain-core importing
+    # it internally for callback-based tracing.
+    "langsmith>=0.11,<1",
 ]
 
 [project.optional-dependencies]
@@ -124,6 +132,12 @@ ignore = [
 # which must print its result summary to stdout/stderr -- the identical
 # CLI-entry-point exception already granted to security_agent.py above.
 "backend/cli/review_local.py" = ["T20"]
+# LangSmith tracing: backend/observability/tracing.py doubles as a
+# standalone CLI health check (`python -m backend.observability.tracing`),
+# the same CLI-entry-point exception as security_agent.py/review_local.py
+# above -- see that module's docstring for why this check is CLI-callable
+# rather than wired into the shared webhook FastAPI app's lifespan.
+"backend/observability/tracing.py" = ["T20"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["backend"]
