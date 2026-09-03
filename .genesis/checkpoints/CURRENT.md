@@ -14,7 +14,45 @@
   free-suite-with-no-.env proof) and
   `.genesis/explanations/2026-08-31-explanation-m12.html` for a full
   walkthrough.
-- last_action: **Ad hoc (post-M13, no new milestone): LangSmith tracing
+- last_action: **Ad hoc: closed the `review_local` silent-tracing-failure
+  gap.** The ARQ-worker/standalone-CLI-only wiring from the previous ad hoc
+  entry left `review_local` (the actual demo path) with no way to know
+  LangSmith tracing was broken -- proven live: `LANGSMITH_ENDPOINT`
+  resolved to the SDK default host instead of this org's AWS one (see the
+  `zsh` trap below), LangSmith's ingestion swallowed the 403 by design,
+  and `review_local` printed a fully successful 15-finding review at exit
+  0 with zero traces landed. Fix: an opt-in `--verify-tracing` flag
+  (`backend/cli/review_local.py`'s `verify_tracing_before_review`), off by
+  default, reusing `assert_tracing_healthy` verbatim (no second
+  implementation). It runs BEFORE `run_review_locally` -- i.e. before any
+  of the four real Anthropic calls -- so a broken endpoint fails loudly
+  before spending money, not after. On success it prints the LangSmith
+  project URL (`backend.observability.tracing.resolve_project_url`, new).
+  When tracing is on but `--verify-tracing` was not passed, an unmissable
+  stdout warning names the flag. New: `tests/unit/test_review_local_tracing.py`
+  (6 tests, all default-free -- proves "off" never touches an injected
+  client double, "on + disabled" no-ops cleanly, "on + broken config"
+  raises `TracingConfigurationError` with the diagnosis, "on + healthy"
+  prints the URL). Also documented two real shell traps hit during this
+  session in `README.md`'s "Local development notes": `zsh`'s unquoted
+  `$VAR` expansion does NOT word-split (unlike `bash`) -- reconstructing
+  `LANGSMITH_*` vars into one string and handing them to
+  `env $LS_ENV command` silently keeps only the first variable, dropping
+  `LANGSMITH_ENDPOINT`, confirmed directly
+  (`env $LS_ENV python -c '...'` -> `['LANGSMITH_API_KEY']`, one var not
+  five) -- and `set -a && source .env` exports the Tiger Cloud `PG*` vars
+  (`PGUSER=tsdbadmin`, etc.) globally, which can break a bare
+  `psql`/libpq call against the LOCAL Postgres. Both real-run proofs
+  captured: broken endpoint fails in ~1.8s, exit 1, before any LLM call,
+  no output file written; correct config (real `.env`) passes, prints
+  `LangSmith project: https://aws.smith.langchain.com/o/.../projects/p/...`,
+  makes 4 real Anthropic calls (`$0.021348` actual spend, confirmed via
+  `agent_events`), writes `out/review_good_tracing.json`. `code_chunks`
+  was also found stale (marker claimed 689 rows, live table had 1 --
+  the documented stale-marker-plus-empty-table trap) and re-seeded with
+  the free fixture embedder (689 chunks, $0). All 5 gates green;
+  `pytest -v` (422 passed, 31 deselected) stays free.
+- last_action (2): **Ad hoc (post-M13, no new milestone): LangSmith tracing
   wired into the LangGraph orchestrator.** Opt-in (`Settings.
   langsmith_tracing`, default `False` -- a checkout with no LangSmith
   config behaves exactly as before). `backend/observability/tracing.py`'s
@@ -39,7 +77,7 @@
   recorded output already carries the routing decision +
   overall_confidence, with no extra wiring needed). All 5 gates green;
   `pytest -q` (404 passed) makes zero LangSmith calls.
-- last_action (2): **Ad hoc: `HybridRetrieverAdapter`, a LangChain
+- last_action (3): **Ad hoc: `HybridRetrieverAdapter`, a LangChain
   `BaseRetriever` wrapper over M9's `HybridRetriever`**
   (`backend/memory/langchain_retriever.py`). Delegates ALL ranking
   (vector search, full-text search, RRF, k=60, candidate-pool sizing) to
